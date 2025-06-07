@@ -1,0 +1,208 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "torch-geometric-pool"
+dynamic = ["version", "description"]
+authors = [
+    { name = "Filippo Maria Bianchi", email = "filippombianchi@gmail.com" },
+    { name = "Ivan Marisca", email = "ivan.marisca@usi.ch" }
+]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+keywords = [
+    "pytorch",
+    "pytorch-geometric",
+    "geometric-deep-learning",
+    "graph-neural-networks",
+    "graph-pooling",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "numpy >=1, <3",
+    "torch >= 1.8, <3",
+    "torch_geometric >=2, <3",
+    "torch_scatter",
+    "torch_sparse",
+]
+
+[project.optional-dependencies]
+ndp = [
+    "scipy",
+]
+nmf = [
+    "scikit-learn",
+]
+graclus = [
+    "torch_cluster",
+]
+pygsp = [
+    "pygsp",
+]
+notebook = [
+    "jupyter",
+    "matplotlib",
+    "torch_geometric_pool[pygsp]",
+]
+test = [
+    "torch_geometric_pool[ndp,nmf,graclus]",
+    "pytest",
+    "coverage[toml]",
+    "pytest-cov",
+]
+doc = [
+    "docutils < 1",
+    "sphinx >= 7.0, <8",
+    "sphinx-design < 1",
+    "sphinx-copybutton < 1",
+    "sphinx-hoverxref < 2",
+    "myst-nb >= 1.0, <2",
+    "shibuya >= 2025, <2026",
+]
+dev = [
+    "pre-commit",
+    "ruff>=0.10",
+    "torch_geometric_pool[notebook,test,doc]",
+]
+
+[project.urls]
+homepage = "https://torch-geometric-pool.readthedocs.io"
+documentation = "https://torch-geometric-pool.readthedocs.io"
+repository = "https://github.com/tgp-team/torch_geometric_pool.git"
+changelog = "https://github.com/tgp-team/torch_geometric_pool/blob/master/CHANGELOG.md"
+
+[tool.flit.module]
+name = "tgp"
+
+# -----------------------------------------------------------
+#  Linting & formatting with Ruff only
+# -----------------------------------------------------------
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py39"
+exclude = [
+    ".eggs",
+    ".git",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "build",
+    "dist",
+    "venv",
+    "docs",
+]
+
+[tool.ruff.lint]
+select = [
+    "D", # docstring rules
+    "E", # pycodestyle rules
+    "F", # pyflakes rules
+    "W", # warnings
+    "I", # import-sorting ruleset (isort parity)
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "D100", # Ignore "Missing docstring in public module"
+    "D101", # Ignore "Missing docstring in public class"
+    "D102", # Ignore "Missing docstring in public method"
+    "D103", # Ignore "Missing docstring in public function"
+    "D104", # Ignore "Missing docstring in public package"
+    "D105", # Ignore "Missing docstring in magic method"
+    "D107", # Ignore "Missing docstring in __init__"
+    "D205", # Ignore "blank line required between summary line and description"
+    "D415", # Ignore "First line should end with a period"
+    "D417", # Ignore "Missing argument description in the docstring"
+    "E501", # Ignore "line too long",
+    "SIM102", # Ignore "Use a single `if` statement instead of nested `if` statements"
+    "SIM108", # Ignore "Use ternary operator instead of `if`-`else`-block"
+    "SIM118", # Ignore "Use `key in dict` instead of `key in dict.keys()`"
+]
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]        # allow assert statements in tests
+"**/__init__.py" = ["F401"]  # allow unused imports in `__init__.py` files
+
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+# Enable auto-formatting of code examples in docstrings.
+docstring-code-format = true
+# Set the line length limit used when formatting code snippets in docstrings.
+docstring-code-line-length = "dynamic"
+
+# -----------------------------------------------------------
+#  Test runner
+# -----------------------------------------------------------
+[tool.pytest.ini_options]
+addopts = [
+    "--cov=tgp",
+    "--cov-report=term-missing",
+#    "--cov-report=html",
+    "--color=yes",
+]
+testpaths = ["tests"]
+markers = ["slow: longer running tests"]
+filterwarnings = [
+    # Filter `torch` warnings:
+    "ignore:scatter_reduce():UserWarning",
+    "ignore:Sparse CSR tensor support is in beta state:UserWarning",
+    "ignore:Sparse CSC tensor support is in beta state:UserWarning",
+    "ignore:`layout` argument unset, using default layout:UserWarning",
+]
+
+# -----------------------------------------------------------
+#  Coverage gates
+# -----------------------------------------------------------
+[tool.coverage.run]
+source = ["tgp"]
+omit = [
+    "tgp/datasets/*",
+    "tgp/imports.py",
+    "tgp/data/collate.py",
+]
+branch = true
+parallel = true
+
+[tool.coverage.report]
+fail_under = 90
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise NotImplementedError",
+    "register_parameter",
+    "torch.cuda.is_available",
+]

@@ -1,0 +1,89 @@
+html.dark {
+    --sy-c-background: var(--slate-2);
+    --mystnb-stdout-bg-color: #000000 !important;
+}
+
+html.light .dark-code {
+    --syntax-pre-bg: #222222;
+}
+
+html.light {
+    --sy-c-background: var(--slate-1);
+    --mystnb-stdout-bg-color: #eeeeee !important;
+}
+
+:root {
+    --mystnb-source-bg-color: unset;
+    --mystnb-stdout-bg-color: unset;
+    --mystnb-stderr-bg-color: unset;
+    --mystnb-traceback-bg-color: unset;
+    --mystnb-source-border-color: var(--sy-c-background);
+    --mystnb-source-margin-color: var(--accent-9);
+    --mystnb-stdout-border-color: var(--sy-c-background);;
+    --mystnb-stderr-border-color: var(--sy-c-background);;
+    --mystnb-traceback-border-color: var(--sy-c-background);;
+}
+
+/* Logos */
+
+img.inline-logo {
+    display: inline-block;
+    width: 1.2em;
+    vertical-align: text-top;
+}
+
+img.inline-logo.with-text {
+    margin-right: .2em;
+}
+
+/* Gradients */
+
+.gradient-text,
+#torch-geometric-pool > h1 {
+    background: transparent linear-gradient(90deg, #ff4f00 0%, #c244b9 32%, var(--accent-9) 52%, #1f87e6 100%) 0% 0% no-repeat padding-box;
+    display: inline-block;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+/* .container.buttons a:first-child{
+    background: linear-gradient(120deg, #ff4f00 0%, var(--accent-9) 40%, var(--accent-9) 70%, #1f87e6 100%);
+    border-color: var(--sy-c-border);
+} */
+
+/* GitHub contributions */
+
+.gh-contributors {
+    display: inline-flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 15px;
+}
+
+.gh-contributor {
+    width: 5rem;
+    height: 5rem;
+    position: relative;
+    /*border: solid;*/
+    /*border-radius: 50%;*/
+    /*border-color: var(--color-link);*/
+}
+
+.gh-contributor img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+
+.gh-contributor-number {
+    position: absolute;
+    bottom: 8px;
+    right: 0;
+    background: var(--color-background-primary);
+    padding: 0.1rem 1rem 0.1rem .5rem;
+    border-radius: 1rem 0rem 0rem 1rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+}

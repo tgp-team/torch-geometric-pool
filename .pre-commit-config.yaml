@@ -1,0 +1,7 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.2           # pin to an exact tag
+    hooks:
+      - id: ruff           # lint + import-sort (autofix with --fix)
+        args: [--fix]
+      - id: ruff-format    # apply Ruff's code formatter
