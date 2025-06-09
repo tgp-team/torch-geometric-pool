@@ -32,7 +32,7 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
-    "numpy >=1, <3",
+    "numpy >=1, <2",
     "torch >= 1.8, <3",
     "torch_geometric >=2, <3",
     "torch_scatter",
@@ -55,6 +55,8 @@ pygsp = [
 notebook = [
     "jupyter",
     "matplotlib",
+    "scikit-learn",
+    "networkx",
     "torch_geometric_pool[pygsp]",
 ]
 test = [
@@ -69,8 +71,11 @@ doc = [
     "sphinx-design < 1",
     "sphinx-copybutton < 1",
     "sphinx-hoverxref < 2",
+    "jupyter_sphinx",
+    "sphinx_sitemap",
     "myst-nb >= 1.0, <2",
     "shibuya >= 2025, <2026",
+    "torch_geometric_pool[notebook]",
 ]
 dev = [
     "pre-commit",
@@ -81,8 +86,8 @@ dev = [
 [project.urls]
 homepage = "https://torch-geometric-pool.readthedocs.io"
 documentation = "https://torch-geometric-pool.readthedocs.io"
-repository = "https://github.com/tgp-team/torch_geometric_pool.git"
-changelog = "https://github.com/tgp-team/torch_geometric_pool/blob/master/CHANGELOG.md"
+repository = "https://github.com/tgp-team/torch-geometric-pool.git"
+changelog = "https://github.com/tgp-team/torch-geometric-pool/blob/master/CHANGELOG.md"
 
 [tool.flit.module]
 name = "tgp"

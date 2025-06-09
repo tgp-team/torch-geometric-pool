@@ -33,7 +33,7 @@ Similary, for a scoring-based method such as Top-$K$, the select matrix will con
 
 <img src="../_static/img/sel-scoring.png" style="width: 30%; display: block; margin: auto;">
 
-In <img src="../_static/img/tgp-logo.svg" width="40px" align="center" style="display: inline-block; height: 1.3em; width: unset; vertical-align: text-top;"/> tgp, the $\mathbf{S}$ matrix is contained within the object [`SelectOutput`](), along with other useful information to perform pooling.
+In <img src="../_static/img/tgp-logo.svg" width="40px" align="center" style="display: inline-block; height: 1.3em; width: unset; vertical-align: text-top;"/> tgp, the $\mathbf{S}$ matrix is contained within the object [`SelectOutput`](https://torch-geometric-pool.readthedocs.io/en/latest/api/select.html#tgp.select.SelectOutput), along with other useful information to perform pooling.
 
 ## Reduce
 The $\texttt{RED}$ operations is the one responsible for computing the node features of the pooled graph. Each pooling method can implement the $\texttt{RED}$ function differently, but in general the result depends on: the topology, the node (and edge) features of the original graph, and on the output of the $\texttt{SEL}$ function. 

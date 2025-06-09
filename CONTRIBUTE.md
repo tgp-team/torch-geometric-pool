@@ -9,7 +9,7 @@ Please, follow the steps below to create a pull request to add new features.
 You will need to install additional dependencies to compile the documentation, to run the tests and the pre-commits
 
 ```bash
-pip install ".[dev]"
+pip install .[dev]
 ```
 
 ## 2. Add new code
@@ -37,7 +37,7 @@ make html
 pytests --cov=tgp --cov-report=term-missing --cov-report=html
 ```
 - Check the code coverage report to see if all the code is covered and correctly executed.
-- If you are using VSCode, go on `Testing`, select `pytests` and `./tests`as the target folder.
+- If you are using VSCode, go on `Testing`, select `pytests` and `/tests`as the target folder.
 
 ## 5. Pull request.
 - Create a PR on Github.

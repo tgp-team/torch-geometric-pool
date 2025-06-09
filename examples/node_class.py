@@ -13,7 +13,8 @@ dataset = Planetoid(root="data/Planetoid", name="Cora")
 data = dataset[0]
 
 for POOLER, value in pooler_map.items():
-    # for POOLER in ['mincut']:
+# for POOLER in ['mincut']: # Test a specific pooler
+
     print(f"Using pooler: {POOLER}")
 
     if POOLER == "pan":

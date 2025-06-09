@@ -13,15 +13,15 @@ Torch Geometric Pool
 .. container:: buttons
 
     `Docs <content/quickstart.html>`_
-    `GitHub <https://github.com/FilippoMB/torch-geometric-pool>`_
+    `GitHub <https://github.com/tgp-team/torch-geometric-pool>`_
 
-:tgp:`null` **TGP (Torch Geometric Pool)** brings every major **graph-pooling operator**
-into a single, unified library built on top of :pyg:`null` `PyTorch Geometric
-<https://github.com/pyg-team/pytorch_geometric/>`_. Drop-in layers let you turn any
+:tgp:`null` **tgp (Torch Geometric Pool)** is a library built on top of :pyg:`null` `PyTorch Geometric
+<https://github.com/pyg-team/pytorch_geometric/>`_ that brings every major **graph-pooling operator**
+into a single, unified framework. Drop-in layers let you turn any
 vanilla GNN into a **hierarchical** one with just a few lines of code.
 
 
-.. admonition:: Do you want to learn more about graph pooling?
+.. admonition:: Want to learn more about graph pooling?
    :class: tip
 
    Read our series of `blog posts <https://gnn-pooling.notion.site/>`_ on the topic.
@@ -98,7 +98,7 @@ For the latest version, consider installing from source:
 
 .. code-block:: bash
 
-    pip install git+https://github.com/FilippoMB/torch-geometric-pool.git
+    pip install git+https://github.com/tgp-team/torch-geometric-pool.git
 
 
 .. admonition:: Before installation

@@ -151,7 +151,7 @@ class NDPSelect(Select):
         Returns:
             ~numpy.ndarray: A value in :math:`[0,1]` representing the normalized size of the cut.
         """
-        cut = z.T @ L @ z  # z.T.dot(L.dot(z))
+        cut = z.T.matmul(L.matmul(z)) # z.T @ L @ z
         cut /= 2 * total_volume
         return cut
 
@@ -166,7 +166,7 @@ class NDPSelect(Select):
     def _spectral_partition(
         self,
         sub_edge_index: Tensor,
-        sub_edge_weight: torch.Optional[Tensor],
+        sub_edge_weight: Optional[Tensor],
         num_sub_nodes: int,
         device: torch.device,
     ):

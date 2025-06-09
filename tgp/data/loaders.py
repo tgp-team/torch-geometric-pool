@@ -132,9 +132,7 @@ class PoolDataLoader(torch.utils.data.DataLoader):
     function.
 
     Args:
-        dataset (Union[~torch.utils.data.Dataset,
-            Sequence[~torch_geometric.data.BaseData],
-            ~torch_geometric.data.datapipes.DatasetAdapter]):
+        dataset (Union[~torch.utils.data.Dataset, Sequence[~torch_geometric.data.BaseData], ~torch_geometric.data.datapipes.DatasetAdapter]):
             The source dataset from which to load graph data.
         batch_size (int): Number of graphs per batch. (default: ``1``)
         shuffle (bool): Whether to shuffle the data each epoch. (default: :obj:`False`)

@@ -13,7 +13,7 @@ seed_everything(8)
 
 # POOLER = 'kmis' #random.choice(list(POOLER_CLASSES.keys())) # Randomly select a pooler
 for POOLER, value in pooler_map.items():
-    # for POOLER in ['diff']:
+# for POOLER in ['diff']: # Use a specific pooler
 
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")

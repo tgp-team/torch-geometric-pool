@@ -24,7 +24,7 @@ For the latest version, consider installing from source:
 
 .. code-block:: shell
 
-    pip install git+https://github.com/FilippoMB/torch-geometric-pool.git
+    pip install git+https://github.com/tgp-team/torch-geometric-pool.git
 
 .. admonition:: Before installation
    :class: caution
@@ -44,7 +44,7 @@ directory and create a new conda environment using the provided conda configurat
 
 .. code:: shell
 
-    git clone https://github.com/FilippoMB/torch-geometric-pool.git
+    git clone https://github.com/tgp-team/torch-geometric-pool.git
     cd torch-geometric-pool
     conda env create -f conda_env.yml
 
