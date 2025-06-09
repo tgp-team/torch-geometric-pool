@@ -1,8 +1,8 @@
 # Doc requirements (cd into /docs and run `pip install -r requirements.txt`)
-numpy<2
-https://download.pytorch.org/whl/cpu/torch-1.13.0%2Bcpu-cp39-cp39-linux_x86_64.whl
-https://data.pyg.org/whl/torch-1.13.0%2Bcpu/torch_scatter-2.1.1%2Bpt113cpu-cp39-cp39-linux_x86_64.whl
-https://data.pyg.org/whl/torch-1.13.0%2Bcpu/torch_sparse-0.6.17%2Bpt113cpu-cp39-cp39-linux_x86_64.whl
+numpy<3
+https://download.pytorch.org/whl/cpu/torch-2.7.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl
+https://data.pyg.org/whl/torch-2.7.0%2Bcpu/torch_scatter-2.1.2%2Bpt27cpu-cp310-cp310-linux_x86_64.whl
+https://data.pyg.org/whl/torch-2.7.0%2Bcpu/torch_sparse-0.6.18%2Bpt27cpu-cp310-cp310-linux_x86_64.whl
 torch-geometric
 
 docutils
