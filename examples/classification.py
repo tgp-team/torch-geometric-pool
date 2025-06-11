@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch_geometric import seed_everything
@@ -9,11 +8,10 @@ from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
 
-seed_everything(8)
+seed_everything(8)  # Reproducibility
 
-# POOLER = 'kmis' #random.choice(list(POOLER_CLASSES.keys())) # Randomly select a pooler
-for POOLER, value in pooler_map.items():
-# for POOLER in ['diff']: # Use a specific pooler
+for POOLER, value in pooler_map.items():  # Use all poolers
+    # for POOLER in ['diff']:                   # Test a specific pooler
 
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
@@ -21,9 +19,6 @@ for POOLER, value in pooler_map.items():
     if POOLER == "pan":
         pass
     else:
-        torch.manual_seed(42)
-        np.random.seed(42)
-
         ### Get the data
         dataset = TUDataset(
             root="../data/TUDataset",
@@ -86,7 +81,7 @@ for POOLER, value in pooler_map.items():
             def forward(self, x, edge_index, edge_weight, batch=None):
                 edge_index = SparseTensor.from_edge_index(
                     edge_index, edge_attr=edge_weight
-                )  # Optional, debug
+                )
 
                 # First MP layer
                 x = self.conv1(x, edge_index, edge_weight)
@@ -137,7 +132,6 @@ for POOLER, value in pooler_map.items():
                 )
                 loss = F.nll_loss(output, data.y.view(-1)) + aux_loss
                 loss.backward()
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
                 loss_all += data.y.size(0) * float(loss)
                 optimizer.step()
             return loss_all / len(dataset)

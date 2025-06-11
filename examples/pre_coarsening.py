@@ -25,6 +25,7 @@ for pooler in poolers:
     print(f"Using pooler: {pooler}")
     print(f"Selector: {selector}, Connector: {connector}")
 
+    ### Get the data
     dataset = TUDataset(
         root="../data/TUDataset",
         name="MUTAG",
@@ -75,7 +76,7 @@ for pooler in poolers:
                 x, _ = self.reducer(x=x, so=pooled.so)
 
                 # Next MP layer
-                x = conv(x, pooled.edge_index, pooled.edge_weight)  # .float()
+                x = conv(x, pooled.edge_index, pooled.edge_weight)
                 x = F.relu(x)
 
             # Global pooling
@@ -101,7 +102,6 @@ for pooler in poolers:
             output = model(data)
             loss = F.nll_loss(output, data.y.view(-1))
             loss.backward()
-            # torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             loss_all += data.y.size(0) * float(loss)
             optimizer.step()
         return loss_all / len(dataset)

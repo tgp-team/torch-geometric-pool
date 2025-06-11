@@ -17,7 +17,7 @@ for POOLER in poolers:
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
 
-    # Load dataset
+    ### Get the data
     dataset = "cora"
     trans = (
         T.NormalizeFeatures()
@@ -37,6 +37,7 @@ for POOLER in poolers:
         "act": "ReLU",
     }
 
+    ### Model definition
     class Net(torch.nn.Module):
         def __init__(
             self,
@@ -71,7 +72,6 @@ for POOLER in poolers:
             print(self.pooler)
 
         def forward(self, x, edge_index, edge_weight):
-            # Propagate node feats
             for i in range(len(self.mp)):
                 if i % 2 == 0:
                     x = self.mp[i](x, edge_index, edge_weight)
@@ -88,6 +88,7 @@ for POOLER in poolers:
 
             return s, aux_loss
 
+    ### Model setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     data = data.to(device)
     model = Net(mp_units=[64] * 2, mp_act="ReLU", in_channels=dataset.num_features).to(
@@ -110,6 +111,7 @@ for POOLER in poolers:
         clust, _ = model(data.x, data.edge_index, data.edge_weight)
         return NMI(clust.max(1)[1].cpu(), data.y.cpu())
 
+    ### Training loop
     for epoch in range(1, 11):
         train_loss = train()
         nmi = test()

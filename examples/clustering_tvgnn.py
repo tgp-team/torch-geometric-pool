@@ -12,13 +12,14 @@ from tgp.poolers import AsymCheegerCutPooling
 
 seed_everything(8)
 
-# Load dataset
+### Get the data
 dataset = "cora"
 path = osp.join(osp.dirname(osp.realpath(__file__)), "..", "data", dataset)
 dataset = Planetoid(path, dataset, transform=T.NormalizeFeatures())
 data = dataset[0]
 
 
+### Model definition
 class Net(torch.nn.Module):
     def __init__(
         self,
@@ -40,6 +41,7 @@ class Net(torch.nn.Module):
         self.mp = ModuleList(mp)
         out_chan = mp_units[-1]
 
+        # Pooling
         self.pooler = AsymCheegerCutPooling(
             in_channels=[out_chan] + mlp_units,
             k=n_clusters,
@@ -49,7 +51,6 @@ class Net(torch.nn.Module):
         )
 
     def forward(self, x, edge_index, edge_weight):
-        # Propagate node feats
         for i in range(len(self.mp)):
             x = self.mp[i](x, edge_index, edge_weight)
 
@@ -62,6 +63,7 @@ class Net(torch.nn.Module):
         return s, aux_loss
 
 
+### Model setup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 data = data.to(device)
 model = Net(
@@ -91,6 +93,7 @@ def test():
     return NMI(clust.max(1)[1].cpu(), data.y.cpu())
 
 
+### Training loop
 for epoch in range(1, 1001):
     train_loss = train()
     nmi = test()

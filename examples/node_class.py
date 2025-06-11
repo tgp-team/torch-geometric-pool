@@ -12,8 +12,8 @@ seed_everything(8)
 dataset = Planetoid(root="data/Planetoid", name="Cora")
 data = dataset[0]
 
-for POOLER, value in pooler_map.items():
-# for POOLER in ['mincut']: # Test a specific pooler
+for POOLER, value in pooler_map.items():  # Use all poolers
+    # for POOLER in ['mincut']:                 # Test a specific pooler
 
     print(f"Using pooler: {POOLER}")
 
@@ -33,6 +33,7 @@ for POOLER, value in pooler_map.items():
             "reduce": "sum",
         }
 
+        #### Model definition
         class GCN(torch.nn.Module):
             def __init__(
                 self,
@@ -64,7 +65,7 @@ for POOLER, value in pooler_map.items():
             def forward(self, x, edge_index, edge_weight, batch):
                 edge_index = SparseTensor.from_edge_index(
                     edge_index, edge_attr=edge_weight
-                )  # Optional, debug
+                )
 
                 # Encoder
                 x = self.conv_enc(x, edge_index)
@@ -76,17 +77,13 @@ for POOLER, value in pooler_map.items():
                     edge_index=edge_index, x=x, batch=batch, use_cache=True
                 )
                 out = self.pooler(x=x, adj=edge_index, batch=batch, mask=mask)
-                x_pool, adj_pool, _pooled_edge_weights = (
+                x_pool, adj_pool = (
                     out.x,
                     out.edge_index,
-                    out.edge_weight,
                 )
-                # print(f"Expressive: {out.so.expressive}")
 
                 # Bottleneck
-                x_pool = self.conv_pool(
-                    x_pool, adj_pool
-                )  # edge_weight=pooled_edge_weights
+                x_pool = self.conv_pool(x_pool, adj_pool)
                 x_pool = F.relu(x_pool)
                 x_pool = F.dropout(x_pool, p=self.dropout, training=self.training)
 
@@ -101,6 +98,7 @@ for POOLER, value in pooler_map.items():
                 else:
                     return F.log_softmax(x, dim=-1), torch.tensor(0.0)
 
+        ### Model setup
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = GCN(hidden_channels=16).to(device)
         data = data.to(device)
@@ -130,7 +128,7 @@ for POOLER, value in pooler_map.items():
                 accs.append(acc)
             return accs
 
-        # Training loop
+        ### Training loop
         for epoch in range(1, 11):
             loss = train()
             train_acc, val_acc, test_acc = test()
