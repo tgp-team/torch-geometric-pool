@@ -45,8 +45,7 @@ class MultipartiteGraphDataset(InMemoryDataset):
         download_url(self.url, self.raw_dir)
 
     def process(self):
-        print(self.root)
-        path = os.path.join(self.root, "/raw/Multipartite.pkl")
+        path = os.path.join(self.raw_dir, self.raw_file_names[0])
         data_list = torch.load(path)
         if self.pre_filter is not None:
             data_list = [data for data in data_list if self.pre_filter(data)]
