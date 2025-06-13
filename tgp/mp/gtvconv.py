@@ -134,9 +134,11 @@ class GTVConv(MessagePassing):
                 out = out * mask.view(B, N, 1).to(x.dtype)
 
         else:
-            assert isinstance(edge_index, SparseTensor)
-            row, col, edge_weight = edge_index.coo()
-            edge_index = torch.stack((row, col), dim=0)
+            if isinstance(edge_index, SparseTensor):
+                row, col, edge_weight = edge_index.coo()
+                edge_index = torch.stack((row, col), dim=0)
+            else:
+                row, col = edge_index
 
             # Absolute differences between neighbouring nodes
             abs_diff = torch.abs(x[row, :] - x[col, :])  # shape [E, in_channels]

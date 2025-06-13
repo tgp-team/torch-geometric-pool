@@ -89,7 +89,13 @@ for POOLER in poolers:
             return s, aux_loss
 
     ### Model setup
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     data = data.to(device)
     model = Net(mp_units=[64] * 2, mp_act="ReLU", in_channels=dataset.num_features).to(
         device

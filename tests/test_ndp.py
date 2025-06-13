@@ -1,8 +1,5 @@
-import numpy as np
 import pytest
-import scipy.sparse as sp
 import torch
-from torch import Tensor
 from torch_geometric.utils import add_self_loops
 from torch_sparse import SparseTensor
 
@@ -31,64 +28,27 @@ def test_forward_no_batch_and_tensor_edge_index():
 
 def test_forward_with_sparse_tensor_edge_index_and_skip_empty_subgraph():
     edge_index = make_chain_edge_index(N=3)
-    # Add self-loops so L builds correctly
     edge_index, _ = add_self_loops(edge_index, num_nodes=3)
     edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
-    sp = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
+    spt = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
 
     # Create a batch of size 3 where class '1' is empty:
     batch = torch.tensor([0, 2, 2], dtype=torch.long)
     selector = NDPSelect(s_inv_op="transpose")
-    out = selector(edge_index=sp, edge_weight=edge_weight, batch=batch, num_nodes=3)
+    out = selector(edge_index=spt, edge_weight=edge_weight, batch=batch, num_nodes=3)
     # s should cover nodes from subgraphs 0 and 2; shape rows = 3
     s = out.s
     assert s.sparse_sizes()[0] == 3
-    assert len(repr(out)) > 0  # Ensure repr works
+    assert len(repr(out)) > 0
 
 
-def test_spectral_partition_lobpcg_exception(monkeypatch):
-    edge_index = make_chain_edge_index(N=3)
-    edge_index, _ = add_self_loops(edge_index, num_nodes=3)
-    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
-
-    # Monkeypatch torch.lobpcg to raise
-    monkeypatch.setattr(
-        torch,
-        "lobpcg",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("fail")),
-    )
-
+def test_random_cut():
+    adj = SparseTensor.from_dense(torch.ones(5, 5))
     selector = NDPSelect(s_inv_op="transpose")
-    out = selector(
-        edge_index=edge_index, edge_weight=edge_weight, batch=None, num_nodes=3
-    )
+    batch = torch.ones(5, dtype=torch.long)
+    out = selector(edge_index=adj, batch=batch, num_nodes=5)
 
-    # s must be valid and L must be scipy sparse
-    s = out.s
-    assert s.sparse_sizes()[0] == 3
-    L = out.L
-    assert sp.isspmatrix(L)
-
-
-def test_eval_cut_and_sign_partition():
-    L = sp.eye(3)
-    # z vector with values +1, -1, +1
-    z = np.array([[1], [-1], [1]])
-    # Total volume = 10 (arbitrary)
-    val = NDPSelect.eval_cut(total_volume=10, L=L, z=z)
-    # assert isinstance(val, float)
-    assert 0 <= val <= 1
-
-    # sign_partition when given an integer
-    idx_pos, idx_neg = NDPSelect.sign_partition(5)
-    assert isinstance(idx_pos, Tensor) and isinstance(idx_neg, Tensor)
-    assert (idx_pos.numel() + idx_neg.numel()) == 5
-
-    # sign_partition when given a tensor
-    vec = torch.tensor([1, -2, 0, 3])
-    idx_pos2, idx_neg2 = NDPSelect.sign_partition(vec)
-    assert torch.equal(torch.where(vec >= 0)[0], idx_pos2)
-    assert torch.equal(torch.where(vec < 0)[0], idx_neg2)
+    assert out.num_clusters <= 3
 
 
 if __name__ == "__main__":

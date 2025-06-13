@@ -25,6 +25,35 @@ def test_gtv_adj_weights_source_to_target():
     assert torch.allclose(new_ew, expected_ew)
 
 
+def test_gtvconv_forward():
+    # Build a small sparse adjacency: 3-node path 0-1-2 + self-loops
+    N, F, out_channels = 3, 2, 4
+    x = torch.randn((N, F), dtype=torch.float)
+
+    # Directed edges: (0,1),(1,2)
+    row = torch.tensor([0, 1], dtype=torch.long)
+    col = torch.tensor([1, 2], dtype=torch.long)
+    edge_index = torch.stack([row, col], dim=0)
+    edge_weight = torch.tensor([1.0, 1.0], dtype=torch.float)
+    edge_index, edge_weight = add_self_loops(
+        edge_index, edge_attr=edge_weight, num_nodes=N
+    )
+
+    conv = GTVConv(
+        in_channels=F,
+        out_channels=out_channels,
+        delta_coeff=1.0,
+        eps=1e-4,
+        act="PReLU",
+    )
+    conv.eval()
+
+    # Forward with sparse adjacency
+    out = conv(x, edge_index, edge_weight)
+    assert out.shape == (N, out_channels)
+    assert torch.isfinite(out).all()
+
+
 @pytest.mark.parametrize("bias", [True, False])
 def test_gtvconv_forward_dense_and_mask(bias):
     # Build a small dense adjacency (3 nodes): complete graph with self-loops
@@ -62,8 +91,9 @@ def test_gtvconv_forward_dense_and_mask(bias):
     assert out_masked.shape == (B, N, out_channels)
     assert torch.allclose(out_masked[:, 1], torch.zeros_like(out_masked[:, 1]))
 
+
 @pytest.mark.parametrize("bias", [True, False])
-def test_gtvconv_forward_sparse(bias):
+def test_gtvconv_forward_spt(bias):
     # Build a small sparse adjacency: 3-node path 0-1-2 + self-loops
     N, F, out_channels = 3, 2, 4
     x = torch.randn((N, F), dtype=torch.float)
@@ -110,6 +140,7 @@ def test_gtvconv_forward_sparse(bias):
     out = conv(x, sparse_adj2)
     assert out.shape == (N, out_channels)
     assert torch.isfinite(out).all()
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
