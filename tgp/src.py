@@ -447,6 +447,14 @@ class DenseSRCPooling(SRCPooling):
                 batch_size=batch_size,
             )
 
+            if adj.dim() > 3:
+                if adj.dim() == 4 and adj.size(3) == 1:
+                    adj = adj.squeeze(-1)
+                else:
+                    raise ValueError(
+                        "Adjacency matrix must have shape [B, N, N] or [B, N, N, 1]"
+                    )
+
             if self.adj_transpose:
                 adj = adj.transpose(-1, -2)
 
