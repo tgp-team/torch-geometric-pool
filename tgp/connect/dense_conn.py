@@ -1,7 +1,6 @@
 import torch
 from torch import Tensor
 
-from tgp import eps
 from tgp.connect import Connect
 from tgp.select import SelectOutput
 
@@ -43,7 +42,8 @@ def postprocess_adj_pool(
         else:
             # Compute row sums along the last dimension.
             d = adj_pool.sum(-1, keepdim=True)
-        d = torch.sqrt(d) + eps
+        d[d == 0] = 1  # avoid division by zero
+        d = torch.sqrt(d)
         adj_pool = (adj_pool / d) / d.transpose(-2, -1)
 
     return adj_pool

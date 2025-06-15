@@ -8,8 +8,6 @@ from torch_sparse import SparseTensor
 from tgp.connect import Connect
 from tgp.select import SelectOutput
 
-EPS = 1e-15
-
 
 class DenseConnectSPT(Connect):
     r"""A :math:`\texttt{connect}` operator to be used when the assignment matrix
@@ -88,8 +86,8 @@ class DenseConnectSPT(Connect):
 
         if self.degree_norm:
             deg = adj_pooled.sum(dim=1)
-
-            deg_inv_sqrt = 1.0 / (deg + EPS).sqrt()
+            deg[deg == 0] = 1.0  # Avoid division by zero
+            deg_inv_sqrt = 1.0 / deg.sqrt()
 
             # Recompute values to apply D^{-1/2} * A * D^{-1/2}
             row, col, val = adj_pooled.coo()
