@@ -9,6 +9,7 @@ from .hosc import HOSCPooling
 from .just_balance import JustBalancePooling
 from .kmis import KMISPooling
 from .lapool import LaPooling
+from .maxcut import MaxCutPooling
 from .mincut import MinCutPooling
 from .ndp import NDPPooling
 from .nmf import NMFPooling
@@ -28,6 +29,7 @@ pooler_classes = [
     "LaPooling",
     "JustBalancePooling",
     "KMISPooling",
+    "MaxCutPooling",
     "MinCutPooling",
     "NDPPooling",
     "NMFPooling",
@@ -48,6 +50,7 @@ pooler_map = {
     "lap": LaPooling,
     "jb": JustBalancePooling,
     "kmis": KMISPooling,
+    "maxcut": MaxCutPooling,
     "mincut": MinCutPooling,
     "ndp": NDPPooling,
     "nmf": NMFPooling,
