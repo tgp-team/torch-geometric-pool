@@ -8,6 +8,8 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import SelectOutput
 from tgp.src import PoolingOutput, SRCPooling
+from tgp.select import TopkSelect  # Temporary placeholder
+from tgp.utils.losses import maxcut_loss
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
@@ -77,9 +79,6 @@ class MaxCutPooling(SRCPooling):
         lift_red_op: ReduceType = "sum",
         **score_net_kwargs
     ):
-        # Note: MaxCutPoolSelect will be implemented later
-        # For now, we'll use a placeholder that will be replaced
-        from tgp.select import TopkSelect  # Temporary placeholder
         
         super().__init__(
             selector=TopkSelect(  # This will be replaced with MaxCutPoolSelect
@@ -154,15 +153,24 @@ class MaxCutPooling(SRCPooling):
 
     def compute_loss(self, x: Tensor, edge_index: Adj, edge_weight: Optional[Tensor], 
                      batch: Optional[Tensor], so: SelectOutput) -> dict:
-        """Compute auxiliary losses.
+        """Compute auxiliary losses."""
+        # Extract scores from SelectOutput - this assumes scores are stored in so.scores
+        # This will be properly implemented when MaxCutPoolSelect is created
+        if hasattr(so, 'scores') and so.scores is not None:
+            scores = so.scores
+        else:
+            # Fallback: use dummy scores for now until MaxCutPoolSelect is implemented
+            import torch
+            scores = torch.randn(x.size(0), device=x.device, requires_grad=True)
         
-        Note: This will be moved to tgp.utils.losses.maxcut_loss later.
-        """
-        # Placeholder loss computation - will be properly implemented later
-        # For now, return a dummy loss to avoid errors
-        import torch
-        dummy_loss = torch.tensor(0.0, device=x.device, requires_grad=True)
-        return {"maxcut_loss": self.beta * dummy_loss}
+        maxcut_loss_val = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            reduction="mean"
+        )
+        return {"maxcut_loss": self.beta * maxcut_loss_val}
 
     def extra_repr_args(self) -> dict:
         return {

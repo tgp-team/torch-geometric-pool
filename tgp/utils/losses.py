@@ -6,6 +6,9 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Distribution, kl_divergence
 
+from torch_geometric.utils import scatter
+from torch_sparse import SparseTensor
+
 from tgp import eps
 from tgp.utils import rank3_diag, rank3_trace
 
@@ -780,3 +783,96 @@ def cluster_connectivity_prior_loss(
         return _batch_reduce_loss(prior_loss, batch_reduction)
 
     return prior_loss
+
+
+def maxcut_loss(
+    scores: Tensor,
+    edge_index: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    reduction: ReductionType = "mean",
+) -> Tensor:
+    r"""Auxiliary MaxCut loss used by :class:`~tgp.poolers.MaxCutPooling`
+    operator from the paper `"MaxCutPool: differentiable feature-aware Maxcut for 
+    pooling in graph neural networks" <https://arxiv.org/abs/2409.05100>`_ 
+    (Abate & Bianchi, ICLR 2025).
+
+    The loss computes the MaxCut objective for graph partitioning, which aims to 
+    maximize the sum of edge weights crossing the partition. For differentiable 
+    optimization, this is formulated as minimizing the negative MaxCut value:
+
+    .. math::
+        \mathcal{L}_{\text{MaxCut}} = -\frac{1}{V} \sum_{i \sim j} w_{ij} \cdot z_i \cdot z_j
+
+    where:
+
+    + :math:`z_i` are the node scores/assignments (typically in :math:`[-1, 1]`),
+    + :math:`w_{ij}` are the edge weights,
+    + :math:`V` is the total volume (sum of edge weights) for normalization,
+    + :math:`i \sim j` denotes edges in the graph.
+
+    The computation uses sparse matrix operations for efficiency:
+
+    .. math::
+        \mathcal{L}_{\text{MaxCut}} = \frac{1}{|V|} \sum_{\text{graphs}} \frac{\mathbf{z}^T \mathbf{A} \mathbf{z}}{\text{volume}}
+
+    where :math:`\mathbf{A}` is the adjacency matrix and :math:`\mathbf{z}` contains node scores.
+
+    Args:
+        scores (~torch.Tensor): Node scores/assignments of shape :math:`(N,)` or :math:`(N, 1)`.
+            Typically normalized to :math:`[-1, 1]` via :obj:`tanh` activation.
+        edge_index (~torch.Tensor): Graph connectivity in COO format of shape :math:`(2, E)`.
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`. 
+            If :obj:`None`, all edges have weight :obj:`1.0`. (default: :obj:`None`)
+        batch (~torch.Tensor, optional): Batch assignments for each node of shape :math:`(N,)`.
+            If :obj:`None`, assumes single graph. (default: :obj:`None`)
+        reduction (str, optional): The reduction method to apply to the loss.
+            (default: :obj:`"mean"`)
+
+    Returns:
+        ~torch.Tensor: The MaxCut loss value.
+
+    Note:
+        This loss function is designed to work with sparse graphs and batched inputs.
+        The normalization by volume ensures that the loss is comparable across graphs
+        of different sizes.
+    """
+
+
+    # Handle score shapes
+    if scores.dim() == 2 and scores.size(1) == 1:
+        scores = scores.squeeze(-1)
+    elif scores.dim() != 1:
+        raise ValueError(f"Expected scores to have shape [N] or [N, 1], got {scores.shape}")
+    
+    num_nodes = scores.size(0)
+    
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=scores.device)
+    
+    if edge_weight is None:
+        edge_weight = torch.ones(edge_index.size(1), device=scores.device)
+
+    # Construct sparse adjacency matrix
+    adj = SparseTensor(
+        row=edge_index[0], 
+        col=edge_index[1], 
+        value=edge_weight, 
+        sparse_sizes=(num_nodes, num_nodes)
+    )
+    
+    # Compute A * z (adjacency matrix times scores)
+    az = adj.matmul(scores.unsqueeze(-1)).squeeze(-1)
+    
+    # Compute z^T * A * z for each graph in the batch
+    cut_values = scores * az
+    cut_losses = scatter(cut_values, batch, dim=0, reduce='sum')
+    
+    # Compute volume (total edge weight) for each graph
+    edge_batch = batch[edge_index[0]]
+    volumes = scatter(edge_weight, edge_batch, dim=0, reduce='sum')
+    
+    # Normalize by volume and take mean across graphs
+    normalized_cut_losses = cut_losses / volumes
+    
+    return _reduce_loss(normalized_cut_losses, reduction)
