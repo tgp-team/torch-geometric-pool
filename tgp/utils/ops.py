@@ -3,7 +3,9 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
+from torch_geometric.utils import get_laplacian
 from torch_geometric.utils.num_nodes import maybe_num_nodes
+from torch_sparse import eye as torch_sparse_eye
 
 from tgp.imports import SparseTensor
 
@@ -139,3 +141,66 @@ def check_and_filter_edge_weights(edge_weight: Tensor) -> Optional[Tensor]:
                     f"Edge weights must be of shape [E] or [E, 1], but got {edge_weight.shape}."
                 )
     return edge_weight
+
+
+def delta_gcn_matrix(
+    edge_index: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    delta: float = 2.0,
+    num_nodes: Optional[int] = None,
+) -> Tuple[Tensor, Tensor]:
+    r"""Compute the Delta-GCN propagation matrix for heterophilic message passing.
+    
+    Constructs the Delta-GCN propagation matrix from `MaxCutPool: differentiable 
+    feature-aware Maxcut for pooling in graph neural networks` (Abate & Bianchi, ICLR 2025).
+    
+    The propagation matrix is computed as: :math:`\mathbf{P} = \mathbf{I} - \delta \cdot \mathbf{L}_{sym}`
+    where :math:`\mathbf{L}_{sym}` is the symmetric normalized Laplacian.
+    
+    As described in the paper, when :math:`\delta > 1`, this operator favors the realization
+    of non-smooth (high-frequency) signals on the graph, making it particularly suitable
+    for heterophilic graphs and MaxCut optimization where adjacent nodes should have
+    different values.
+    
+    Args:
+        edge_index (~torch.Tensor): Graph connectivity in COO format of shape :math:`(2, E)`.
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            (default: :obj:`None`)
+        delta (float, optional): Delta parameter for heterophilic message passing. When 
+            :math:`\delta > 1`, promotes high-frequency (non-smooth) signals. (default: :obj:`2.0`)
+        num_nodes (int, optional): Number of nodes. If :obj:`None`, inferred from
+            :obj:`edge_index`. (default: :obj:`None`)
+        
+    Returns:
+        tuple:
+            - **edge_index** (*Tensor*): Updated edge indices of shape :math:`(2, E')`.
+            - **edge_weight** (*Tensor*): Updated edge weights of shape :math:`(E',)`.
+    """
+    num_nodes = maybe_num_nodes(edge_index, num_nodes)
+
+    # Get symmetric normalized Laplacian: L_sym = D^(-1/2) (D - A) D^(-1/2)
+    edge_index_laplacian, edge_weight_laplacian = get_laplacian(
+        edge_index, edge_weight, normalization='sym', num_nodes=num_nodes
+    )
+    
+    # Scale by delta and negate: -delta * L_sym
+    edge_weight_scaled = -delta * edge_weight_laplacian
+    
+    # Create identity matrix: I
+    eye_index, eye_weight = torch_sparse_eye(
+        num_nodes, device=edge_index.device, dtype=edge_weight_scaled.dtype
+    )
+    
+    # Combine to form Delta-GCN propagation matrix: P = I - delta * L_sym
+    propagation_matrix = SparseTensor(
+        row=torch.cat([edge_index_laplacian[0], eye_index[0]]),
+        col=torch.cat([edge_index_laplacian[1], eye_index[1]]),
+        value=torch.cat([edge_weight_scaled, eye_weight]),
+        sparse_sizes=(num_nodes, num_nodes)
+    ).coalesce("sum")  # Sum weights for overlapping edges (diagonal elements)
+    
+    # Convert back to COO format
+    row, col, edge_weight_out = propagation_matrix.coo()
+    edge_index_out = torch.stack([row, col], dim=0)
+
+    return edge_index_out, edge_weight_out

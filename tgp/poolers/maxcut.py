@@ -6,23 +6,23 @@ from torch_geometric.typing import Adj
 from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import SelectOutput
+from tgp.select import MaxCutSelect, SelectOutput
 from tgp.src import PoolingOutput, SRCPooling
-from tgp.select import TopkSelect  # Temporary placeholder
 from tgp.utils.losses import maxcut_loss
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
 class MaxCutPooling(SRCPooling):
-    r"""MaxCut pooling operator from the paper "MaxCutPool: differentiable 
-    feature-aware Maxcut for pooling in graph neural networks" 
-    (Abate & Bianchi, ICLR 2025).
+    r"""The MaxCut pooling operator from the paper
+    `"MaxCutPool: differentiable feature-aware Maxcut for pooling in graph neural networks"
+    <https://arxiv.org/abs/2409.05100>`_ (Abate & Bianchi, ICLR 2025).
 
     This pooling layer uses a differentiable MaxCut objective to learn 
     node assignments. It is particularly effective for heterophilic graphs
     and provides robust pooling through graph topology-aware scoring.
 
-    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.MaxCutPoolSelect`.
+    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.MaxCutSelect`,
+      which computes MaxCut-aware node scores and performs top-k selection.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.SparseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
@@ -33,106 +33,98 @@ class MaxCutPooling(SRCPooling):
 
     Args:
         in_channels (int): Size of each input sample.
-        ratio (Union[int, float], optional): Graph pooling ratio. 
-            If float, fraction of nodes to keep. If int, exact number of nodes.
+        ratio (Union[float, int]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
-        beta (float, optional): Coefficient for the MaxCut auxiliary loss.
+        loss_coeff (float): Coefficient for the MaxCut auxiliary loss.
             (default: :obj:`1.0`)
-        min_score (Optional[float], optional): Minimal node score threshold.
-            When set, overrides the ratio parameter.
-            (default: :obj:`None`)
-        initial_embedding (bool, optional): Whether to apply initial embedding
-            to transform input features before scoring.
-            (default: :obj:`True`)
-        lift (LiftType, optional): Lifting operation type.
+        lift (LiftType): Matrix operation for lifting pooled features.
             (default: :obj:`"precomputed"`)
-        s_inv_op (SinvType, optional): Operation for computing S inverse.
-            (default: :obj:`"transpose"`) 
-        reduce_red_op (ReduceType, optional): Reduction operation for features.
+        s_inv_op (SinvType): Operation for computing :math:`\mathbf{S}^{-1}`.
+            (default: :obj:`"transpose"`)
+        reduce_red_op (ReduceType): Aggregation function for node reduction.
             (default: :obj:`"sum"`)
-        connect_red_op (ReduceType, optional): Reduction operation for edges.
+        connect_red_op (ReduceType): Aggregation function for edge connection.
             (default: :obj:`"sum"`)
-        lift_red_op (ReduceType, optional): Reduction operation for lifting.
+        lift_red_op (ReduceType): Aggregation function for lifting operation.
             (default: :obj:`"sum"`)
-        **score_net_kwargs: Additional arguments for the score network
-            (mp_units, mp_act, mlp_units, mlp_act, delta).
+        **score_net_kwargs: Additional arguments for the MaxCut score network.
 
-    Examples:
-        >>> pooler = MaxCutPooling(in_channels=64, ratio=0.5, beta=1.0)
-        >>> x = torch.randn(100, 64)
-        >>> edge_index = torch.randint(0, 100, (2, 200))
-        >>> out = pooler(x, edge_index)
+    Example:
+        >>> pooler = MaxCutPooling(in_channels=64, ratio=0.5, loss_coeff=1.0)
+        >>> x = torch.randn(100, 64)  # 100 nodes, 64 features
+        >>> edge_index = torch.randint(0, 100, (2, 200))  # 200 edges
+        >>> out = pooler(x=x, edge_index=edge_index)
         >>> print(out.x.shape, out.edge_index.shape)
+        >>> print(f"MaxCut loss: {out.get_loss_value('maxcut_loss')}")
     """
 
     def __init__(
         self,
         in_channels: int,
-        ratio: Union[int, float] = 0.5,
-        beta: float = 1.0,
-        min_score: Optional[float] = None,
-        initial_embedding: bool = True,
+        ratio: Union[float, int] = 0.5,
+        loss_coeff: float = 1.0,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
-        connect_red_op: ReduceType = "sum", 
+        connect_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
-        **score_net_kwargs
+        **score_net_kwargs,
     ):
-        
         super().__init__(
-            selector=TopkSelect(  # This will be replaced with MaxCutPoolSelect
+            selector=MaxCutSelect(
                 in_channels=in_channels,
                 ratio=ratio,
-                min_score=min_score,
                 s_inv_op=s_inv_op,
+                **score_net_kwargs,
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
-            lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(reduce_op=connect_red_op),
+            lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
         )
-        
+
         self.in_channels = in_channels
         self.ratio = ratio
-        self.beta = beta
-        self.min_score = min_score
-        self.initial_embedding = initial_embedding
-        self.score_net_kwargs = score_net_kwargs
+        self.loss_coeff = loss_coeff
 
     def forward(
         self,
         x: Tensor,
-        edge_index: Adj,
+        edge_index: Optional[Adj] = None,
         edge_weight: Optional[Tensor] = None,
-        batch: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
+        batch: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
-        r"""Forward pass.
+        r"""Forward pass of the MaxCut pooling operator.
 
         Args:
-            x (Tensor): Node feature matrix of shape [N, F].
-            edge_index (Adj): Graph connectivity.
-            edge_weight (Optional[Tensor]): Edge weights.
-            batch (Optional[Tensor]): Batch vector.
-            so (Optional[SelectOutput]): Pre-computed selection output.
-            lifting (bool): Whether to perform lifting operation.
+            x (~torch.Tensor): Node features of shape :math:`(N, F)`.
+            edge_index (~torch_geometric.typing.Adj, optional): Graph connectivity.
+                Can be edge_index tensor of shape :math:`(2, E)` or SparseTensor.
+                (default: :obj:`None`)
+            edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+                (default: :obj:`None`)
+            so (~tgp.select.SelectOutput, optional): The output of the select operator.
+                (default: :obj:`None`)
+            batch (~torch.Tensor, optional): Batch assignments of shape :math:`(N,)`.
+                (default: :obj:`None`)
+            lifting (bool, optional): If :obj:`True`, perform lift operation.
+                (default: :obj:`False`)
 
         Returns:
-            PoolingOutput: The pooling result containing pooled features,
-                connectivity, and auxiliary loss.
+            PoolingOutput: The output of the pooling operator.
         """
         if lifting:
-            # Lift operation
+            # Lift
             x_lifted = self.lift(x_pool=x, so=so)
             return PoolingOutput(x=x_lifted)
 
         # Select phase
         so = self.select(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
         
-        # Compute auxiliary MaxCut loss (will be moved to utils/losses later)
-        loss = self.compute_loss(x, edge_index, edge_weight, batch, so)
+        # Compute auxiliary loss
+        loss = self.compute_loss(so, batch)
 
         # Reduce phase
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
@@ -151,32 +143,48 @@ class MaxCutPooling(SRCPooling):
             loss=loss,
         )
 
-    def compute_loss(self, x: Tensor, edge_index: Adj, edge_weight: Optional[Tensor], 
-                     batch: Optional[Tensor], so: SelectOutput) -> dict:
-        """Compute auxiliary losses."""
-        # Extract scores from SelectOutput - this assumes scores are stored in so.scores
-        # This will be properly implemented when MaxCutPoolSelect is created
-        if hasattr(so, 'scores') and so.scores is not None:
-            scores = so.scores
-        else:
-            # Fallback: use dummy scores for now until MaxCutPoolSelect is implemented
-            import torch
-            scores = torch.randn(x.size(0), device=x.device, requires_grad=True)
+    def compute_loss(self, so: SelectOutput, batch: Optional[Tensor] = None) -> dict:
+        """Compute the auxiliary MaxCut loss.
+
+        Args:
+            so (~tgp.select.SelectOutput): The output of the select operator,
+                which should contain scores, edge_index, and edge_weight.
+            batch (~torch.Tensor, optional): Batch assignments.
+
+        Returns:
+            dict: A dictionary with the MaxCut loss term.
+        """
+        # Extract scores and connectivity from SelectOutput
+        if not hasattr(so, 'scores'):
+            raise ValueError("SelectOutput must contain 'scores' for MaxCut loss computation")
         
+        scores = so.scores
+        edge_index = getattr(so, 'edge_index', None)
+        edge_weight = getattr(so, 'edge_weight', None)
+        
+        if edge_index is None:
+            raise ValueError("SelectOutput must contain 'edge_index' for MaxCut loss computation")
+
+        # Compute MaxCut loss
         maxcut_loss_val = maxcut_loss(
             scores=scores,
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            reduction="mean"
+            reduction="mean",
         )
-        return {"maxcut_loss": self.beta * maxcut_loss_val}
+
+        return {"maxcut_loss": maxcut_loss_val * self.loss_coeff}
+
+    @property
+    def has_loss(self) -> bool:
+        """Returns True if this pooler computes auxiliary losses."""
+        return True
 
     def extra_repr_args(self) -> dict:
+        """Additional representation arguments for debugging."""
         return {
             "in_channels": self.in_channels,
             "ratio": self.ratio,
-            "beta": self.beta,
-            "min_score": self.min_score,
-            "initial_embedding": self.initial_embedding,
+            "loss_coeff": self.loss_coeff,
         } 
