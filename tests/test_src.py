@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from tgp.connect import SparseConnect
+from tgp.poolers import MinCutPooling
 from tgp.select import GraclusSelect
 from tgp.src import SRCPooling
 
@@ -33,6 +34,23 @@ def test_reducer_none(make_chain_graph):
 def test_compute_loss_none():
     pooler = SRCPooling()
     assert pooler.compute_loss() is None
+
+
+def test_preprocessing(make_chain_graph):
+    x, edge_index, edge_weight, batch = make_chain_graph
+
+    # add a trailing dimension to edge_weight to simulate a feature dimension
+    edge_weight = edge_weight.unsqueeze(-1)
+
+    pooler = MinCutPooling(
+        k=2,
+        in_channels=x.size(-1),
+    )
+    x, adj, mask = pooler.preprocessing(
+        edge_index=edge_index, edge_weight=edge_weight, x=x, batch=batch
+    )
+
+    assert adj.dim() == 3
 
 
 if __name__ == "__main__":

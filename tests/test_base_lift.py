@@ -1,5 +1,3 @@
-# tests/test_base_lift_additional.py
-
 import pytest
 import torch
 from torch_geometric.nn import DenseGCNConv, GCNConv

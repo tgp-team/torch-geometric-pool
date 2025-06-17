@@ -291,6 +291,13 @@ class SRCPooling(torch.nn.Module):
         """
         return self.compute_loss.__qualname__.split(".")[0] != "SRCPooling"
 
+    @property
+    def is_trainable(self) -> bool:
+        r"""Returns :obj:`True` if any parameter belonging to the pooler or any
+        of its registered sub-modules is trainable.
+        """
+        return any(p.requires_grad for p in self.parameters())
+
     def compute_loss(self, *args, **kwargs) -> Optional[dict]:
         """Compute loss function."""
         return None
