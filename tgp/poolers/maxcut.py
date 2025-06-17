@@ -9,7 +9,7 @@ from tgp.reduce import BaseReduce
 from tgp.select import MaxCutSelect, SelectOutput
 from tgp.src import PoolingOutput, SRCPooling
 from tgp.utils.losses import maxcut_loss
-from tgp.utils.typing import LiftType, ReduceType, SinvType
+from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 
 class MaxCutPooling(SRCPooling):
@@ -66,7 +66,7 @@ class MaxCutPooling(SRCPooling):
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
-        connect_red_op: ReduceType = "sum",
+        connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
         **score_net_kwargs,
     ):
@@ -89,7 +89,7 @@ class MaxCutPooling(SRCPooling):
     def forward(
         self,
         x: Tensor,
-        edge_index: Optional[Adj] = None,
+        adj: Optional[Adj] = None,
         edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         batch: Optional[Tensor] = None,
@@ -100,7 +100,7 @@ class MaxCutPooling(SRCPooling):
 
         Args:
             x (~torch.Tensor): Node features of shape :math:`(N, F)`.
-            edge_index (~torch_geometric.typing.Adj, optional): Graph connectivity.
+            adj (~torch_geometric.typing.Adj, optional): Graph connectivity.
                 Can be edge_index tensor of shape :math:`(2, E)` or SparseTensor.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
@@ -117,11 +117,13 @@ class MaxCutPooling(SRCPooling):
         """
         if lifting:
             # Lift
+            if so is None:
+                raise ValueError("SelectOutput (so) cannot be None for lifting")
             x_lifted = self.lift(x_pool=x, so=so)
-            return PoolingOutput(x=x_lifted)
+            return x_lifted  # type: ignore
 
         # Select phase
-        so = self.select(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
+        so = self.select(x=x, edge_index=adj, edge_weight=edge_weight, batch=batch)
         
         # Compute auxiliary loss
         loss = self.compute_loss(so, batch)
@@ -130,13 +132,15 @@ class MaxCutPooling(SRCPooling):
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
         # Connect phase  
+        # Note: adj cannot be None here because selection phase would have failed first
+        assert adj is not None  # for type checker
         edge_index_pooled, edge_weight_pooled = self.connect(
-            edge_index=edge_index, so=so, edge_weight=edge_weight
+            edge_index=adj, so=so, edge_weight=edge_weight
         )
 
         return PoolingOutput(
             x=x_pooled,
-            edge_index=edge_index_pooled,
+            edge_index=edge_index_pooled,  # type: ignore
             edge_weight=edge_weight_pooled,
             batch=batch_pooled,
             so=so,
@@ -158,7 +162,7 @@ class MaxCutPooling(SRCPooling):
         if not hasattr(so, 'scores'):
             raise ValueError("SelectOutput must contain 'scores' for MaxCut loss computation")
         
-        scores = so.scores
+        scores = so.scores  # type: ignore
         edge_index = getattr(so, 'edge_index', None)
         edge_weight = getattr(so, 'edge_weight', None)
         

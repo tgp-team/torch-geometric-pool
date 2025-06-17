@@ -826,8 +826,8 @@ def maxcut_loss(
             If :obj:`None`, all edges have weight :obj:`1.0`. (default: :obj:`None`)
         batch (~torch.Tensor, optional): Batch assignments for each node of shape :math:`(N,)`.
             If :obj:`None`, assumes single graph. (default: :obj:`None`)
-        reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"mean"`)
+        reduction (str, optional): The reduction method to apply to the loss. 
+            Can be :obj:`"mean"` or :obj:`"sum"`. (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The MaxCut loss value.

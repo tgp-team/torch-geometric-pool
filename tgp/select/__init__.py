@@ -5,7 +5,7 @@ from .edge_contraction_select import EdgeContractionSelect
 from .graclus_select import GraclusSelect
 from .kmis_select import KMISSelect, degree_scorer
 from .lapool_select import LaPoolSelect
-from .maxcut_select import MaxCutSelect
+from .maxcut_select import MaxCutSelect, MaxCutScoreNet
 from .ndp_select import NDPSelect
 from .nmf_select import NMFSelect
 from .topk_select import TopkSelect
@@ -24,6 +24,7 @@ select_classes = [
     "LaPoolSelect",
     "KMISSelect",
     "MaxCutSelect",
+    "MaxCutScoreNet",
     "NDPSelect",
     "NMFSelect",
     "TopkSelect",

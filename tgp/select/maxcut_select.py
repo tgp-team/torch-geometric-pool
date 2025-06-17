@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 from torch_geometric.nn import GCNConv, Linear
 from torch_geometric.nn.resolver import activation_resolver
+from torch_sparse import SparseTensor
 
 from tgp.select.base_select import Select, SelectOutput
 from tgp.select.topk_select import TopkSelect
@@ -37,6 +38,7 @@ class MaxCutScoreNet(torch.nn.Module):
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",
         delta: float = 2.0,
+        **kwargs,  # Accept and ignore extra kwargs for compatibility
     ):
         super().__init__()
 
@@ -67,6 +69,14 @@ class MaxCutScoreNet(torch.nn.Module):
 
         self.final_layer = Linear(in_units, 1)
         self.delta = delta
+
+    def reset_parameters(self):
+        """Reset parameters of all layers."""
+        for conv in self.mp_convs:
+            conv.reset_parameters()
+        for layer in self.mlp:
+            layer.reset_parameters()
+        self.final_layer.reset_parameters()
 
     def forward(
         self,
@@ -176,7 +186,7 @@ class MaxCutSelect(Select):
     def forward(
         self,
         x: Tensor,
-        edge_index: Tensor,
+        edge_index: Union[Tensor, SparseTensor],
         edge_weight: Optional[Tensor] = None,
         batch: Optional[Tensor] = None,
         **kwargs,
@@ -194,6 +204,13 @@ class MaxCutSelect(Select):
         Returns:
             SelectOutput: Selection output containing node indices, weights, and scores.
         """
+        # Convert SparseTensor to edge_index format if needed
+        if isinstance(edge_index, SparseTensor):
+            row, col, edge_weight = edge_index.coo()
+            edge_index = torch.stack([row, col], dim=0)
+        elif edge_index is None:
+            raise ValueError("edge_index cannot be None for MaxCutSelect")
+        
         # Compute MaxCut scores
         scores = self.score_net(x, edge_index, edge_weight)  # Shape: (N, 1)
 
