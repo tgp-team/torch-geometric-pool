@@ -1,11 +1,12 @@
-import pytest
 import importlib
 import sys
-import tgp.imports as imports_mod
+
+import pytest
 import torch
 from torch_geometric.utils import add_self_loops
 from torch_sparse import SparseTensor
 
+import tgp.imports as imports_mod
 from tgp.poolers import get_pooler
 from tgp.select.base_select import SelectOutput
 from tgp.select.kmis_select import (
@@ -379,8 +380,8 @@ def test_kmis_select_custom_scorer(simple_edge_index):
     expected_scores = custom_scorer(x, edge_index, None, None).view(-1)
     assert torch.equal(out.weight, expected_scores)
     assert isinstance(out, SelectOutput)
-    
-    
+
+
 def test_skip_torch_scatter_import(monkeypatch):
     # 1) Ensure the flag is False before kmis_select ever runs its top‐level import:
     monkeypatch.setattr(imports_mod, "HAS_TORCH_SCATTER", False)
@@ -397,6 +398,7 @@ def test_skip_torch_scatter_import(monkeypatch):
     assert not hasattr(kmis_mod, "scatter_add")
     assert not hasattr(kmis_mod, "scatter_max")
     assert not hasattr(kmis_mod, "scatter_min")
-    
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

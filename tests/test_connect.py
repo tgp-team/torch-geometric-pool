@@ -7,7 +7,6 @@ from torch_sparse import SparseTensor
 
 from tgp.connect import (
     Connect,
-    DenseConnect,
     DenseConnectSPT,
     KronConnect,
     SparseConnect,
@@ -42,7 +41,7 @@ def test_sparse_connect_raises_runtime_error():
         )
 
     # Check if the same error is raised for SparseConnect when s is dense and no node_index or cluster_index is provided
-    s = torch.randn((2, 1), dtype=torch.float) 
+    s = torch.randn((2, 1), dtype=torch.float)
     so = SelectOutput(s=s)
     connector = SparseConnect()
     with pytest.raises(RuntimeError):
@@ -61,7 +60,7 @@ def test_denseconn_spt():
     edge_index = torch.tensor([[0, 1, 1, 0], [1, 0, 1, 2]], dtype=torch.long)
     edge_weight = torch.tensor([1.0, 1.0, 1.5, 0.7], dtype=torch.float)
     adj_pool, _ = connector(edge_index=edge_index, edge_weight=edge_weight, so=so)
-    
+
     # check if the diagonal is zero
     assert edge_index.size(0) == adj_pool.size(0)
 
@@ -71,7 +70,7 @@ def test_denseconn_spt_invalid_edge_index_type():
     should raise a ValueError at the `else:` branch (line 76).
     """
     connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
-    s = torch.eye(2).unsqueeze(0)  
+    s = torch.eye(2).unsqueeze(0)
     so = SelectOutput(s=s)
     invalid_edge_index = [[0, 1], [1, 0]]
     with pytest.raises(ValueError, match="Edge index must be of type"):
@@ -127,7 +126,7 @@ def test_kron_conn_without_ndp():
     assert x_pool.shape[-2] == 4
     assert batch_pool.size(0) == x_pool.size(-2)
     assert adj_pool is not None
-    
+
     # Test also with edge index
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_weight, batch=batch)
     data.num_nodes = N
@@ -142,7 +141,6 @@ def test_kron_conn_without_ndp():
     assert x_pool.shape[-2] == 4
     assert batch_pool.size(0) == x_pool.size(-2)
     assert adj_pool is not None
-    
 
 
 def test_kronconnect_handles_singular_L():
@@ -157,7 +155,7 @@ def test_kronconnect_handles_singular_L():
     L = csr_matrix(data)
     node_index = torch.tensor([0, 1], dtype=torch.long)
     num_nodes = 3
-    cluster_index = torch.tensor([0, 1], dtype=torch.long) 
+    cluster_index = torch.tensor([0, 1], dtype=torch.long)
     so = SelectOutput(
         s=None,
         cluster_index=cluster_index,

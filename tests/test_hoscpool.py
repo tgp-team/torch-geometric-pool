@@ -19,6 +19,7 @@ def small_dense_graph():
     adj = adj_mat.unsqueeze(0)
     return x, adj
 
+
 @pytest.mark.parametrize("alpha", [-0.5, 1.5])
 @pytest.mark.parametrize("mu", [0.0, 0.1])
 def test_hosc_different_params(small_dense_graph, alpha, mu):
@@ -42,6 +43,7 @@ def test_hosc_ortho_true(small_dense_graph):
     out = pooler(x=x, adj=adj, so=None, mask=None, lifting=False)
     loss_dict = out.loss
     assert "ortho_loss" in loss_dict
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

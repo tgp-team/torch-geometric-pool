@@ -1,5 +1,7 @@
 import pytest
+
 from tgp.utils.signature import foo_signature
+
 
 def test_foo_signature_with_no_args():
     # Define a function that takes no parameters
@@ -12,6 +14,7 @@ def test_foo_signature_with_no_args():
     assert sig.has_varargs is False
     assert sig.has_kwargs is False
 
+
 def test_foo_signature_first_arg_not_self_or_cls():
     # Define a function whose first parameter is "x" (not "self" or "cls")
     def foo(x, y, *args, **kwargs):
@@ -23,6 +26,7 @@ def test_foo_signature_first_arg_not_self_or_cls():
     assert sig.args == ["x", "y"]
     assert sig.has_varargs is True
     assert sig.has_kwargs is True
-    
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
