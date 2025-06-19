@@ -7,7 +7,7 @@ from torch import Tensor
 from tgp import eps
 from tgp.utils import rank3_diag, rank3_trace
 
-ReductionType = Literal["mean", "sum", "none"]
+ReductionType = Literal["mean", "sum"]
 
 
 def _reduce_loss(loss: Tensor, reduction: ReductionType) -> Tensor:
@@ -21,7 +21,7 @@ def _reduce_loss(loss: Tensor, reduction: ReductionType) -> Tensor:
 
 
 def mincut_loss(
-    adj: Tensor, S: Tensor, adj_pooled: Tensor, reduction: ReductionType = "none"
+    adj: Tensor, S: Tensor, adj_pooled: Tensor, reduction: ReductionType = "mean"
 ) -> Tensor:
     r"""Auxiliary mincut loss used by :class:`~tgp.poolers.MinCutPooling` operator
     from the paper `"Spectral Clustering in Graph Neural Networks for Graph Pooling"
@@ -50,7 +50,7 @@ def mincut_loss(
         adj_pooled (~torch.Tensor): The pooled adjacency matrix :math:`\mathbf{S}^{\top}
             \mathbf{A}\mathbf{S}` of shape :math:`(B, K, K)`.
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The mincut loss.
@@ -63,7 +63,7 @@ def mincut_loss(
     return _reduce_loss(cut_loss, reduction)
 
 
-def orthogonality_loss(S: Tensor, reduction: ReductionType = "none") -> Tensor:
+def orthogonality_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
     r"""Auxiliary orthogonality loss used by :class:`~tgp.poolers.MinCutPooling`
     operator from the paper `"Spectral Clustering in Graph Neural Networks for Graph
     Pooling" <https://arxiv.org/abs/1907.00481>`_ (Bianchi et al., ICML 2020).
@@ -86,7 +86,7 @@ def orthogonality_loss(S: Tensor, reduction: ReductionType = "none") -> Tensor:
             :math:`(B, N, K)`, where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The orthogonality loss.
@@ -100,7 +100,7 @@ def orthogonality_loss(S: Tensor, reduction: ReductionType = "none") -> Tensor:
 
 
 def hosc_orthogonality_loss(
-    S: Tensor, mask: Optional[Tensor] = None, reduction: ReductionType = "none"
+    S: Tensor, mask: Optional[Tensor] = None, reduction: ReductionType = "mean"
 ) -> Tensor:
     r"""Auxiliary orthogonality loss used by :class:`~tgp.poolers.HOSCPooling`
     operator from the paper `"Higher-order Clustering and Pooling for Graph Neural Networks"
@@ -125,7 +125,7 @@ def hosc_orthogonality_loss(
             :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
             the valid nodes for each graph. (default: :obj:`None`)
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The orthogonality loss.
@@ -177,7 +177,7 @@ def link_pred_loss(S: Tensor, adj: Tensor, normalize_loss: bool = True) -> Tenso
     return link_loss
 
 
-def entropy_loss(S: Tensor, reduction: ReductionType = "none") -> Tensor:
+def entropy_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
     r"""Auxiliary entropy regularization loss used by :class:`~tgp.poolers.DiffPool`
     operator from the paper `"Hierarchical Graph Representation Learning with
     Differentiable Pooling" <https://arxiv.org/abs/1806.08804>`_ (Ying et al., NeurIPS 2018).
@@ -198,7 +198,7 @@ def entropy_loss(S: Tensor, reduction: ReductionType = "none") -> Tensor:
             :math:`(B, N, K)` where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The entropy regularization loss.
@@ -208,7 +208,7 @@ def entropy_loss(S: Tensor, reduction: ReductionType = "none") -> Tensor:
     return _reduce_loss(entropy, reduction)
 
 
-def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "none") -> Tensor:
+def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "mean") -> Tensor:
     r"""The total variation regularization loss used by
     :class:`~tgp.poolers.AsymCheegerCutPooling` operator from the paper
     `"Total Variation Graph Neural Networks" <https://arxiv.org/abs/2211.06218>`_
@@ -239,7 +239,7 @@ def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "none") -> Te
         adj (~torch.Tensor): The adjacency matrix of shape
             :math:`(B, N, N)`.
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The total variation regularization loss.
@@ -251,7 +251,7 @@ def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "none") -> Te
     return _reduce_loss(loss, reduction)
 
 
-def asym_norm_loss(S: Tensor, k: int, reduction: ReductionType = "none") -> Tensor:
+def asym_norm_loss(S: Tensor, k: int, reduction: ReductionType = "mean") -> Tensor:
     r"""Auxiliary asymmetrical norm term used by :class:`~tgp.poolers.AsymCheegerCutPooling`
     operator from the paper `"Total Variation Graph Neural Networks"
     <https://arxiv.org/abs/2211.06218>`_ (Hansen & Bianchi, ICML 2023).
@@ -290,7 +290,7 @@ def asym_norm_loss(S: Tensor, k: int, reduction: ReductionType = "none") -> Tens
             internally to set :math:`\rho = K - 1` if no other
             value of :math:`\rho` is explicitly chosen.
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The asymmetrical norm regularization loss.
@@ -315,7 +315,7 @@ def just_balance_loss(
     normalize_loss: bool = True,
     num_nodes: int = None,
     num_clusters: int = None,
-    reduction: ReductionType = "none",
+    reduction: ReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary balance regularization loss used by
     :class:`~tgp.poolers.JustBalancePooling` operator from the paper
@@ -347,7 +347,7 @@ def just_balance_loss(
         num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The balance regularization loss.
@@ -375,7 +375,7 @@ def spectral_loss(
     adj_pooled: Tensor,
     mask: Optional[Tensor] = None,
     num_clusters: int = None,
-    reduction: ReductionType = "none",
+    reduction: ReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary spectral regularization loss used by
     :class:`~tgp.poolers.DMoNPooling` operator from the paper
@@ -435,7 +435,7 @@ def cluster_loss(
     S: Tensor,
     mask: Optional[Tensor] = None,
     num_clusters: int = None,
-    reduction: ReductionType = "none",
+    reduction: ReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary cluster regularization loss used by
     :class:`~tgp.poolers.DMoNPooling` operator from the paper
@@ -464,7 +464,7 @@ def cluster_loss(
         num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The cluster regularization loss.

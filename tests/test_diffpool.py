@@ -82,7 +82,7 @@ def test_diffpool_link_entropy_loss(
     assert torch.allclose(actual_link, expected_link, atol=1e-6)
 
     # Compute expected entropy_loss
-    expected_ent = entropy_loss(S, reduction="mean") * ent_coeff
+    expected_ent = entropy_loss(S) * ent_coeff
     actual_ent = loss_dict.get("entropy_loss", None)
     assert isinstance(actual_ent, Tensor)
     assert torch.allclose(actual_ent, expected_ent, atol=1e-6)

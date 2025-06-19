@@ -180,7 +180,7 @@ class DiffPool(DenseSRCPooling):
             the auxiliary loss.
         """
         link_loss = link_pred_loss(S, adj, normalize_loss=self.normalize_loss)
-        ent_loss = entropy_loss(S, reduction="mean")
+        ent_loss = entropy_loss(S)
         return {
             "link_loss": link_loss * self.link_loss_coeff,
             "entropy_loss": ent_loss * self.ent_loss_coeff,

@@ -16,7 +16,7 @@ def small_graph_dense():
     for i, j in edge_list:
         adj_mat[i, j] = 1.0
         adj_mat[j, i] = 1.0
-    adj_mat += torch.eye(N)  
+    adj_mat += torch.eye(N)
     adj = adj_mat.unsqueeze(0)  # Shape: (1, N, N)
     return x, adj
 
@@ -45,13 +45,14 @@ def test_dmon_base(small_graph_dense):
     )
 
     mask = torch.ones((B, N), dtype=torch.bool)  # No mask, all nodes valid
-    exp_spec = spectral_loss(adj, S, adj_pooled, mask=mask, num_clusters=k, reduction="mean") * 2.0
-    exp_cluster = cluster_loss(S, mask=mask, num_clusters=k, reduction="mean") * 1.5
-    exp_ortho = orthogonality_loss(S, reduction="mean") * 0.5
+    exp_spec = spectral_loss(adj, S, adj_pooled, mask=mask, num_clusters=k) * 2.0
+    exp_cluster = cluster_loss(S, mask=mask, num_clusters=k) * 1.5
+    exp_ortho = orthogonality_loss(S) * 0.5
 
     assert torch.allclose(loss_dict["spectral_loss"], exp_spec, atol=1e-6)
     assert torch.allclose(loss_dict["cluster_loss"], exp_cluster, atol=1e-6)
     assert torch.allclose(loss_dict["ortho_loss"], exp_ortho, atol=1e-6)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

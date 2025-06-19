@@ -194,12 +194,12 @@ class HOSCPooling(DenseSRCPooling):
         cut_loss = ho_cut_loss = 0
         # 1st order MinCUT loss
         if self.alpha < 1:
-            cut_loss = mincut_loss(adj, S, adj_pool, reduction="mean")
+            cut_loss = mincut_loss(adj, S, adj_pool)
             cut_loss = 1 / self.k * cut_loss
 
         # Higher order cut
         if self.alpha > 0:
-            ho_cut_loss = mincut_loss(motif_adj, S, motif_adj_pool, reduction="mean")
+            ho_cut_loss = mincut_loss(motif_adj, S, motif_adj_pool)
             ho_cut_loss = 1 / self.k * ho_cut_loss
 
         # Combine ho and fo mincut loss.
@@ -210,10 +210,10 @@ class HOSCPooling(DenseSRCPooling):
             ortho_loss = torch.tensor(0)
         elif self.hosc_ortho:
             # Hosc orthogonality regularization
-            ortho_loss = hosc_orthogonality_loss(S, mask, reduction="mean")
+            ortho_loss = hosc_orthogonality_loss(S, mask)
         else:
             # Standard orthogonality regularization of MinCutPool
-            ortho_loss = orthogonality_loss(S, reduction="mean")
+            ortho_loss = orthogonality_loss(S)
 
         return {"hosc_loss": hosc_loss, "ortho_loss": self.mu * ortho_loss}
 
