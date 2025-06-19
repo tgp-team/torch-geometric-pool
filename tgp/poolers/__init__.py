@@ -33,6 +33,7 @@ pooler_classes = [
     "PANPooling",
     "SAGPooling",
     "TopkPooling",
+    'BNPool'
 ]
 
 pooler_map = {
