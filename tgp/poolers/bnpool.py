@@ -48,22 +48,30 @@ class DPSelect(DenseSelect):
     the alpha and beta parameters of the stick fractions' variational distribution; then, the final assignment matrix is obtained
     by simulating the stick breaking process.
 
-    Attributes:
-        is_dense (bool): Indicates whether the selector operates in dense mode. Always True for this class.
-        k (int): The maximum number of clusters supported in the selection process.
+    Args:
+        in_channels: Input channels, defined as either an integer or a list 
+            of integers, which represent the number of channels.
+        k: The maximum number of clusters.
+        act: Name of the activation function to be used. Defaults to None if
+            no activation is specified.
+        dropout: Dropout probability applied during training for regularization.
+            Takes values between 0.0 and 1.0. Defaults to 0.0.
+        s_inv_op: An operation type to handle invariant operations for specific 
+            models. Accepts values of the SinvType enumeration. Defaults to 
+            "transpose".
     """
     is_dense = True
 
     def __init__(self,
                  in_channels: Union[int, List[int]],
-                 max_k: int,
+                 k: int,
                  act: str = None,
                  dropout: float = 0.0,
                  s_inv_op: SinvType = "transpose",
-                ):
+                 ):
         # 2*max_key needs to compute both alpahs and betas of the posterior
-        super(DPSelect, self).__init__(in_channels=in_channels, k=2*(max_k-1), act=act, dropout=dropout, s_inv_op=s_inv_op)
-        self.k = max_k
+        super(DPSelect, self).__init__(in_channels=in_channels, k=2*(k - 1), act=act, dropout=dropout, s_inv_op=s_inv_op)
+        self.k = k
 
     @staticmethod
     def _compute_pi_given_sticks(stick_fractions):
@@ -123,17 +131,42 @@ class DPSelect(DenseSelect):
         return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask, q_z=q_z)
 
 class BNPool(DenseSRCPooling):
-    """
-    Represents BN-Pool, a Bayesian non-parametric pooling method for graph-structured data.
+    r"""
+    The BN-Pool operator from the paper `"BN-Pool: a Bayesian Nonparametric Approach for Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
+    (Castellana D., and Bianchi F.M., preprint, 2025).
 
-    Attributes:
-        max_k (int): Maximum number of clusters.
-        eta (float): Coefficient for the KL divergence component in the loss.
-        K (Tensor): The cluster connectivity matrix.
-    """
+    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.DPSelect` to perform variational inference of the stick-breaking process.
+    + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
+    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
+    + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
+
+    This layer provides three auxiliary losses:
+
+    + the reconstruction loss, i.e. the binary cross-entropy loss between the true and the reconstructed adjacency matrix,
+    + the KL loss, i.e. the KL divergence between the prior and the posterior variational approximation of the assignments,
+    + the K prior loss, i.e. the KL divergence between the prior and the cluster connectivity matrix.
+
+    Args:
+        in_channels (Union[int, List[int]]): The number of input channels or a list of input channels.
+        k (int): The maximum number of clusters to be used in the pooling mechanism.
+        alpha_DP (float, optional): Prior concentration parameter of the DP. Default is 1.0.
+        K_var (float, optional): Variance of the cluster connectivity prior. Default is 1.0.
+        K_mu (float, optional): Mean of the cluster connectivity prior. Default is 10.0.
+        K_init (float, optional): Initial value for the cluster connectivity prior. Default is 1.0.
+        eta (float, optional): Coefficient for the KL loss term. Default is 1.0.
+        rescale_loss (bool, optional): Flag indicating whether to rescale the loss during training. Default is True.
+        balance_links (bool, optional): Flag to enable balancing of incoming/outgoing links. Default is True.
+        train_K (bool, optional): Specifies whether the cluster connectivity matrix is learnable. Default is True.
+        act (str, optional): Activation function for the selector. Default is None.
+        dropout (float, optional): Dropout rate to be used in the selector. Default is 0.0.
+        adj_transpose (bool, optional): Flag whether to transpose adjacency matrices. Default is True.
+        lift (LiftType, optional): Specifies the operation used in the lifting step. Default is "precomputed".
+        s_inv_op (SinvType, optional): Specifies the sparse inverse operation in the selector.
+            Default is "transpose".
+        """
     def __init__(self,
                  in_channels: Union[int, List[int]],
-                 max_k: int,
+                 k: int,
                  # hyperparameters of the method
                  alpha_DP=1.0,
                  K_var=1.0,
@@ -149,30 +182,20 @@ class BNPool(DenseSRCPooling):
                  adj_transpose: bool = True,
                  lift: LiftType = "precomputed",
                  s_inv_op: SinvType = "transpose"):
-        """
-        Initializes the BNPool instance with the specified parameters, involving hyperparameters for both
-        the method and the selector. It also sets up prior distributions and initializes the cluster-cluster
-        probability matrix.
 
-        Args:
-            in_channels (Union[int, List[int]]): The number of input channels or a list of input channels.
-            max_k (int): The maximum number of clusters to be used in the pooling mechanism.
-            alpha_DP (float, optional): Prior concentration parameter of the DP. Default is 1.0.
-            K_var (float, optional): Variance of the cluster connectivity prior. Default is 1.0. 
-            K_mu (float, optional): Mean of the cluster connectivity prior. Default is 10.0.
-            K_init (float, optional): Initial value for the cluster connectivity prior. Default is 1.0.
-            eta (float, optional): Coefficient for the KL loss term. Default is 1.0.
-            rescale_loss (bool, optional): Flag indicating whether to rescale the loss during training. Default is True.
-            balance_links (bool, optional): Flag to enable balancing of incoming/outgoing links. Default is True.
-            train_K (bool, optional): Specifies whether the cluster connectivity matrix is learnable. Default is True.
-            act (str, optional): Activation function for the selector. Default is None.
-            dropout (float, optional): Dropout rate to be used in the selector. Default is 0.0.
-            adj_transpose (bool, optional): Flag whether to transpose adjacency matrices. Default is True.
-            lift (LiftType, optional): Specifies the operation used in the lifting step. Default is "precomputed".
-            s_inv_op (SinvType, optional): Specifies the sparse inverse operation in the selector.
-                Default is "transpose".
-        """
-        super(BNPool, self).__init__(selector=DPSelect(in_channels, max_k, act, dropout, s_inv_op),
+        if alpha_DP <=0:
+            raise ValueError("alpha_DP must be positive")
+
+        if K_var <=0:
+            raise ValueError("K_var must be positive")
+
+        if eta <=0:
+            raise ValueError("eta must be positive")
+
+        if k <=0:
+            raise ValueError("max_k must be positive")
+
+        super(BNPool, self).__init__(selector=DPSelect(in_channels, k, act, dropout, s_inv_op),
                                      reducer=BaseReduce(),
                                      lifter=BaseLift(matrix_op=lift),
                                      connector=DenseConnect(
@@ -180,7 +203,8 @@ class BNPool(DenseSRCPooling):
                                      ),
                                      adj_transpose=adj_transpose
                                      )
-        self.max_k = max_k
+
+        self.k = k
         self._K_init = K_init
         self._alpha_DP = alpha_DP
         self._K_var = K_var
@@ -191,24 +215,24 @@ class BNPool(DenseSRCPooling):
         self.eta = eta  # coefficient for the kl_loss
 
         # prior for the Stick Breaking Process
-        self.register_buffer('alpha_prior', torch.ones(self.max_k - 1))
-        self.register_buffer('beta_prior', torch.ones(self.max_k - 1) * alpha_DP)
+        self.register_buffer('alpha_prior', torch.ones(self.k - 1))
+        self.register_buffer('beta_prior', torch.ones(self.k - 1) * alpha_DP)
 
         # prior for the cluster-cluster prob. matrix
         self.register_buffer('K_var', torch.tensor(K_var))
-        self.register_buffer('K_mu', K_mu * torch.eye(self.max_k, self.max_k) -
-                             K_mu * (1 - torch.eye(self.max_k, self.max_k)))
+        self.register_buffer('K_mu', K_mu * torch.eye(self.k, self.k) -
+                             K_mu * (1 - torch.eye(self.k, self.k)))
 
         # cluster-cluster prob matrix
-        self.K = torch.nn.Parameter(K_init * torch.eye(self.max_k, self.max_k) -
-                                    K_init * (1 - torch.eye(self.max_k, self.max_k)), requires_grad=train_K)
+        self.K = torch.nn.Parameter(K_init * torch.eye(self.k, self.k) -
+                                    K_init * (1 - torch.eye(self.k, self.k)), requires_grad=train_K)
 
         self._pos_weight_cache = None
 
     def reset_parameters(self):
         super().reset_parameters()
-        self.K.fill_(self._K_init * torch.eye(self.max_k, self.max_k) -
-                     self._K_init * (1 - torch.eye(self.max_k, self.max_k)))
+        self.K.data = (self._K_init * torch.eye(self.k, self.k, device=self.K.device) -
+                       self._K_init * (1 - torch.eye(self.k, self.k, device=self.K.device)))
 
     def _get_bce_weight(self, adj, mask=None):
         """

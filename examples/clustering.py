@@ -37,10 +37,6 @@ for POOLER in poolers:
         "act": "ReLU",
     }
 
-    if POOLER == "bnpool":
-        PARAMS["max_k"] = 20
-        PARAMS.pop('k')
-
     ### Model definition
     class Net(torch.nn.Module):
         def __init__(
