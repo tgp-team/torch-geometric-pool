@@ -10,8 +10,8 @@ from tgp.poolers import get_pooler, pooler_map
 
 seed_everything(8)  # Reproducibility
 
-for POOLER, value in pooler_map.items():  # Use all poolers
-    # for POOLER in ['mincut']:                 # Test a specific pooler
+#for POOLER, value in pooler_map.items():  # Use all poolers
+for POOLER in ['bnpool']:                 # Test a specific pooler
 
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
@@ -44,6 +44,10 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "scorer": "degree",
             "adj_transpose": True,
         }
+
+        if POOLER == "bnpool":
+            PARAMS.pop('k')
+            PARAMS["max_k"] = 2 * dataset.num_classes
 
         ### Model definition
         class Net(torch.nn.Module):

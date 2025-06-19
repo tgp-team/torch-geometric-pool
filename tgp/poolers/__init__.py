@@ -14,6 +14,7 @@ from .nmf import NMFPooling
 from .pan import PANPooling
 from .sag import SAGPooling
 from .topk import TopkPooling
+from .bnpool import BNPool
 
 pooler_classes = [
     "ASAPooling",
@@ -51,6 +52,7 @@ pooler_map = {
     "pan": PANPooling,
     "sag": SAGPooling,
     "topk": TopkPooling,
+    'bnpool': BNPool
 }
 
 
