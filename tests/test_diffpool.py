@@ -181,9 +181,14 @@ def test_diffpool_expressive_cuda_grads(small_graph_dense):
     assert so.is_expressive is True, "DiffPool should be expressive"
 
     # check that so.cuda() fails
-    so.to(device=x.device)
-    with pytest.raises(AssertionError):
-        so.to("cpu").cuda()
+    if not torch.cuda.is_available():
+        so.to(device=x.device)
+        with pytest.raises(AssertionError):
+            so.to("cpu").cuda()
+
+    else:
+        so.to(device="cuda")
+        assert so.s.device.type == "cuda"
 
     # check if so requires_grad
     assert so.requires_grad_(True).is_expressive is True, (
