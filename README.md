@@ -4,6 +4,7 @@
     <h3>The library for pooling in Graph Neural Networks</h3>
     <hr>
     <p>
+    <a href='https://github.com/FilippoMB/torch-geometric-pool/actions/workflows/ci.yaml'><img alt="CI status" src="https://github.com/FilippoMB/torch-geometric-pool/actions/workflows/ci.yaml/badge.svg"></a>
     <a href='https://pypi.org/project/torch-geometric-pool/'><img alt="PyPI" src="https://img.shields.io/pypi/v/torch-geometric-pool"></a>
     <img alt="PyPI - Python Version" src="https://img.shields.io/badge/python-%3E%3D3.9-blue">
     </p>

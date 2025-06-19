@@ -36,11 +36,12 @@ def test_dense_global_reduce_all_ops(reduce_op):
 
     expected = torch.stack([expected0, expected1], dim=0)
     assert torch.equal(out, expected)
-    
+
     # test also invalid reduce_op
     with pytest.raises(ValueError):
         _ = dense_global_reduce(x, reduce_op="invalid", node_dim=-2)
-        
+
+
 def test_global_reduce():
     # Create a dense batch of shape [N=4, F=2]
     x = torch.tensor(
@@ -50,6 +51,7 @@ def test_global_reduce():
 
     out = global_reduce(x, reduce_op="sum", batch=batch, node_dim=-2)
     assert out.shape == (2, 2)  # [B, F]
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

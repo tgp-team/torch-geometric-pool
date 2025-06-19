@@ -5,7 +5,6 @@ from tgp.imports import SparseTensor
 from tgp.select.base_select import Select, SelectOutput, cluster_to_s
 
 
-
 def test_cluster_to_s_as_edge_index():
     num_nodes = 5
     cluster_index = torch.tensor([0, 1, 0, 2, 1])
@@ -57,7 +56,6 @@ def test_selectoutput_from_cluster_index_and_default_s_inv():
     assert out.is_expressive
 
 
-
 def test_selectoutput_set_s_inv_inverse_and_invalid():
     # Use a dense s for which pseudo-inverse is known
     s = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
@@ -105,7 +103,7 @@ def test_selectoutput_repr_clone_apply_and_device_ops():
     out_det_inplace = out.clone()
     out_det_inplace.detach_()
     assert isinstance(out_det_inplace, SelectOutput)
-    
+
     out.s_inv = None
     out.cpu()
     assert out_cpu.s.device.type == "cpu"

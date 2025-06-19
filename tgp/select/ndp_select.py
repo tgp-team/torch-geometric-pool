@@ -151,7 +151,7 @@ class NDPSelect(Select):
         Returns:
             ~numpy.ndarray: A value in :math:`[0,1]` representing the normalized size of the cut.
         """
-        cut = z.T.matmul(L.matmul(z)) # z.T @ L @ z
+        cut = z.T.matmul(L.matmul(z))  # z.T @ L @ z
         cut /= 2 * total_volume
         return cut
 
