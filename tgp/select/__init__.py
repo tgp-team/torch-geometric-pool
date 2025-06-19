@@ -24,7 +24,6 @@ select_classes = [
     "LaPoolSelect",
     "KMISSelect",
     "MaxCutSelect",
-    "MaxCutScoreNet",
     "NDPSelect",
     "NMFSelect",
     "TopkSelect",
