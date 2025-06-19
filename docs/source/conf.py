@@ -105,6 +105,7 @@ nb_execution_mode = 'auto' # off
 myst_enable_extensions = ['dollarmath']
 myst_dmath_allow_space = True
 myst_dmath_double_inline = True
+nb_execution_timeout = -1
 # nb_code_prompt_hide = 'Hide code cell outputs'
 
 # -- Theme options -----------------------------------------------------------
