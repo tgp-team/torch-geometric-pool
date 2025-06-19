@@ -284,19 +284,7 @@ class BNPool(DenseSRCPooling):
         **kwargs,
     ) -> PoolingOutput:
         """
-        Computes the forward pass for the pooling layer. Depending on the `lifting`
-        parameter, the method either performs lifting or pooling operations on the
-        input data.
-
-        The forward operation involves several steps:
-        1. If `lifting` is True, applies a lifting operation that transforms the
-           pooled features.
-        2. If `lifting` is False, performs the pooling process:
-           - Selection of representative features using a selection module.
-           - Reduction of input features.
-           - Construction of a coarsened adjacency matrix.
-           - Computation of the loss associated with the pooling process.
-           - Normalization of the coarsened adjacency matrix for further propagation.
+        Forward pass.
 
         Args:
             x (Tensor): The input feature matrix.
@@ -414,9 +402,6 @@ class BNPool(DenseSRCPooling):
         return S @ self.K @ S.transpose(-1, -2)
 
     def dense_rec_loss(self, rec_adj, adj):
-        """
-        BCE loss between the reconstructed adjacency matrix and the true one.
-        """
         pos_weight = None
         if self._balance_links:
             pos_weight = self._get_bce_weight(adj)
