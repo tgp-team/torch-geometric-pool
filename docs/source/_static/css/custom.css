@@ -24,6 +24,11 @@ html.light {
     --mystnb-traceback-border-color: var(--sy-c-background);;
 }
 
+#torch-geometric-pool > h1 {
+    color: var(--accent-9);
+    font-size: 4rem;
+}
+
 /* Logos */
 
 img.inline-logo {
@@ -36,8 +41,17 @@ img.inline-logo.with-text {
     margin-right: .2em;
 }
 
+.inline-logo-text {
+    font-weight: 500;
+}
+
+.tgp-inline-logo-text {
+    color: var(--accent-11);
+}
+
 /* Gradients */
 
+/*
 .gradient-text,
 #torch-geometric-pool > h1 {
     background: transparent linear-gradient(90deg, #ff4f00 0%, #c244b9 32%, var(--accent-9) 52%, #1f87e6 100%) 0% 0% no-repeat padding-box;
@@ -46,10 +60,11 @@ img.inline-logo.with-text {
     -webkit-text-fill-color: transparent;
 }
 
-/* .container.buttons a:first-child{
+.container.buttons a:first-child{
     background: linear-gradient(120deg, #ff4f00 0%, var(--accent-9) 40%, var(--accent-9) 70%, #1f87e6 100%);
     border-color: var(--sy-c-border);
-} */
+}
+*/
 
 /* GitHub contributions */
 
@@ -86,4 +101,8 @@ img.inline-logo.with-text {
     border-radius: 1rem 0rem 0rem 1rem;
     font-size: 0.8rem;
     font-weight: 700;
+}
+
+[data-ea-publisher] {
+    display: none;
 }
