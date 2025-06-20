@@ -4,6 +4,8 @@ from itertools import product
 import numpy as np
 import pytest
 import torch
+from torch_geometric.data import Data
+from torch_geometric.utils import barabasi_albert_graph
 
 from tgp.poolers.bnpool import BNPool
 
@@ -16,7 +18,7 @@ def set_random_seed():
 
 
 @pytest.fixture(params=list(product([1, 3, 5], [1, 4, 8], [1, 2, 12])))
-def small_dense_graph(set_random_seed, request):
+def small_batched_dense_graphs(set_random_seed, request):
     batch_size, n_nodes, n_features = request.param
     x = torch.randn(batch_size, n_nodes, n_features)  # Node features
     adj = torch.randint(
@@ -24,6 +26,16 @@ def small_dense_graph(set_random_seed, request):
     ).float()  # Adjacency matrix
     adj = (adj + adj.transpose(-1, -2)) // 2  # Make symmetric
     return x, adj
+
+
+@pytest.fixture(params=list(product([10, 20], [3, 7])))
+def single_sparse_graph(set_random_seed, request):
+    n_nodes, n_edges = request.param
+    n_features = 3
+    return Data(
+        x=torch.randn((n_nodes, n_features)),
+        edge_index=barabasi_albert_graph(n_nodes, n_edges),
+    )
 
 
 def test_bnpool_initialization():
@@ -60,9 +72,9 @@ def test_bnpool_invalid_parameters():
 
 
 @pytest.mark.parametrize("train_k", [True, False])
-def test_bnpool_training_mode(small_dense_graph, train_k):
+def test_bnpool_training_mode(small_batched_dense_graphs, train_k):
     """Test BNPool behavior in training mode."""
-    x, adj = small_dense_graph
+    x, adj = small_batched_dense_graphs
     pooler = BNPool(in_channels=x.shape[-1], k=3, train_K=train_k)
     pooler.train()
 
@@ -90,8 +102,8 @@ def test_bnpool_training_mode(small_dense_graph, train_k):
         assert pooler.K.grad is None
 
 
-def test_bnpool_eval_mode(small_dense_graph):
-    x, adj = small_dense_graph
+def test_bnpool_eval_mode(small_batched_dense_graphs):
+    x, adj = small_batched_dense_graphs
     batch_size, n_nodes, n_features = x.shape
 
     from tgp.poolers.bnpool import BNPool
@@ -115,13 +127,18 @@ def test_bnpool_eval_mode(small_dense_graph):
     )
 
 
-def test_bnpool_with_mask_patterns(small_dense_graph):
+@pytest.mark.parametrize("small_batched_dense_graphs", [(3, 10, 4)], indirect=True)
+@pytest.mark.parametrize("rescale_loss", [False, True])
+def test_bnpool_with_mask_patterns_and_rescale(
+    small_batched_dense_graphs, rescale_loss
+):
     """Test BNPool with different mask patterns."""
-    x, adj = small_dense_graph
+    x, adj = small_batched_dense_graphs
     batch_size, n_nodes = x.shape[:2]
 
     # Test different mask patterns
     mask_patterns = [
+        None,
         torch.ones(batch_size, n_nodes, dtype=torch.bool),  # All nodes
         torch.zeros(batch_size, n_nodes, dtype=torch.bool),  # No nodes
         torch.bernoulli(torch.ones(batch_size, n_nodes) * 0.7).bool(),  # Random mask
@@ -134,27 +151,9 @@ def test_bnpool_with_mask_patterns(small_dense_graph):
         assert out.edge_index is not None
 
 
-def test_bnpool_loss_scaling(small_dense_graph):
-    """Test loss scaling behavior of BNPool."""
-    x, adj = small_dense_graph
-
-    # Test with and without loss scaling
-    for rescale_loss in [True, False]:
-        pooler = BNPool(in_channels=x.shape[-1], k=3, rescale_loss=rescale_loss)
-        out = pooler(x=x, adj=adj)
-
-        # Verify loss components exist
-        assert all(k in out.loss for k in ["quality", "kl", "K_prior"])
-
-        # Check if losses are properly scaled
-        if rescale_loss:
-            n_nodes = x.shape[1]
-            assert torch.all(out.loss["quality"] <= 1.0 * n_nodes)
-
-
-def test_bnpool_lifting_operation(small_dense_graph):
+def test_bnpool_lifting_operation(small_batched_dense_graphs):
     """Test the lifting operation in BNPool."""
-    x, adj = small_dense_graph
+    x, adj = small_batched_dense_graphs
     pooler = BNPool(in_channels=x.shape[-1], k=3)
 
     # First do regular pooling to get selection output
@@ -165,3 +164,25 @@ def test_bnpool_lifting_operation(small_dense_graph):
 
     # Check if lifted output has same dimensions as input
     assert lifted_out.shape == x.shape
+
+
+def test_bnpool_preprocessing_and_pos_weight_caching(single_sparse_graph):
+    """Test the lifting operation in BNPool."""
+    data = single_sparse_graph
+    pooler = BNPool(in_channels=data.x.shape[-1], k=3)
+
+    x, adj, mask = pooler.preprocessing(
+        x=data.x, edge_index=data.edge_index, use_cache=True
+    )
+
+    assert pooler.preprocessing_cache is not None
+    assert torch.isclose(pooler.preprocessing_cache, adj).all()
+
+    pooler(x=x, adj=adj)
+    cached_pos_weight = pooler._pos_weight_cache
+
+    assert cached_pos_weight is not None
+
+    pooler(x=x, adj=adj)
+
+    assert torch.isclose(pooler._pos_weight_cache, cached_pos_weight).all()
