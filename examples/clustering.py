@@ -12,7 +12,7 @@ from tgp.poolers import get_pooler, pooler_map
 
 seed_everything(8)
 
-poolers = ["mincut", "diff", "jb", "acc", "dmon", "hosc"]
+poolers = ["mincut", "diff", "jb", "acc", "dmon", "hosc", "bnpool"]
 for POOLER in poolers:
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")

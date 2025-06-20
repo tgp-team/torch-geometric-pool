@@ -27,7 +27,7 @@ cd docs
 make html
 ```
 
-- To check the documentation you built, open `docs\build\index.html`.
+- To check the documentation you built, open `docs/build/index.html`.
 
 ## 4. Tests
 - Create new tests to cover the new code that you added.
