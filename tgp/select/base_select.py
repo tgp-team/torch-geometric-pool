@@ -287,7 +287,7 @@ class Select(torch.nn.Module):
                 where :math:`E` is the number of edges in the batch.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional):
-                A vector of shape  :math:`[E]` containing the weights of the edges.
+                A vector of shape  :math:`[E]` or  :math:`[E, 1]` containing the weights of the edges.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates

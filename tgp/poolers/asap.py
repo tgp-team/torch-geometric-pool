@@ -14,7 +14,7 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import SelectOutput, TopkSelect
 from tgp.src import PoolingOutput, SRCPooling
-from tgp.utils import add_remaining_self_loops
+from tgp.utils import add_remaining_self_loops, check_and_filter_edge_weights
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
@@ -170,8 +170,8 @@ class ASAPooling(SRCPooling):
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
                 If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
-            edge_weight (~torch.Tensor, optional):
-                A vector of shape :math:`[E]` containing the weights of the edges.
+            edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
+                containing the weights of the edges.
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
@@ -195,6 +195,7 @@ class ASAPooling(SRCPooling):
             N = x.size(0)
             x = x.unsqueeze(-1) if x.dim() == 1 else x
 
+            edge_weight = check_and_filter_edge_weights(edge_weight)
             adj, edge_weight = add_remaining_self_loops(
                 adj, edge_weight, fill_value=1.0, num_nodes=N
             )
@@ -228,13 +229,7 @@ class ASAPooling(SRCPooling):
 
             v_j = x[edge_index[0]] * score.view(-1, 1)
             x = scatter(v_j, edge_index[1], dim=0, reduce="sum")
-            score = self.select_scorer(
-                x,
-                edge_index=adj,
-                edge_weight=edge_weight
-                if edge_weight is not None and edge_weight.dim() == 1
-                else None,
-            )
+            score = self.select_scorer(x, edge_index=adj, edge_weight=edge_weight)
 
             # Select
             so = self.select(x=score, batch=batch)

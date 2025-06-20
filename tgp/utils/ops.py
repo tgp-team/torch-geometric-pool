@@ -121,3 +121,21 @@ def add_remaining_self_loops(
     from torch_geometric.utils import add_remaining_self_loops as arsl
 
     return arsl(edge_index, edge_weight, fill_value, num_nodes)
+
+
+def check_and_filter_edge_weights(edge_weight: Tensor) -> Optional[Tensor]:
+    r"""Check and filter edge weights to ensure they are in the correct shape
+     :math:`[E]` or :math:`[E, 1]`.
+
+    Args:
+        edge_weight (Tensor): The edge weights tensor.
+    """
+    if edge_weight is not None:
+        if edge_weight.ndim > 1:
+            if edge_weight.ndim == 2 and edge_weight.size(-1) == 1:
+                edge_weight = edge_weight.flatten()
+            else:
+                raise RuntimeError(
+                    f"Edge weights must be of shape [E] or [E, 1], but got {edge_weight.shape}."
+                )
+    return edge_weight

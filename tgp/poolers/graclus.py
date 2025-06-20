@@ -1,9 +1,7 @@
 from typing import Optional
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_sparse import SparseTensor
 
 from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
@@ -83,8 +81,8 @@ class GraclusPooling(SRCPooling):
         self,
         x: Tensor,
         adj: Optional[Adj] = None,
-        so: Optional[SelectOutput] = None,
         edge_weight: Optional[Tensor] = None,
+        so: Optional[SelectOutput] = None,
         batch: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
@@ -92,20 +90,28 @@ class GraclusPooling(SRCPooling):
         r"""Forward pass.
 
         Args:
-            x (torch.Tensor): The node feature matrix.
-            adj (torch.Tensor): The edge indices.
-            so (SelectOutput, optional): The output of the select operator.
+            x (~torch.Tensor): The node feature matrix of shape :math:`[N, F]`,
+                where :math:`N` is the number of nodes in the batch and
+                :math:`F` is the number of node features.
+            adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
+                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
+                :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
+                If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
-            edge_weight (torch.Tensor, optional): The edge weights.
+            edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
+                containing the weights of the edges.
                 (default: :obj:`None`)
-            batch (torch.Tensor, optional): The batch vector.
+            so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
-            lifting (bool, optional): If set to :obj:`True`, the lifting operation will be applied.
+            batch (torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
+                to which graph in the batch each node belongs. (default: :obj:`None`)
+            lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
         Returns:
-            PoolingOutput: The pooled node features and the pooled edge indices
-            and edge attributes.
+            PoolingOutput: The output of the pooling operator.
         """
         if lifting:
             # Lift
@@ -114,13 +120,8 @@ class GraclusPooling(SRCPooling):
 
         else:
             # Select
-            if isinstance(adj, SparseTensor):
-                row, col, edge_weight = adj.coo()
-                edge_index = torch.stack([row, col])
-            else:
-                edge_index = adj
             so = self.select(
-                edge_index=edge_index, edge_weight=edge_weight, num_nodes=x.size(0)
+                edge_index=adj, edge_weight=edge_weight, num_nodes=x.size(0)
             )
 
             # Reduce
