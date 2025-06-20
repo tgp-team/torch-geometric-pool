@@ -236,7 +236,7 @@ class BNPool(DenseSRCPooling):
             self.k, self.k, device=self.K.device
         ) - self.K_init_val * (1 - torch.eye(self.k, self.k, device=self.K.device))
 
-    def _get_bce_weight(self, adj, mask=None):
+    def _get_bce_weight(self, adj, mask):
         """Calculates the binary cross-entropy (BCE) weight for a given adjacency matrix to ensure balancing
         of positive and negative samples.
 
@@ -247,7 +247,7 @@ class BNPool(DenseSRCPooling):
         Args:
             adj (torch.Tensor): The adjacency matrix representing the graph. It should
                 be a tensor with `... x N x N` shape, where `N` is the number of nodes.
-            mask (torch.Tensor | None): Optional tensor mask applied on the adjacency
+            mask (torch.Tensor): Optional tensor mask applied on the adjacency
                 matrix for computation. It has the same dimensions as `adj`.
 
         Returns:
@@ -359,7 +359,7 @@ class BNPool(DenseSRCPooling):
         """
         s, q_z = so.s, so.q_z
         rec_adj = self.get_rec_adj(s)
-        rec_loss = self.dense_rec_loss(rec_adj, adj)  # has shape B x N x N
+        rec_loss = self.dense_rec_loss(rec_adj, adj, mask)  # has shape B x N x N
         kl_loss = self.eta * self.kl_loss(q_z)  # has shape B x N
 
         K_prior_loss = (
@@ -406,10 +406,10 @@ class BNPool(DenseSRCPooling):
     def get_rec_adj(self, S):
         return S @ self.K @ S.transpose(-1, -2)
 
-    def dense_rec_loss(self, rec_adj, adj):
+    def dense_rec_loss(self, rec_adj, adj, mask):
         pos_weight = None
         if self.balance_links:
-            pos_weight = self._get_bce_weight(adj)
+            pos_weight = self._get_bce_weight(adj, mask)
 
         loss = F.binary_cross_entropy_with_logits(
             rec_adj, adj, weight=pos_weight, reduction="none"
