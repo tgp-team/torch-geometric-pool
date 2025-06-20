@@ -13,28 +13,6 @@ from tgp.src import DenseSRCPooling, PoolingOutput
 from tgp.utils.typing import LiftType, SinvType
 
 
-def _align_dimensions(rec_adj, adj, pos_weight):
-    """Ensures that rec_adj, adj, and pos_weight have the correct dimensions."""
-    assert rec_adj.ndim in [3, 4]  # Assert that rec_adj has either 3 or 4 dimensions
-
-    # If rec_adj has 3 dimensions, add an extra dimension at the beginning
-    if rec_adj.ndim == 3:
-        rec_adj = rec_adj.unsqueeze(0)
-
-    # Unpack the shape of rec_adj
-    P, B, N, N = rec_adj.shape
-
-    # If pos_weight is not None, align its dimensions
-    if pos_weight is not None:
-        pos_weight = pos_weight.unsqueeze(0).expand(P, -1, -1, -1)
-
-    # Align the dimensions of adj
-    adj = adj.unsqueeze(0).expand(P, -1, -1, -1)
-
-    # Return the aligned tensors
-    return rec_adj, adj, pos_weight
-
-
 class DPSelect(DenseSelect):
     """The DPSelect class provides a mechanism for performing dense Dirichlet Process-based selection.
 
@@ -135,6 +113,7 @@ class DPSelect(DenseSelect):
                 operation `s_inv_op`, the optional mask, and the sampled distribution `q_z`.
         """
         x = x.unsqueeze(0) if x.dim() == 2 else x
+
         out = torch.clamp(F.softplus(self.mlp(x)), min=1e-3, max=1e3)
         q_v_alpha, q_v_beta = torch.split(out, self.k - 1, dim=-1)
         q_z = Beta(q_v_alpha, q_v_beta)
@@ -380,7 +359,7 @@ class BNPool(DenseSRCPooling):
         """
         s, q_z = so.s, so.q_z
         rec_adj = self.get_rec_adj(s)
-        rec_loss = self.dense_rec_loss(rec_adj, adj)  # has shape P x B x N x N
+        rec_loss = self.dense_rec_loss(rec_adj, adj)  # has shape B x N x N
         kl_loss = self.eta * self.kl_loss(q_z)  # has shape B x N
 
         K_prior_loss = (
@@ -388,22 +367,20 @@ class BNPool(DenseSRCPooling):
         )  # has shape 1
         # sum losses over nodes by considering the right number of nodes for each graph
         if mask is not None and not torch.all(mask):
-            edge_mask = torch.einsum("bn,bm->bnm", mask, mask).unsqueeze(
-                0
-            )  # has shape 1 x B x N x N
+            edge_mask = torch.einsum("bn,bm->bnm", mask, mask)  # has shape B x N x N
             rec_loss = rec_loss * edge_mask
             kl_loss = kl_loss * mask
-        rec_loss = rec_loss.sum((-1, -2))  # has shape P x B
+        rec_loss = rec_loss.sum((-1, -2))  # has shape B
         kl_loss = kl_loss.sum(-1)  # has shape B
 
         # RESCALE THE LOSSES
         if self._rescale_loss:
-            N_2 = (
-                mask.sum(-1) ** 2
-                if mask is not None
-                else torch.tensor(adj.shape[1] ** 2, device=adj.device)
-            )
-            rec_loss = rec_loss / N_2.unsqueeze(0)
+            if mask is not None:
+                N_2 = mask.sum(-1) ** 2
+            else:
+                N_2 = adj.shape[1] ** 2
+
+            rec_loss = rec_loss / N_2
             kl_loss = kl_loss / N_2
             K_prior_loss = K_prior_loss / N_2
 
@@ -433,13 +410,12 @@ class BNPool(DenseSRCPooling):
         pos_weight = None
         if self._balance_links:
             pos_weight = self._get_bce_weight(adj)
-            rec_adj, adj, pos_weight = _align_dimensions(rec_adj, adj, pos_weight)
 
         loss = F.binary_cross_entropy_with_logits(
             rec_adj, adj, weight=pos_weight, reduction="none"
         )
 
-        return loss  # has shape P x B x N x N
+        return loss  # has shape B x N x N
 
     def kl_loss(self, q_z):
         p_z = Beta(self.get_buffer("alpha_prior"), self.get_buffer("beta_prior"))

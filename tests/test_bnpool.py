@@ -1,3 +1,5 @@
+from itertools import product
+
 import numpy as np
 import pytest
 import torch
@@ -10,56 +12,50 @@ def set_random_seed():
 
 
 @pytest.fixture
-def small_dense_graph(set_random_seed):
-    x = torch.randn(5, 3)  # Node features
-    adj = torch.randint(0, 2, (5, 5)).float()  # Adjacency matrix
-    adj = adj.tril() + adj.tril().T  # Make symmetric
+def small_dense_graph(set_random_seed, request):
+    batch_size, n_nodes, n_features = request.param
+    x = torch.randn(batch_size, n_nodes, n_features)  # Node features
+    adj = torch.randint(
+        0, 2, (batch_size, n_nodes, n_nodes)
+    ).float()  # Adjacency matrix
+    adj = (adj + adj.transpose(-1, -2)) // 2  # Make symmetric
     return x, adj
 
 
+@pytest.mark.parametrize(
+    "small_dense_graph", product([1, 5, 10], [1, 3, 7], [1, 9, 12]), indirect=True
+)
 def test_bnpool_forward_shapes(small_dense_graph):
     x, adj = small_dense_graph
-    _, n_nodes, n_features = 1, x.size(0), x.size(1)
+    batch_size, n_nodes, n_features = x.shape
 
     from tgp.poolers.bnpool import BNPool
 
-    pooler = BNPool(in_channels=n_features, k=2)
+    k = 2
+    pooler = BNPool(in_channels=n_features, k=k)
     pooler.eval()
 
     out = pooler(x=x, adj=adj)
 
     # Check output shapes
-    assert out.x.shape[0] <= n_nodes, "Pooled nodes should be <= input nodes"
-    assert out.x.shape[1] == n_features, "Feature dimension should remain unchanged"
-    assert out.edge_index.shape[0] == out.x.shape[0], (
-        "Adjacency matrix should match pooled nodes"
+    assert out.x.shape[0] == batch_size, "Batch dimension should be 1 for pooled x"
+    assert out.x.shape[1] == k, "Number of nodes should be equal to k"
+    assert out.x.shape[2] == n_features, "Feature dimension should remain unchanged"
+
+    assert out.edge_index.shape[0] == batch_size, (
+        "Batch dimension should be 1 for edge_index"
     )
-    assert out.edge_index.shape[1] == out.x.shape[0], (
-        "Adjacency matrix should match pooled nodes"
+    assert out.edge_index.shape[1] == out.edge_index.shape[2] == k, (
+        "Adjacency matrix size should match number of clusters k"
     )
 
 
-@pytest.mark.parametrize("n_nodes", [1, 5, 10])
-def test_bnpool_different_sizes(set_random_seed, n_nodes):
-    x = torch.randn(n_nodes, 3)
-    adj = torch.randint(0, 2, (n_nodes, n_nodes)).float()
-    adj = adj.tril() + adj.tril().T
-
-    from tgp.poolers.bnpool import BNPool
-
-    pooler = BNPool(in_channels=3, k=2)
-    pooler.eval()
-
-    out = pooler(x=x, adj=adj)
-    assert out.x is not None
-    assert out.edge_index is not None
-
-
-def test_bnpool_with_mask():
-    x = torch.randn(5, 3)
-    adj = torch.randint(0, 2, (5, 5)).float()
-    mask = torch.ones(5, dtype=torch.bool)
-    mask[3:] = False  # Mark last two nodes as padding
+@pytest.mark.parametrize("small_dense_graph", [(5, 7, 3)], indirect=True)
+def test_bnpool_with_mask(small_dense_graph):
+    x, adj = small_dense_graph
+    batch_size, n_nodes, _ = x.shape
+    mask = torch.ones(batch_size, n_nodes, dtype=torch.bool)
+    mask[:, 3:] = False  # Mark last two nodes as padding
 
     from tgp.poolers.bnpool import BNPool
 
