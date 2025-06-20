@@ -197,8 +197,7 @@ class NDPSelect(Select):
             device=device,
         ).coalesce()  # make indices unique
 
-        # Trivial case
-        if num_sub_nodes <= 1:
+        if num_sub_nodes <= 1:  # Trivial case
             idx_pos_local = np.array(list(range(num_sub_nodes)), dtype=int)
             idx_neg_local = np.array([], dtype=int)
         else:
@@ -226,7 +225,7 @@ class NDPSelect(Select):
             if cut_size < 0.5:
                 idx_pos_local, idx_neg_local = self.sign_partition(num_sub_nodes)
 
-        L = to_scipy_sparse_matrix(L.indices(), L.values())
+        L = to_scipy_sparse_matrix(L.indices(), L.values(), num_nodes=num_sub_nodes)
         return idx_pos_local, idx_neg_local, L
 
     def __repr__(self) -> str:
