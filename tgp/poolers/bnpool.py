@@ -1,25 +1,21 @@
-from typing import Optional, Union, List, Tuple
+from typing import List, Optional, Union
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Beta, kl_divergence
-from torch_geometric.typing import Adj
 
 from tgp.connect import DenseConnect, postprocess_adj_pool
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import DenseSelect, SelectOutput, Select
+from tgp.select import DenseSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils.typing import SinvType, LiftType
+from tgp.utils.typing import LiftType, SinvType
 
 
 def _align_dimensions(rec_adj, adj, pos_weight):
-    """
-    Ensures that rec_adj, adj, and pos_weight have the correct dimensions.
-    """
-    # Assert that rec_adj has either 3 or 4 dimensions
-    assert rec_adj.ndim in [3, 4]
+    """Ensures that rec_adj, adj, and pos_weight have the correct dimensions."""
+    assert rec_adj.ndim in [3, 4]  # Assert that rec_adj has either 3 or 4 dimensions
 
     # If rec_adj has 3 dimensions, add an extra dimension at the beginning
     if rec_adj.ndim == 3:
@@ -40,8 +36,7 @@ def _align_dimensions(rec_adj, adj, pos_weight):
 
 
 class DPSelect(DenseSelect):
-    """
-    The DPSelect class provides a mechanism for performing dense Dirichlet Process-based selection.
+    """The DPSelect class provides a mechanism for performing dense Dirichlet Process-based selection.
 
     This class extends the DenseSelect class and is designed to compute the assignment matrix S by leveraging
     a truncated stick-breaking variational approximation of the DP posterior. To this end, an MLP is used to compute
@@ -49,34 +44,41 @@ class DPSelect(DenseSelect):
     by simulating the stick breaking process.
 
     Args:
-        in_channels: Input channels, defined as either an integer or a list 
+        in_channels: Input channels, defined as either an integer or a list
             of integers, which represent the number of channels.
         k: The maximum number of clusters.
         act: Name of the activation function to be used. Defaults to None if
             no activation is specified.
         dropout: Dropout probability applied during training for regularization.
             Takes values between 0.0 and 1.0. Defaults to 0.0.
-        s_inv_op: An operation type to handle invariant operations for specific 
-            models. Accepts values of the SinvType enumeration. Defaults to 
+        s_inv_op: An operation type to handle invariant operations for specific
+            models. Accepts values of the SinvType enumeration. Defaults to
             "transpose".
     """
+
     is_dense = True
 
-    def __init__(self,
-                 in_channels: Union[int, List[int]],
-                 k: int,
-                 act: str = None,
-                 dropout: float = 0.0,
-                 s_inv_op: SinvType = "transpose",
-                 ):
-        # 2*max_key needs to compute both alpahs and betas of the posterior
-        super(DPSelect, self).__init__(in_channels=in_channels, k=2*(k - 1), act=act, dropout=dropout, s_inv_op=s_inv_op)
+    def __init__(
+        self,
+        in_channels: Union[int, List[int]],
+        k: int,
+        act: str = None,
+        dropout: float = 0.0,
+        s_inv_op: SinvType = "transpose",
+    ):
+        # 2*max_key needs to compute both alphas and betas of the posterior
+        super(DPSelect, self).__init__(
+            in_channels=in_channels,
+            k=2 * (k - 1),
+            act=act,
+            dropout=dropout,
+            s_inv_op=s_inv_op,
+        )
         self.k = k
 
     @staticmethod
     def _compute_pi_given_sticks(stick_fractions):
-        """
-        Computes the stick-breaking proportions (pi) for a given set of stick fractions.
+        """Computes the stick-breaking proportions (pi) for a given set of stick fractions.
 
         This function implements the stick-breaking by multiplying the stick fractions. The multiplications are done
         in the logarithmic space to avoid numerical errors.
@@ -88,21 +90,35 @@ class DPSelect(DenseSelect):
 
         Returns:
             torch.Tensor: A tensor containing the cluster assignment probabilities [batch, n_nodes, n_clusters].
-
         """
         device = stick_fractions.device
-        log_v = torch.concat([torch.log(stick_fractions), torch.zeros(*stick_fractions.shape[:-1], 1, device=device)], dim=-1)
-        log_one_minus_v = torch.concat([torch.zeros(*stick_fractions.shape[:-1], 1, device=device), torch.log(1 - stick_fractions)], dim=-1)
-        pi = torch.exp(log_v + torch.cumsum(log_one_minus_v, dim=-1))  # has shape [n_particles, batch, n_nodes, n_clusters]
+        log_v = torch.concat(
+            [
+                torch.log(stick_fractions),
+                torch.zeros(*stick_fractions.shape[:-1], 1, device=device),
+            ],
+            dim=-1,
+        )
+        log_one_minus_v = torch.concat(
+            [
+                torch.zeros(*stick_fractions.shape[:-1], 1, device=device),
+                torch.log(1 - stick_fractions),
+            ],
+            dim=-1,
+        )
+        pi = torch.exp(
+            log_v + torch.cumsum(log_one_minus_v, dim=-1)
+        )  # has shape [n_particles, batch, n_nodes, n_clusters]
         return pi
 
-    def forward(self, x: Tensor, mask: Optional[Tensor] = None, **kwargs) -> SelectOutput:
-        """
-        Applies the selection operator to the input data.
+    def forward(
+        self, x: Tensor, mask: Optional[Tensor] = None, **kwargs
+    ) -> SelectOutput:
+        """Applies the selection operator to the input data.
 
-        This function takes input data to compute the parameters (q_v_alpha, q_v_beta) of the variational approximation
-        of the stick fractions. Then, a sample from the posterior is obtained by using the rsample method of the
-        Beta distribution. This allow to backpropagate through the sampling step. Finally, the assignment matrix S is
+        This function takes input data to compute the parameters (q_v_alpha, q_v_beta) of the stick fractions'
+        variational approximation. Then, a sample from the posterior is obtained by using the rsample method of the
+        Beta distribution. This allows backpropagate through the sampling step. Finally, the assignment matrix S is
         obtained by simulating the stick breaking process.
 
         Args:
@@ -130,9 +146,9 @@ class DPSelect(DenseSelect):
 
         return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask, q_z=q_z)
 
+
 class BNPool(DenseSRCPooling):
-    r"""
-    The BN-Pool operator from the paper `"BN-Pool: a Bayesian Nonparametric Approach for Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
+    r"""The BN-Pool operator from the paper `"BN-Pool: a Bayesian Nonparametric Approach for Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
     (Castellana D., and Bianchi F.M., preprint, 2025).
 
     + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.DPSelect` to perform variational inference of the stick-breaking process.
@@ -142,9 +158,9 @@ class BNPool(DenseSRCPooling):
 
     This layer provides three auxiliary losses:
 
-    + the reconstruction loss, i.e. the binary cross-entropy loss between the true and the reconstructed adjacency matrix,
-    + the KL loss, i.e. the KL divergence between the prior and the posterior variational approximation of the assignments,
-    + the K prior loss, i.e. the KL divergence between the prior and the cluster connectivity matrix.
+    + the reconstruction loss, i.e., the binary cross-entropy loss between the true and the reconstructed adjacency matrix,
+    + the KL loss, i.e., the KL divergence between the prior and the posterior variational approximation of the assignments,
+    + the K prior loss, i.e., the KL divergence between the prior and the cluster connectivity matrix.
 
     Args:
         in_channels (Union[int, List[int]]): The number of input channels or a list of input channels.
@@ -163,46 +179,47 @@ class BNPool(DenseSRCPooling):
         lift (LiftType, optional): Specifies the operation used in the lifting step. Default is "precomputed".
         s_inv_op (SinvType, optional): Specifies the sparse inverse operation in the selector.
             Default is "transpose".
-        """
-    def __init__(self,
-                 in_channels: Union[int, List[int]],
-                 k: int,
-                 # hyperparameters of the method
-                 alpha_DP=1.0,
-                 K_var=1.0,
-                 K_mu=10.0,
-                 K_init=1.0,
-                 eta=1.0,
-                 rescale_loss=True,
-                 balance_links=True,
-                 train_K=True,
-                 # hyperparameters of the selector
-                 act: str = None,
-                 dropout: float = 0.0,
-                 adj_transpose: bool = True,
-                 lift: LiftType = "precomputed",
-                 s_inv_op: SinvType = "transpose"):
+    """
 
-        if alpha_DP <=0:
+    def __init__(
+        self,
+        in_channels: Union[int, List[int]],
+        k: int,  # hyperparameters of the method
+        alpha_DP=1.0,
+        K_var=1.0,
+        K_mu=10.0,
+        K_init=1.0,
+        eta=1.0,
+        rescale_loss=True,
+        balance_links=True,
+        train_K=True,  # hyperparameters of the selector
+        act: str = None,
+        dropout: float = 0.0,
+        adj_transpose: bool = True,
+        lift: LiftType = "precomputed",
+        s_inv_op: SinvType = "transpose",
+    ):
+        if alpha_DP <= 0:
             raise ValueError("alpha_DP must be positive")
 
-        if K_var <=0:
+        if K_var <= 0:
             raise ValueError("K_var must be positive")
 
-        if eta <=0:
+        if eta <= 0:
             raise ValueError("eta must be positive")
 
-        if k <=0:
+        if k <= 0:
             raise ValueError("max_k must be positive")
 
-        super(BNPool, self).__init__(selector=DPSelect(in_channels, k, act, dropout, s_inv_op),
-                                     reducer=BaseReduce(),
-                                     lifter=BaseLift(matrix_op=lift),
-                                     connector=DenseConnect(
-                                         remove_self_loops=False, degree_norm=False, adj_transpose=adj_transpose
-                                     ),
-                                     adj_transpose=adj_transpose
-                                     )
+        super(BNPool, self).__init__(
+            selector=DPSelect(in_channels, k, act, dropout, s_inv_op),
+            reducer=BaseReduce(),
+            lifter=BaseLift(matrix_op=lift),
+            connector=DenseConnect(
+                remove_self_loops=False, degree_norm=False, adj_transpose=adj_transpose
+            ),
+            adj_transpose=adj_transpose,
+        )
 
         self.k = k
         self._K_init = K_init
@@ -214,35 +231,39 @@ class BNPool(DenseSRCPooling):
         self._train_K = train_K
         self.eta = eta  # coefficient for the kl_loss
 
-        # prior for the Stick Breaking Process
-        self.register_buffer('alpha_prior', torch.ones(self.k - 1))
-        self.register_buffer('beta_prior', torch.ones(self.k - 1) * alpha_DP)
+        # prior of the Stick Breaking Process
+        self.register_buffer("alpha_prior", torch.ones(self.k - 1))
+        self.register_buffer("beta_prior", torch.ones(self.k - 1) * alpha_DP)
 
-        # prior for the cluster-cluster prob. matrix
-        self.register_buffer('K_var', torch.tensor(K_var))
-        self.register_buffer('K_mu', K_mu * torch.eye(self.k, self.k) -
-                             K_mu * (1 - torch.eye(self.k, self.k)))
+        # prior of the cluster-cluster prob. matrix
+        self.register_buffer("K_var", torch.tensor(K_var))
+        self.register_buffer(
+            "K_mu",
+            K_mu * torch.eye(self.k, self.k) - K_mu * (1 - torch.eye(self.k, self.k)),
+        )
 
         # cluster-cluster prob matrix
-        self.K = torch.nn.Parameter(K_init * torch.eye(self.k, self.k) -
-                                    K_init * (1 - torch.eye(self.k, self.k)), requires_grad=train_K)
+        self.K = torch.nn.Parameter(
+            K_init * torch.eye(self.k, self.k)
+            - K_init * (1 - torch.eye(self.k, self.k)),
+            requires_grad=train_K,
+        )
 
         self._pos_weight_cache = None
 
     def reset_parameters(self):
         super().reset_parameters()
-        self.K.data = (self._K_init * torch.eye(self.k, self.k, device=self.K.device) -
-                       self._K_init * (1 - torch.eye(self.k, self.k, device=self.K.device)))
+        self.K.data = self._K_init * torch.eye(
+            self.k, self.k, device=self.K.device
+        ) - self._K_init * (1 - torch.eye(self.k, self.k, device=self.K.device))
 
     def _get_bce_weight(self, adj, mask=None):
-        """
-        Calculates the binary cross-entropy (BCE) weight for a given adjacency matrix to ensure balancing
+        """Calculates the binary cross-entropy (BCE) weight for a given adjacency matrix to ensure balancing
         of positive and negative samples.
 
         This function generates weights for BCE loss calculations by computing the
-        positive and negative edge contributions based on the given adjacency matrix
-        and an optional mask. It optimally utilizes caching if enabled to improve
-        performance.
+        positive and negative edges contributions based on the given adjacency matrix
+        and an optional mask. If enabled, it does caching to improve performance.
 
         Args:
             adj (torch.Tensor): The adjacency matrix representing the graph. It should
@@ -263,16 +284,18 @@ class BNPool(DenseSRCPooling):
                 N = mask.sum(-1).view(-1, 1, 1)  # has shape B x 1 x 1
             else:
                 N = adj.shape[-1]
-            n_edges = torch.clamp(adj.sum([-1, -2]), min=1).view(-1, 1, 1)  # this is a vector of size B x 1 x 1
-            n_not_edges = torch.clamp(N ** 2 - n_edges, min=1).view(-1, 1, 1)  # this is a vector of size B x 1 x 1
+            n_edges = torch.clamp(adj.sum([-1, -2]), min=1).view(
+                -1, 1, 1
+            )  # this is a vector of size B x 1 x 1
+            n_not_edges = torch.clamp(N**2 - n_edges, min=1).view(
+                -1, 1, 1
+            )  # this is a vector of size B x 1 x 1
             # the clamp is needed to avoid zero division when we have all edges
-            pos_weight = (N ** 2 / n_edges) * adj + (N ** 2 / n_not_edges) * (1 - adj)
+            pos_weight = (N**2 / n_edges) * adj + (N**2 / n_not_edges) * (1 - adj)
 
             if use_cache:
                 self._pos_weight_cache = pos_weight
         return pos_weight
-
-
 
     def forward(
         self,
@@ -283,8 +306,7 @@ class BNPool(DenseSRCPooling):
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
-        """
-        Forward pass.
+        """Forward pass.
 
         Args:
             x (Tensor): The input feature matrix.
@@ -332,8 +354,7 @@ class BNPool(DenseSRCPooling):
             return out
 
     def compute_loss(self, adj, mask, so) -> dict:
-        """
-        Computes the loss components for the model.
+        """Computes the loss components for the model.
 
         This method calculates the reconstruction loss, the KL loss, and optionally
         the prior loss over the cluster connectivity matrix `K`. Reconstruction and KL losses are rescaled by the number of total nodes
@@ -362,10 +383,14 @@ class BNPool(DenseSRCPooling):
         rec_loss = self.dense_rec_loss(rec_adj, adj)  # has shape P x B x N x N
         kl_loss = self.eta * self.kl_loss(q_z)  # has shape B x N
 
-        K_prior_loss = self.K_prior_loss() if self._train_K else torch.tensor(0.0)  # has shape 1
+        K_prior_loss = (
+            self.K_prior_loss() if self._train_K else torch.tensor(0.0)
+        )  # has shape 1
         # sum losses over nodes by considering the right number of nodes for each graph
         if mask is not None and not torch.all(mask):
-            edge_mask = torch.einsum('bn,bm->bnm', mask, mask).unsqueeze(0)  # has shape 1 x B x N x N
+            edge_mask = torch.einsum("bn,bm->bnm", mask, mask).unsqueeze(
+                0
+            )  # has shape 1 x B x N x N
             rec_loss = rec_loss * edge_mask
             kl_loss = kl_loss * mask
         rec_loss = rec_loss.sum((-1, -2))  # has shape P x B
@@ -373,30 +398,33 @@ class BNPool(DenseSRCPooling):
 
         # RESCALE THE LOSSES
         if self._rescale_loss:
-            N_2 = mask.sum(-1)**2 if mask is not None else torch.tensor(adj.shape[1] ** 2, device=adj.device)
+            N_2 = (
+                mask.sum(-1) ** 2
+                if mask is not None
+                else torch.tensor(adj.shape[1] ** 2, device=adj.device)
+            )
             rec_loss = rec_loss / N_2.unsqueeze(0)
             kl_loss = kl_loss / N_2
             K_prior_loss = K_prior_loss / N_2
 
         # build the output dictionary
         return {
-            'quality': rec_loss.mean(),
-            'kl': self.eta * kl_loss.mean(),
-            'K_prior': K_prior_loss.mean()
+            "quality": rec_loss.mean(),
+            "kl": self.eta * kl_loss.mean(),
+            "K_prior": K_prior_loss.mean(),
         }
 
     def extra_repr_args(self) -> dict:
         return {
-            'alpha_DP': self._alpha_DP,
-            'k_prior_variance': self._K_var,
-            'k_prior_mean': self._K_mu,
-            'k_init_value': self._K_init,
-            'eta': self.eta,
-            'rescale_loss': self._rescale_loss,
-            'balance_links': self._balance_links,
-            'train_K': self._train_K
+            "alpha_DP": self._alpha_DP,
+            "k_prior_variance": self._K_var,
+            "k_prior_mean": self._K_mu,
+            "k_init_value": self._K_init,
+            "eta": self.eta,
+            "rescale_loss": self._rescale_loss,
+            "balance_links": self._balance_links,
+            "train_K": self._train_K,
         }
-
 
     def get_rec_adj(self, S):
         return S @ self.K @ S.transpose(-1, -2)
@@ -407,16 +435,18 @@ class BNPool(DenseSRCPooling):
             pos_weight = self._get_bce_weight(adj)
             rec_adj, adj, pos_weight = _align_dimensions(rec_adj, adj, pos_weight)
 
-        loss = F.binary_cross_entropy_with_logits(rec_adj, adj, weight=pos_weight, reduction='none')
+        loss = F.binary_cross_entropy_with_logits(
+            rec_adj, adj, weight=pos_weight, reduction="none"
+        )
 
         return loss  # has shape P x B x N x N
 
     def kl_loss(self, q_z):
-        p_z = Beta(self.get_buffer('alpha_prior'), self.get_buffer('beta_prior'))
+        p_z = Beta(self.get_buffer("alpha_prior"), self.get_buffer("beta_prior"))
         loss = kl_divergence(q_z, p_z).sum(-1)
         return loss  # has shape B x N
 
     def K_prior_loss(self):
-        K_mu, K_var = self.get_buffer('K_mu'), self.get_buffer('K_var')
+        K_mu, K_var = self.get_buffer("K_mu"), self.get_buffer("K_var")
         K_prior_loss = (0.5 * (self.K - K_mu) ** 2 / K_var).sum()
         return K_prior_loss  # has shape 1
