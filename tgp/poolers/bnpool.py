@@ -201,13 +201,13 @@ class BNPool(DenseSRCPooling):
         )
 
         self.k = k
-        self._K_init = K_init
-        self._alpha_DP = alpha_DP
-        self._K_var = K_var
-        self._K_mu = K_mu
-        self._rescale_loss = rescale_loss
-        self._balance_links = balance_links
-        self._train_K = train_K
+        self.K_init_val = K_init
+        self.alpha_DP = alpha_DP
+        self.K_var_val = K_var
+        self.K_mu_val = K_mu
+        self.rescale_loss = rescale_loss
+        self.balance_links = balance_links
+        self.train_K = train_K
         self.eta = eta  # coefficient for the kl_loss
 
         # prior of the Stick Breaking Process
@@ -232,9 +232,9 @@ class BNPool(DenseSRCPooling):
 
     def reset_parameters(self):
         super().reset_parameters()
-        self.K.data = self._K_init * torch.eye(
+        self.K.data = self.K_init_val * torch.eye(
             self.k, self.k, device=self.K.device
-        ) - self._K_init * (1 - torch.eye(self.k, self.k, device=self.K.device))
+        ) - self.K_init_val * (1 - torch.eye(self.k, self.k, device=self.K.device))
 
     def _get_bce_weight(self, adj, mask=None):
         """Calculates the binary cross-entropy (BCE) weight for a given adjacency matrix to ensure balancing
@@ -363,7 +363,7 @@ class BNPool(DenseSRCPooling):
         kl_loss = self.eta * self.kl_loss(q_z)  # has shape B x N
 
         K_prior_loss = (
-            self.K_prior_loss() if self._train_K else torch.tensor(0.0)
+            self.K_prior_loss() if self.train_K else torch.tensor(0.0)
         )  # has shape 1
         # sum losses over nodes by considering the right number of nodes for each graph
         if mask is not None and not torch.all(mask):
@@ -374,7 +374,7 @@ class BNPool(DenseSRCPooling):
         kl_loss = kl_loss.sum(-1)  # has shape B
 
         # RESCALE THE LOSSES
-        if self._rescale_loss:
+        if self.rescale_loss:
             if mask is not None:
                 N_2 = mask.sum(-1) ** 2
             else:
@@ -393,14 +393,14 @@ class BNPool(DenseSRCPooling):
 
     def extra_repr_args(self) -> dict:
         return {
-            "alpha_DP": self._alpha_DP,
-            "k_prior_variance": self._K_var,
-            "k_prior_mean": self._K_mu,
-            "k_init_value": self._K_init,
+            "alpha_DP": self.alpha_DP,
+            "k_prior_variance": self.K_var_val,
+            "k_prior_mean": self.K_mu_val,
+            "k_init_value": self.K_init_val,
             "eta": self.eta,
-            "rescale_loss": self._rescale_loss,
-            "balance_links": self._balance_links,
-            "train_K": self._train_K,
+            "rescale_loss": self.rescale_loss,
+            "balance_links": self.balance_links,
+            "train_K": self.train_K,
         }
 
     def get_rec_adj(self, S):
@@ -408,7 +408,7 @@ class BNPool(DenseSRCPooling):
 
     def dense_rec_loss(self, rec_adj, adj):
         pos_weight = None
-        if self._balance_links:
+        if self.balance_links:
             pos_weight = self._get_bce_weight(adj)
 
         loss = F.binary_cross_entropy_with_logits(
