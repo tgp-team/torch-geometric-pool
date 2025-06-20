@@ -147,6 +147,7 @@ the :doc:`tutorials/index`, and explore our :doc:`APIs <api/tgp>`.
    content/quickstart
    content/src
    tutorials/index
+   poolers_cheatsheet
 
 
 .. toctree::

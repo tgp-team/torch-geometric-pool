@@ -5,6 +5,7 @@ import os
 from docutils import nodes
 
 import tgp
+from tgp.utils import cheatsheet
 
 os.environ["PYTORCH_JIT"] = '0'  # generate doc for torch.jit.script methods
 
@@ -48,7 +49,7 @@ autosummary_generate = True
 doctest_default_flags = doctest.NORMALIZE_WHITESPACE
 autodoc_member_order = 'bysource'
 
-rst_context = {'tgp': tgp}
+rst_context = {'tgp': tgp, 'cheatsheet': cheatsheet}
 
 add_module_names = False
 # autodoc_inherit_docstrings = False
