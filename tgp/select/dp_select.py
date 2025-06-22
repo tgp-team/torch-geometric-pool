@@ -3,10 +3,11 @@ from typing import List, Optional, Union
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributions import Beta, kl_divergence
+from torch.distributions import Beta
 
 from tgp.select import DenseSelect, SelectOutput
 from tgp.utils.typing import SinvType
+
 
 class DPSelect(DenseSelect):
     r"""The select operator for the BN-Pool operator (:class:`~tgp.poolers.BNPool`)

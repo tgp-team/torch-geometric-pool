@@ -8,7 +8,7 @@ from torch.distributions import Beta, kl_divergence
 from tgp.connect import DenseConnect, postprocess_adj_pool
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import SelectOutput, DPSelect
+from tgp.select import DPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
 from tgp.utils.typing import LiftType, SinvType
 

@@ -1,5 +1,6 @@
 from .base_select import Select, SelectOutput
 from .dense_select import DenseSelect
+from .dp_select import DPSelect
 from .edge_contraction_select import EdgeContractionSelect
 from .graclus_select import GraclusSelect
 from .kmis_select import KMISSelect, degree_scorer
@@ -7,7 +8,6 @@ from .lapool_select import LaPoolSelect
 from .ndp_select import NDPSelect
 from .nmf_select import NMFSelect
 from .topk_select import TopkSelect
-from .dp_select import DPSelect
 
 select_functions = [
     "degree_scorer",
