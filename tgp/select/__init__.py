@@ -7,6 +7,7 @@ from .lapool_select import LaPoolSelect
 from .ndp_select import NDPSelect
 from .nmf_select import NMFSelect
 from .topk_select import TopkSelect
+from .dp_select import DPSelect
 
 select_functions = [
     "degree_scorer",
@@ -23,6 +24,7 @@ select_classes = [
     "NDPSelect",
     "NMFSelect",
     "TopkSelect",
+    "DPSelect",
 ]
 
 __all__ = ["SelectOutput"] + select_classes + select_functions
