@@ -1,15 +1,19 @@
 from typing import List, Optional, Union
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
-from torch.distributions import Beta, kl_divergence
+from torch.distributions import Beta
 
 from tgp.connect import DenseConnect, postprocess_adj_pool
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import DPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
+from tgp.utils.losses import (
+    cluster_connectivity_prior_loss,
+    kl_loss,
+    weighted_bce_reconstruction_loss,
+)
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -115,53 +119,11 @@ class BNPool(DenseSRCPooling):
             requires_grad=train_K,
         )
 
-        self._pos_weight_cache = None
-
     def reset_parameters(self):
         super().reset_parameters()
         self.K.data = self.K_init_val * torch.eye(
             self.k, self.k, device=self.K.device
         ) - self.K_init_val * (1 - torch.eye(self.k, self.k, device=self.K.device))
-
-    def _get_bce_weight(self, adj, mask):
-        """Calculates the binary cross-entropy (BCE) weight for a given adjacency matrix to ensure balancing
-        of positive and negative samples.
-
-        This function generates weights for BCE loss calculations by computing the
-        positive and negative edges contributions based on the given adjacency matrix
-        and an optional mask. If enabled, it does caching to improve performance.
-
-        Args:
-            adj (torch.Tensor): The adjacency matrix representing the graph. It should
-                be a tensor with `... x N x N` shape, where `N` is the number of nodes.
-            mask (torch.Tensor): Optional tensor mask applied on the adjacency
-                matrix for computation. It has the same dimensions as `adj`.
-
-        Returns:
-            torch.Tensor: Resulting tensor representing binary cross-entropy weights
-                with the same dimensions as the adjacency matrix.
-        """
-        use_cache = self.preprocessing_cache is not None
-
-        if use_cache and self._pos_weight_cache is not None:
-            pos_weight = self._pos_weight_cache
-        else:
-            if mask is not None:
-                N = mask.sum(-1).view(-1, 1, 1)  # has shape B x 1 x 1
-            else:
-                N = adj.shape[-1]
-            n_edges = torch.clamp(adj.sum([-1, -2]), min=1).view(
-                -1, 1, 1
-            )  # this is a vector of size B x 1 x 1
-            n_not_edges = torch.clamp(N**2 - n_edges, min=1).view(
-                -1, 1, 1
-            )  # this is a vector of size B x 1 x 1
-            # the clamp is needed to avoid zero division when we have all edges
-            pos_weight = (N**2 / n_edges) * adj + (N**2 / n_not_edges) * (1 - adj)
-
-            if use_cache:
-                self._pos_weight_cache = pos_weight
-        return pos_weight
 
     def forward(
         self,
@@ -246,36 +208,49 @@ class BNPool(DenseSRCPooling):
         """
         s, q_z = so.s, so.q_z
         rec_adj = self.get_rec_adj(s)
-        rec_loss = self.dense_rec_loss(rec_adj, adj, mask)  # has shape B x N x N
-        kl_loss = self.eta * self.kl_loss(q_z)  # has shape B x N
 
-        K_prior_loss = (
-            self.K_prior_loss() if self.train_K else torch.tensor(0.0)
-        )  # has shape 1
-        # sum losses over nodes by considering the right number of nodes for each graph
-        if mask is not None and not torch.all(mask):
-            edge_mask = torch.einsum("bn,bm->bnm", mask, mask)  # has shape B x N x N
-            rec_loss = rec_loss * edge_mask
-            kl_loss = kl_loss * mask
-        rec_loss = rec_loss.sum((-1, -2))  # has shape B
-        kl_loss = kl_loss.sum(-1)  # has shape B
+        # Reconstruction loss
+        rec_loss = weighted_bce_reconstruction_loss(
+            rec_adj,
+            adj,
+            mask,
+            balance_links=self.balance_links,
+            normalize_loss=self.rescale_loss,
+            reduction="mean",
+        )
 
-        # RESCALE THE LOSSES
-        if self.rescale_loss:
-            if mask is not None:
-                N_2 = mask.sum(-1) ** 2
-            else:
-                N_2 = adj.shape[1] ** 2
+        # KL loss
+        alpha_prior = self.get_buffer("alpha_prior")
+        beta_prior = self.get_buffer("beta_prior")
+        prior_dist = Beta(alpha_prior, beta_prior)
+        kl_loss_value = kl_loss(
+            q_z,
+            prior_dist,
+            mask=mask,
+            node_axis=1,  # Nodes are on axis 1: (B, N, K-1)
+            sum_axes=[2, 1],  # Sum over K-1 components (axis 2), then nodes (axis 1)
+            normalize_loss=self.rescale_loss,
+            reduction="mean",
+        )
 
-            rec_loss = rec_loss / N_2
-            kl_loss = kl_loss / N_2
-            K_prior_loss = K_prior_loss / N_2
+        # K prior loss
+        if self.train_K:
+            K_prior_loss = cluster_connectivity_prior_loss(
+                self.K,
+                self.get_buffer("K_mu"),
+                self.get_buffer("K_var"),
+                normalize_loss=self.rescale_loss,
+                mask=mask,
+                reduction="mean",
+            )
+        else:
+            K_prior_loss = torch.tensor(0.0)
 
         # build the output dictionary
         return {
-            "quality": rec_loss.mean(),
-            "kl": self.eta * kl_loss.mean(),
-            "K_prior": K_prior_loss.mean(),
+            "quality": rec_loss,
+            "kl": self.eta * kl_loss_value,
+            "K_prior": K_prior_loss,
         }
 
     def extra_repr_args(self) -> dict:
@@ -292,24 +267,3 @@ class BNPool(DenseSRCPooling):
 
     def get_rec_adj(self, S):
         return S @ self.K @ S.transpose(-1, -2)
-
-    def dense_rec_loss(self, rec_adj, adj, mask):
-        pos_weight = None
-        if self.balance_links:
-            pos_weight = self._get_bce_weight(adj, mask)
-
-        loss = F.binary_cross_entropy_with_logits(
-            rec_adj, adj, weight=pos_weight, reduction="none"
-        )
-
-        return loss  # has shape B x N x N
-
-    def kl_loss(self, q_z):
-        p_z = Beta(self.get_buffer("alpha_prior"), self.get_buffer("beta_prior"))
-        loss = kl_divergence(q_z, p_z).sum(-1)
-        return loss  # has shape B x N
-
-    def K_prior_loss(self):
-        K_mu, K_var = self.get_buffer("K_mu"), self.get_buffer("K_var")
-        K_prior_loss = (0.5 * (self.K - K_mu) ** 2 / K_var).sum()
-        return K_prior_loss  # has shape 1

@@ -1,8 +1,10 @@
 import math
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
+from torch.distributions import Distribution, kl_divergence
 
 from tgp import eps
 from tgp.utils import rank3_diag, rank3_trace
@@ -480,3 +482,233 @@ def cluster_loss(
     cluster_loss = torch.norm(input=cluster_size, dim=1)
     cluster_loss = cluster_loss / mask.sum(dim=1) * torch.norm(i_s) - 1
     return _reduce_loss(cluster_loss, reduction)
+
+
+def weighted_bce_reconstruction_loss(
+    rec_adj: Tensor,
+    adj: Tensor,
+    mask: Optional[Tensor] = None,
+    balance_links: bool = True,
+    normalize_loss: bool = False,
+    reduction: ReductionType = "mean",
+) -> Tensor:
+    r"""Weighted binary cross-entropy reconstruction loss for adjacency matrices.
+
+    This function computes the binary cross-entropy loss between a reconstructed
+    adjacency matrix and the true adjacency matrix. When `balance_links` is True,
+    it applies class-balancing weights to handle the imbalance between edges and
+    non-edges in sparse graphs. When `normalize_loss` is True, it normalizes by
+    the square of the number of nodes per graph.
+
+    The weighted BCE loss is computed as:
+
+    .. math::
+        \mathcal{L}_{\text{BCE}} = \text{BCE}(\text{rec\_adj}, \text{adj}, \text{weight})
+
+    where the weight is computed to balance positive and negative samples:
+
+    .. math::
+        w_{ij} = \frac{N^2}{n_{\text{edges}}} \cdot \text{adj}_{ij} + \frac{N^2}{n_{\text{non-edges}}} \cdot (1 - \text{adj}_{ij})
+
+    When `normalize_loss` is True, the loss is normalized by :math:`N^2` per graph:
+
+    .. math::
+        \mathcal{L}_{\text{normalized}} = \frac{\mathcal{L}_{\text{BCE}}}{N^2}
+
+    Args:
+        rec_adj (~torch.Tensor): The reconstructed adjacency matrix (logits) of shape
+            :math:`(B, N, N)`, where :math:`B` is the batch size and :math:`N` is
+            the number of nodes.
+        adj (~torch.Tensor): The true adjacency matrix of shape :math:`(B, N, N)`.
+        mask (Optional[~torch.Tensor]): A node mask of shape :math:`(B, N)` for
+            handling graphs with variable sizes within a batch. Default is None.
+        balance_links (bool): Whether to apply class-balancing weights to handle
+            edge/non-edge imbalance. Default is True.
+        normalize_loss (bool): Whether to normalize the loss by the square of the
+            number of nodes per graph. Default is False.
+        reduction (str): Reduction method applied to the batch dimension.
+            Can be 'mean' or 'sum'. Default is 'mean'.
+
+    Returns:
+        ~torch.Tensor: The weighted BCE reconstruction loss.
+    """
+    pos_weight = None
+    if balance_links:
+        # Calculate BCE weights to balance positive and negative samples
+        if mask is not None:
+            N = mask.sum(-1).view(-1, 1, 1)  # has shape B x 1 x 1
+        else:
+            N = adj.shape[-1]  # Number of nodes
+        n_edges = torch.clamp(adj.sum([-1, -2]), min=1).view(
+            -1, 1, 1
+        )  # this is a vector of size B x 1 x 1
+        n_not_edges = torch.clamp(N**2 - n_edges, min=1).view(
+            -1, 1, 1
+        )  # this is a vector of size B x 1 x 1
+        # the clamp is needed to avoid zero division when we have all edges
+        pos_weight = (N**2 / n_edges) * adj + (N**2 / n_not_edges) * (1 - adj)
+
+    loss = F.binary_cross_entropy_with_logits(
+        rec_adj, adj, weight=pos_weight, reduction="none"
+    )
+
+    # Apply mask if provided (create edge mask for adjacency matrices)
+    if mask is not None and not torch.all(mask):
+        # Create edge mask: (B, N) -> (B, N, N)
+        edge_mask = torch.einsum("bn,bm->bnm", mask, mask)
+        loss = loss * edge_mask
+
+    # Sum over both spatial dimensions (always the same for adjacency matrices)
+    loss = loss.sum((-1, -2))  # Sum over both spatial dimensions -> (B,)
+
+    # Normalize by N^2 if requested
+    if normalize_loss:
+        if mask is not None:
+            N_squared = mask.sum(-1) ** 2  # (B,)
+        else:
+            N_squared = adj.shape[-1] ** 2  # All nodes are valid
+        loss = loss / N_squared
+
+    return _reduce_loss(loss, reduction)
+
+
+def kl_loss(
+    q: Distribution,
+    p: Distribution,
+    mask: Optional[Tensor] = None,
+    node_axis: Optional[int] = None,
+    sum_axes: Optional[List[int]] = None,
+    normalize_loss: bool = False,
+    reduction: ReductionType = "mean",
+) -> Tensor:
+    r"""Compute KL divergence between two distributions with flexible axis control.
+
+    This function computes the KL divergence :math:`D_{KL}(q \parallel p)` between
+    two distributions, with explicit control over which axes to sum and how to
+    apply masking.
+
+    .. math::
+        D_{KL}(q \parallel p) = \mathbb{E}_{x \sim q}[\log q(x) - \log p(x)]
+
+    When `normalize_loss` is True, the loss is normalized by :math:`N^2` per graph:
+
+    .. math::
+        D_{KL,\text{normalized}} = \frac{D_{KL}(q \parallel p)}{N^2}
+
+    Args:
+        q (~torch.distributions.Distribution): The approximate posterior distribution.
+        p (~torch.distributions.Distribution): The prior distribution.
+        mask (Optional[~torch.Tensor]): A mask for handling variable-sized inputs.
+            Applied along the node_axis if specified. Default is None.
+        node_axis (Optional[int]): The axis along which nodes are arranged.
+            The mask will be applied along this axis. Default is None.
+        sum_axes (Optional[list]): List of axes to sum over after masking but before
+            final reduction. If None, sums over all axes except batch (axis 0).
+            Default is None.
+        reduction (str): Reduction method applied to the batch dimension.
+            Can be 'mean' or 'sum'. Default is 'mean'.
+
+    Returns:
+        ~torch.Tensor: The KL divergence loss (scalar after reduction).
+
+    Examples:
+        # Stick-breaking: (B, N, K-1) -> sum over K-1, then N
+        kl_loss(q, p, mask, node_axis=1, sum_axes=[2, 1])
+
+        # VAE latent: (B, latent_dim) -> sum over latent_dim
+        kl_loss(q, p, sum_axes=[1])
+
+        # Per-node but single dist: (B, N) -> sum over N
+        kl_loss(q, p, mask, node_axis=1, sum_axes=[1])
+    """
+    loss = kl_divergence(q, p)
+
+    # Store number of nodes for normalization (before summing changes the shape)
+    if normalize_loss and node_axis is not None:
+        if mask is not None:
+            num_nodes = mask.sum(node_axis)  # (B,) - actual number of nodes per graph
+        else:
+            num_nodes = loss.shape[node_axis]  # All nodes are valid
+
+    # Apply mask if provided
+    if mask is not None and node_axis is not None:
+        if not torch.all(mask):
+            # Expand mask to match loss dimensions
+            mask_shape = [1] * loss.dim()
+            mask_shape[node_axis] = mask.shape[node_axis]
+            if mask.dim() > 1:  # Handle batch dimension
+                mask_shape[0] = mask.shape[0]
+            expanded_mask = mask.view(mask_shape)
+            loss = loss * expanded_mask
+
+    # Sum over specified axes
+    if sum_axes is not None:
+        for axis in sorted(
+            sum_axes, reverse=True
+        ):  # Sum from last to first to maintain indices
+            loss = loss.sum(dim=axis)
+    else:
+        # Default: sum over all non-batch axes
+        sum_dims = list(range(1, loss.dim()))
+        for axis in reversed(sum_dims):
+            loss = loss.sum(dim=axis)
+
+    # Normalize by N^2 if requested
+    if normalize_loss:
+        N_squared = num_nodes**2  # (B,) - use stored num_nodes
+        loss = loss / N_squared
+
+    return _reduce_loss(loss, reduction)
+
+
+def cluster_connectivity_prior_loss(
+    K: Tensor,
+    K_mu: Tensor,
+    K_var: Tensor,
+    normalize_loss: bool = False,
+    mask: Optional[Tensor] = None,
+    reduction: ReductionType = "mean",
+) -> Tensor:
+    r"""Prior loss for cluster connectivity matrix in Bayesian nonparametric pooling.
+
+    This function computes the prior loss for the cluster connectivity matrix,
+    which regularizes the learned cluster-cluster connectivity probabilities
+    towards a prior distribution.
+
+    The prior loss is computed as:
+
+    .. math::
+        \mathcal{L}_{\text{K\_prior}} = \frac{1}{2} \sum_{i,j} \frac{(K_{ij} - \mu_{ij})^2}{\sigma^2}
+
+    where :math:`K` is the cluster connectivity matrix, :math:`\mu` is the prior mean,
+    and :math:`\sigma^2` is the prior variance.
+
+    Args:
+        K (~torch.Tensor): The cluster connectivity matrix of shape :math:`(K, K)`,
+            where :math:`K` is the number of clusters.
+        K_mu (~torch.Tensor): Prior mean matrix of shape :math:`(K, K)`.
+        K_var (~torch.Tensor): Prior variance (scalar).
+        normalize_loss (bool): Whether to normalize the loss by the square of the
+            number of nodes per graph. Default is False.
+        mask (Optional[~torch.Tensor]): A node mask for normalization. Only used
+            if normalize_loss is True. Default is None.
+        reduction (str): Reduction method applied to the batch dimension when
+            normalize_loss is True. Can be 'mean' or 'sum'. Default is 'mean'.
+
+    Returns:
+        ~torch.Tensor: The cluster connectivity prior loss (scalar).
+    """
+    prior_loss = (0.5 * (K - K_mu) ** 2 / K_var).sum()
+
+    # Normalize by N^2 if requested
+    if normalize_loss:
+        if mask is not None:
+            N_squared = mask.sum(-1) ** 2  # (B,) - per-graph N^2
+        else:
+            N_squared = K.shape[-1] ** 2  # All nodes are valid
+
+        prior_loss = prior_loss / N_squared  # scalar / vector = vector
+
+        return _reduce_loss(prior_loss, reduction)
+
+    return prior_loss
