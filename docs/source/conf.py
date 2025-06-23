@@ -145,8 +145,8 @@ html_favicon = "_static/favicon.svg"
 
 html_theme_options = {
     "logo_target": "/",
-    "light_logo": "_static/img/tgp-logo-bar.svg",
-    "dark_logo": "_static/img/tgp-logo-bar.svg",
+    "light_logo": "_static/img/tgp-logo-light.svg",
+    "dark_logo": "_static/img/tgp-logo-dark.svg",
 
     "accent_color": "violet",
 
@@ -177,8 +177,8 @@ html_sidebars = {
         "sidebars/localtoc.html",
         # "sidebars/repo-stats.html",
         # "sidebars/edit-this-page.html",
-        # "sidebars/carbon-ads.html",
-        # "sidebars/ethical-ads.html",
+        "sidebars/carbon-ads.html",
+        "sidebars/ethical-ads.html",
     ]
 }
 
@@ -220,12 +220,10 @@ def logo_role(name, rawtext, text, *args, **kwargs):
     else:
         raise RuntimeError
     node = nodes.image(uri=url, alt=str(name).capitalize() + ' logo')
-    classes = ['inline-logo', f'{name.lower().replace(" ", "-")}-inline-logo']
-    node['classes'] += classes
+    node['classes'] += ['inline-logo', name]
     if text != 'null':
         node['classes'].append('with-text')
         span = nodes.inline(text=text)
-        span['classes'] += [f'{node_cls}-text' for node_cls in classes]
         return [node, span], []
     return [node], []
 
