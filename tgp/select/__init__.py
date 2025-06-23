@@ -1,5 +1,6 @@
 from .base_select import Select, SelectOutput
 from .dense_select import DenseSelect
+from .dp_select import DPSelect
 from .edge_contraction_select import EdgeContractionSelect
 from .graclus_select import GraclusSelect
 from .kmis_select import KMISSelect, degree_scorer
@@ -23,6 +24,7 @@ select_classes = [
     "NDPSelect",
     "NMFSelect",
     "TopkSelect",
+    "DPSelect",
 ]
 
 __all__ = ["SelectOutput"] + select_classes + select_functions

@@ -1,5 +1,6 @@
 from .asap import ASAPooling
 from .asym_cheeger_cut import AsymCheegerCutPooling
+from .bnpool import BNPool
 from .diffpool import DiffPool
 from .dmon import DMoNPooling
 from .edge_contraction import EdgeContractionPooling
@@ -32,6 +33,7 @@ pooler_classes = [
     "PANPooling",
     "SAGPooling",
     "TopkPooling",
+    "BNPool",
 ]
 
 pooler_map = {
@@ -51,6 +53,7 @@ pooler_map = {
     "pan": PANPooling,
     "sag": SAGPooling,
     "topk": TopkPooling,
+    "bnpool": BNPool,
 }
 
 
