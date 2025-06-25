@@ -170,25 +170,3 @@ def test_bnpool_lifting_operation(small_batched_dense_graphs):
 
     # Check if lifted output has same dimensions as input
     assert lifted_out.shape == x.shape
-
-
-def test_bnpool_preprocessing_and_pos_weight_caching(single_sparse_graph):
-    """Test the lifting operation in BNPool."""
-    data = single_sparse_graph
-    pooler = BNPool(in_channels=data.x.shape[-1], k=3)
-
-    x, adj, mask = pooler.preprocessing(
-        x=data.x, edge_index=data.edge_index, use_cache=True
-    )
-
-    assert pooler.preprocessing_cache is not None
-    assert torch.isclose(pooler.preprocessing_cache, adj).all()
-
-    pooler(x=x, adj=adj)
-    cached_pos_weight = pooler._pos_weight_cache
-
-    assert cached_pos_weight is not None
-
-    pooler(x=x, adj=adj)
-
-    assert torch.isclose(pooler._pos_weight_cache, cached_pos_weight).all()

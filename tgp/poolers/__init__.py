@@ -19,6 +19,7 @@ from .topk import TopkPooling
 pooler_classes = [
     "ASAPooling",
     "AsymCheegerCutPooling",
+    "BNPool",
     "DiffPool",
     "DMoNPooling",
     "EdgeContractionPooling",
@@ -33,12 +34,12 @@ pooler_classes = [
     "PANPooling",
     "SAGPooling",
     "TopkPooling",
-    "BNPool",
 ]
 
 pooler_map = {
     "asap": ASAPooling,
     "acc": AsymCheegerCutPooling,
+    "bnpool": BNPool,
     "diff": DiffPool,
     "dmon": DMoNPooling,
     "ec": EdgeContractionPooling,
@@ -53,7 +54,6 @@ pooler_map = {
     "pan": PANPooling,
     "sag": SAGPooling,
     "topk": TopkPooling,
-    "bnpool": BNPool,
 }
 
 

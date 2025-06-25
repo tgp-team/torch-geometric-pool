@@ -6,7 +6,7 @@ Please, follow the steps below to create a pull request to add new features.
 
 ## 1. Install dependecies
 
-You will need to install additional dependencies to compile the documentation, to run the tests and the pre-commits
+You will need to install additional dependencies to compile the documentation, to run the tests and the pre-commits:
 
 ```bash
 pip install .[dev]
@@ -24,7 +24,7 @@ pip install .[dev]
 
 ```bash
 cd docs
-make html
+make clean html
 ```
 
 - To check the documentation you built, open `docs/build/index.html`.

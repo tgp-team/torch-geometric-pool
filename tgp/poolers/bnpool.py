@@ -1,15 +1,19 @@
 from typing import List, Optional, Union
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
-from torch.distributions import Beta, kl_divergence
+from torch.distributions import Beta
 
 from tgp.connect import DenseConnect, postprocess_adj_pool
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import DPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
+from tgp.utils.losses import (
+    cluster_connectivity_prior_loss,
+    kl_loss,
+    weighted_bce_reconstruction_loss,
+)
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -17,34 +21,86 @@ class BNPool(DenseSRCPooling):
     r"""The BN-Pool operator from the paper `"BN-Pool: a Bayesian Nonparametric Approach for Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
     (Castellana D., and Bianchi F.M., preprint, 2025).
 
+    BN-Pool implements a Bayesian nonparametric approach to graph pooling using a Dirichlet Process
+    with stick-breaking construction for cluster assignment. The method learns both the number of clusters
+    and their assignments through variational inference.
+
+    **Architecture:**
+
     + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.DPSelect` to perform variational inference of the stick-breaking process.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
+    **Mathematical Formulation:**
+
+    The method uses a truncated stick-breaking representation of the Dirichlet Process:
+
+    .. math::
+        \mathbf{v}_{ik} \sim \text{Beta}(\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}), \quad i = 1, \ldots, N \quad k = 1, \ldots, K-1
+
+    .. math::
+        \boldsymbol{\pi}_{ik} = \mathbf{v}_{ik} \prod_{j=1}^{k-1} (1 - \mathbf{v}_{ij})
+
+    where :math:`\boldsymbol{\pi}_{ik}` represents the probability of assigning node :math:`i` to cluster :math:`k`.
+    The coefficients :math:`\boldsymbol{\alpha}_{ik}` and :math:`\boldsymbol{\beta}_{ik}` are computed by an MLP
+    from node features :math:`\mathbf{x}_i`.
+
+    The cluster connectivity is modeled through a learnable matrix :math:`\mathbf{K} \in \mathbb{R}^{K \times K}`
+    and the pooled adjacency matrix is computed as:
+
+    .. math::
+        \mathbf{A}_{\text{rec}} = \mathbf{S} \mathbf{K} \mathbf{S}^{\top}
+
+    **Loss Functions:**
+
     This layer provides three auxiliary losses:
 
-    + the reconstruction loss, i.e., the binary cross-entropy loss between the true and the reconstructed adjacency matrix,
-    + the KL loss, i.e., the KL divergence between the prior and the posterior variational approximation of the assignments,
-    + the K prior loss, i.e., the KL divergence between the prior and the cluster connectivity matrix.
+    + **Reconstruction loss** (:func:`~tgp.utils.losses.weighted_bce_reconstruction_loss`): Binary cross-entropy loss between the true and reconstructed adjacency matrix :math:`\mathbf{A}_{\text{rec}}`.
+    + **KL divergence loss** (:func:`~tgp.utils.losses.kl_loss`): KL divergence between the prior and posterior variational approximation of the stick-breaking variables.
+    + **Cluster connectivity prior loss** (:func:`~tgp.utils.losses.cluster_connectivity_prior_loss`): Prior regularization on the cluster connectivity matrix :math:`\mathbf{K}`.
 
     Args:
-        in_channels (Union[int, List[int]]): The number of input channels or a list of input channels.
-        k (int): The maximum number of clusters to be used in the pooling mechanism.
-        alpha_DP (float, optional): Prior concentration parameter of the DP. Default is 1.0.
-        K_var (float, optional): Variance of the cluster connectivity prior. Default is 1.0.
-        K_mu (float, optional): Mean of the cluster connectivity prior. Default is 10.0.
-        K_init (float, optional): Initial value for the cluster connectivity prior. Default is 1.0.
-        eta (float, optional): Coefficient for the KL loss term. Default is 1.0.
-        rescale_loss (bool, optional): Flag indicating whether to rescale the loss during training. Default is True.
-        balance_links (bool, optional): Flag to enable balancing of incoming/outgoing links. Default is True.
-        train_K (bool, optional): Specifies whether the cluster connectivity matrix is learnable. Default is True.
-        act (str, optional): Activation function for the selector. Default is None.
-        dropout (float, optional): Dropout rate to be used in the selector. Default is 0.0.
-        adj_transpose (bool, optional): Flag whether to transpose adjacency matrices. Default is True.
-        lift (LiftType, optional): Specifies the operation used in the lifting step. Default is "precomputed".
-        s_inv_op (SinvType, optional): Specifies the sparse inverse operation in the selector.
-            Default is "transpose".
+        in_channels (Union[int, List[int]]): The number of input node feature channels.
+            If a list is provided, it specifies the architecture of the MLP in :class:`~tgp.select.DPSelect`.
+        k (int): The maximum number of clusters :math:`K` to be used in the pooling mechanism.
+            The actual number of active clusters is learned through the stick-breaking process.
+        alpha_DP (float, optional): Prior concentration parameter :math:`\alpha` of the Dirichlet Process.
+            Controls the expected number of clusters. Higher values encourage more clusters.
+            (default: :obj:`1.0`)
+        K_var (float, optional): Variance :math:`\sigma^2` of the Gaussian prior on the cluster connectivity matrix :math:`\mathbf{K}`.
+            (default: :obj:`1.0`)
+        K_mu (float, optional): Mean parameter for the cluster connectivity prior. The prior mean matrix is constructed as
+            :math:`\mathbf{K}_{\mu} = \mu \mathbf{I} - \mu (\mathbf{1}\mathbf{1}^{\top} - \mathbf{I})`.
+            (default: :obj:`10.0`)
+        K_init (float, optional): Initial value for the cluster connectivity matrix :math:`\mathbf{K}`.
+            (default: :obj:`1.0`)
+        eta (float, optional): Coefficient :math:`\eta` for weighting the KL divergence loss term.
+            (default: :obj:`1.0`)
+        rescale_loss (bool, optional): If :obj:`True`, losses are normalized by the number of nodes :math:`N^2`
+            to ensure proper scaling across different graph sizes.
+            (default: :obj:`True`)
+        balance_links (bool, optional): If :obj:`True`, applies class-balancing weights in the reconstruction loss
+            to handle the imbalance between edges and non-edges in sparse graphs.
+            (default: :obj:`True`)
+        train_K (bool, optional): If :obj:`True`, the cluster connectivity matrix :math:`\mathbf{K}` is learnable.
+            If :obj:`False`, :math:`\mathbf{K}` is fixed to its initial value.
+            (default: :obj:`True`)
+        act (str, optional): Activation function for the MLP in :class:`~tgp.select.DPSelect`.
+            (default: :obj:`None`)
+        dropout (float, optional): Dropout rate in the MLP of :class:`~tgp.select.DPSelect`.
+            (default: :obj:`0.0`)
+        adj_transpose (bool, optional): If :obj:`True`, adjacency matrices are transposed for compatibility
+            with dense message-passing layers.
+            (default: :obj:`True`)
+        lift (LiftType, optional): Specifies the operation used in the lifting step.
+            See :class:`~tgp.lift.BaseLift` for available options.
+            (default: :obj:`"precomputed"`)
+        s_inv_op (SinvType, optional): Specifies the method for computing :math:`\mathbf{S}^{-1}` in the selector.
+            See :class:`~tgp.select.DPSelect` for available options.
+            (default: :obj:`"transpose"`)
+
+
     """
 
     def __init__(
@@ -115,53 +171,11 @@ class BNPool(DenseSRCPooling):
             requires_grad=train_K,
         )
 
-        self._pos_weight_cache = None
-
     def reset_parameters(self):
         super().reset_parameters()
         self.K.data = self.K_init_val * torch.eye(
             self.k, self.k, device=self.K.device
         ) - self.K_init_val * (1 - torch.eye(self.k, self.k, device=self.K.device))
-
-    def _get_bce_weight(self, adj, mask):
-        """Calculates the binary cross-entropy (BCE) weight for a given adjacency matrix to ensure balancing
-        of positive and negative samples.
-
-        This function generates weights for BCE loss calculations by computing the
-        positive and negative edges contributions based on the given adjacency matrix
-        and an optional mask. If enabled, it does caching to improve performance.
-
-        Args:
-            adj (torch.Tensor): The adjacency matrix representing the graph. It should
-                be a tensor with `... x N x N` shape, where `N` is the number of nodes.
-            mask (torch.Tensor): Optional tensor mask applied on the adjacency
-                matrix for computation. It has the same dimensions as `adj`.
-
-        Returns:
-            torch.Tensor: Resulting tensor representing binary cross-entropy weights
-                with the same dimensions as the adjacency matrix.
-        """
-        use_cache = self.preprocessing_cache is not None
-
-        if use_cache and self._pos_weight_cache is not None:
-            pos_weight = self._pos_weight_cache
-        else:
-            if mask is not None:
-                N = mask.sum(-1).view(-1, 1, 1)  # has shape B x 1 x 1
-            else:
-                N = adj.shape[-1]
-            n_edges = torch.clamp(adj.sum([-1, -2]), min=1).view(
-                -1, 1, 1
-            )  # this is a vector of size B x 1 x 1
-            n_not_edges = torch.clamp(N**2 - n_edges, min=1).view(
-                -1, 1, 1
-            )  # this is a vector of size B x 1 x 1
-            # the clamp is needed to avoid zero division when we have all edges
-            pos_weight = (N**2 / n_edges) * adj + (N**2 / n_not_edges) * (1 - adj)
-
-            if use_cache:
-                self._pos_weight_cache = pos_weight
-        return pos_weight
 
     def forward(
         self,
@@ -172,23 +186,34 @@ class BNPool(DenseSRCPooling):
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
-        """Forward pass.
+        r"""Forward pass.
 
         Args:
-            x (Tensor): The input feature matrix.
-            adj (Optional[Tensor]): The adjacency matrix representing the graph's
-                structure. Default is None.
-            so (Optional[SelectOutput]): A selection output object used for lifting
-                or pooling operations. Default is None.
-            mask (Optional[Tensor]): A mask to apply during feature selection. Default
-                is None.
-            lifting (bool): Whether to perform a lifting operation instead of pooling.
-                Default is False.
-            **kwargs: Additional keyword arguments for specific implementations.
+            x (~torch.Tensor): Input node feature tensor of shape :math:`(B, N, F)` where:
+                - :math:`B` is the batch size
+                - :math:`N` is the (maximum) number of nodes per graph
+                - :math:`F` is the number of node features
+            adj (Optional[~torch.Tensor]): Dense adjacency tensor of shape :math:`(B, N, N)` representing
+                the graph structure. If :obj:`None`, no connectivity information is used.
+                (default: :obj:`None`)
+            so (Optional[:class:`~tgp.select.SelectOutput`]): Pre-computed selection output from a previous
+                forward pass. Used for lifting operations or when reusing assignments.
+                (default: :obj:`None`)
+            mask (Optional[~torch.Tensor]): Boolean node mask of shape :math:`(B, N)` indicating valid nodes
+                in each graph. Used to handle variable-sized graphs within batches.
+                (default: :obj:`None`)
+            lifting (bool): If :obj:`True`, performs lifting operation to map features from :math:`K` supernodes
+                back to :math:`N` original nodes using :math:`\mathbf{X}_{\text{lifted}} = \mathbf{S}^{-1} \mathbf{X}_{\text{pool}}`.
+                If :obj:`False`, performs standard pooling operation.
+                (default: :obj:`False`)
+            **kwargs: Additional keyword arguments passed to the underlying operators.
 
         Returns:
-            PoolingOutput: An object containing the pooled features, coarsened
-            adjacency matrix, selected outputs, and the loss value.
+            :class:`~tgp.src.PoolingOutput`: Pooling output containing:
+                - :attr:`x`: Pooled node features of shape :math:`(B, K, F)` where :math:`K \leq` :obj:`k`
+                - :attr:`edge_index`: Coarsened adjacency matrix of shape :math:`(B, K, K)`
+                - :attr:`so`: Selection output with assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
+                - :attr:`loss`: Dictionary with loss components: :obj:`'quality'`, :obj:`'kl'`, :obj:`'K_prior'`
         """
         if lifting:
             # Lift
@@ -220,62 +245,90 @@ class BNPool(DenseSRCPooling):
             return out
 
     def compute_loss(self, adj, mask, so) -> dict:
-        """Computes the loss components for the model.
+        r"""Computes the loss components for BN-Pool training.
 
-        This method calculates the reconstruction loss, the KL loss, and optionally
-        the prior loss over the cluster connectivity matrix `K`. Reconstruction and KL losses are rescaled by the number of total nodes
-        to ensure proper normalization when summing across graph structures. The final
-        loss components are returned as a dictionary.
+        This method calculates three loss components that guide the learning of cluster assignments
+        and connectivity patterns:
+
+        1. **Reconstruction Loss**: Measures how well the learned cluster connectivity matrix :math:`\mathbf{K}`
+           can reconstruct the original adjacency matrix through :math:`\mathbf{A}_{\text{rec}} = \mathbf{S} \mathbf{K} \mathbf{S}^{\top}`.
+
+        2. **KL Divergence Loss**: Regularizes the posterior stick-breaking variables :math:`q(v_k)` towards
+           the Dirichlet Process prior :math:`p(v_k)`.
+
+        3. **Cluster Connectivity Prior Loss**: Regularizes the learned connectivity matrix :math:`\mathbf{K}`
+           towards the specified prior distribution.
+
+        All losses can be optionally normalized by :math:`N^2` (number of node pairs) when :attr:`rescale_loss=True`
+        to ensure consistent scaling across different graph sizes.
 
         Args:
-            adj: Adjacency matrix to reconstruct with shape `B x N x N`, where `B`
-                is the batch size and `N` is the number of nodes per graph.
-            mask: Node mask of shape `B x N` for differentiating valid nodes, used
-                to handle graphs with variable sizes within a batch.
-            so: An object containing `s` (soft assignments of nodes to components)
-                and `q_z` (latent distribution parameters for each node).
+            adj (~torch.Tensor): True adjacency matrix of shape :math:`(B, N, N)` to reconstruct.
+            mask (~torch.Tensor): Boolean node mask of shape :math:`(B, N)` indicating valid nodes.
+                Used to handle variable-sized graphs within batches.
+            so (:class:`~tgp.select.SelectOutput`): Selection output containing:
+                - :attr:`s`: Soft assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
+                - :attr:`q_z`: Posterior Beta distributions for stick-breaking variables
 
         Returns:
-            dict: A dictionary containing the following loss terms:
-                - 'quality': Mean reconstruction loss after summing over the nodes
-                     and rescaling.
-                - 'kl': Mean KL loss with rescaling, after adjusting by the scaling
-                     factor `eta`.
-                - 'K_prior': Mean prior loss for the number of clusters `K`. If
-                     `train_K` is False, this will be zero.
+            dict: Dictionary containing three loss components:
+                - :obj:`'quality'`: Reconstruction loss :math:`\mathcal{L}_{\text{rec}}`
+                  (see :func:`~tgp.utils.losses.weighted_bce_reconstruction_loss`)
+                - :obj:`'kl'`: KL divergence loss :math:`\eta \cdot \mathcal{L}_{\text{KL}}` weighted by :attr:`eta`
+                  (see :func:`~tgp.utils.losses.kl_loss`)
+                - :obj:`'K_prior'`: Cluster connectivity prior loss :math:`\mathcal{L}_{\mathbf{K}}`
+                  (see :func:`~tgp.utils.losses.cluster_connectivity_prior_loss`).
+                  Set to :obj:`0.0` if :attr:`train_K=False`.
+
+        Note:
+            The total training loss is typically computed as:
+            :math:`\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{rec}} + \mathcal{L}_{\text{KL}} + \mathcal{L}_{\mathbf{K}}`
         """
         s, q_z = so.s, so.q_z
         rec_adj = self.get_rec_adj(s)
-        rec_loss = self.dense_rec_loss(rec_adj, adj, mask)  # has shape B x N x N
-        kl_loss = self.eta * self.kl_loss(q_z)  # has shape B x N
 
-        K_prior_loss = (
-            self.K_prior_loss() if self.train_K else torch.tensor(0.0)
-        )  # has shape 1
-        # sum losses over nodes by considering the right number of nodes for each graph
-        if mask is not None and not torch.all(mask):
-            edge_mask = torch.einsum("bn,bm->bnm", mask, mask)  # has shape B x N x N
-            rec_loss = rec_loss * edge_mask
-            kl_loss = kl_loss * mask
-        rec_loss = rec_loss.sum((-1, -2))  # has shape B
-        kl_loss = kl_loss.sum(-1)  # has shape B
+        # Reconstruction loss
+        rec_loss = weighted_bce_reconstruction_loss(
+            rec_adj,
+            adj,
+            mask,
+            balance_links=self.balance_links,
+            normalize_loss=self.rescale_loss,
+            reduction="mean",
+        )
 
-        # RESCALE THE LOSSES
-        if self.rescale_loss:
-            if mask is not None:
-                N_2 = mask.sum(-1) ** 2
-            else:
-                N_2 = adj.shape[1] ** 2
+        # KL loss
+        alpha_prior = self.get_buffer("alpha_prior")
+        beta_prior = self.get_buffer("beta_prior")
+        prior_dist = Beta(alpha_prior, beta_prior)
+        kl_loss_value = kl_loss(
+            q_z,
+            prior_dist,
+            mask=mask,
+            node_axis=1,  # Nodes are on axis 1: (B, N, K-1)
+            sum_axes=[2, 1],  # Sum over K-1 components (axis 2), then nodes (axis 1)
+            normalize_loss=self.rescale_loss,
+            reduction="mean",
+        )
 
-            rec_loss = rec_loss / N_2
-            kl_loss = kl_loss / N_2
-            K_prior_loss = K_prior_loss / N_2
+        # K prior loss
+        if self.train_K:
+            K_prior_loss = cluster_connectivity_prior_loss(
+                self.K,
+                self.get_buffer("K_mu"),
+                self.get_buffer("K_var"),
+                normalize_loss=self.rescale_loss,
+                mask=mask,
+                reduction="mean",
+            )
+        else:
+            K_prior_loss = torch.tensor(0.0)
 
         # build the output dictionary
         return {
-            "quality": rec_loss.mean(),
-            "kl": self.eta * kl_loss.mean(),
-            "K_prior": K_prior_loss.mean(),
+            "quality": rec_loss,
+            "kl": self.eta * kl_loss_value,
+            "K_prior": K_prior_loss,
         }
 
     def extra_repr_args(self) -> dict:
@@ -292,24 +345,3 @@ class BNPool(DenseSRCPooling):
 
     def get_rec_adj(self, S):
         return S @ self.K @ S.transpose(-1, -2)
-
-    def dense_rec_loss(self, rec_adj, adj, mask):
-        pos_weight = None
-        if self.balance_links:
-            pos_weight = self._get_bce_weight(adj, mask)
-
-        loss = F.binary_cross_entropy_with_logits(
-            rec_adj, adj, weight=pos_weight, reduction="none"
-        )
-
-        return loss  # has shape B x N x N
-
-    def kl_loss(self, q_z):
-        p_z = Beta(self.get_buffer("alpha_prior"), self.get_buffer("beta_prior"))
-        loss = kl_divergence(q_z, p_z).sum(-1)
-        return loss  # has shape B x N
-
-    def K_prior_loss(self):
-        K_mu, K_var = self.get_buffer("K_mu"), self.get_buffer("K_var")
-        K_prior_loss = (0.5 * (self.K - K_mu) ** 2 / K_var).sum()
-        return K_prior_loss  # has shape 1

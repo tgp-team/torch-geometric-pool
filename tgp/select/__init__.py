@@ -17,6 +17,7 @@ select_classes = [
     "Select",
     "SelectOutput",
     "DenseSelect",
+    "DPSelect",
     "EdgeContractionSelect",
     "GraclusSelect",
     "LaPoolSelect",
@@ -24,7 +25,6 @@ select_classes = [
     "NDPSelect",
     "NMFSelect",
     "TopkSelect",
-    "DPSelect",
 ]
 
 __all__ = ["SelectOutput"] + select_classes + select_functions

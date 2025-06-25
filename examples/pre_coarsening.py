@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch_geometric import seed_everything
 from torch_geometric.datasets import TUDataset
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import ARMAConv
 
 from tgp.connect import DenseConnectSPT, KronConnect, SparseConnect
 from tgp.data import PoolDataLoader, PreCoarsening
@@ -50,7 +50,9 @@ for pooler in poolers:
             num_classes = dataset.num_classes
 
             # First MP layer
-            self.conv1 = GCNConv(in_channels=num_features, out_channels=hidden_channels)
+            self.conv1 = ARMAConv(
+                in_channels=num_features, out_channels=hidden_channels, num_layers=2
+            )
 
             # Pooling
             self.reducer = reducer
@@ -58,7 +60,11 @@ for pooler in poolers:
             # Second MP layer
             self.next_conv = torch.nn.ModuleList(
                 [
-                    GCNConv(in_channels=hidden_channels, out_channels=hidden_channels)
+                    ARMAConv(
+                        in_channels=hidden_channels,
+                        out_channels=hidden_channels,
+                        num_layers=2,
+                    )
                     for _ in range(N_LEVELS)
                 ]
             )

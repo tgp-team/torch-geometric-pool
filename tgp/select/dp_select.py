@@ -10,27 +10,71 @@ from tgp.utils.typing import SinvType
 
 
 class DPSelect(DenseSelect):
-    r"""The select operator for the BN-Pool operator (:class:`~tgp.poolers.BNPool`)
+    r"""The Dirichlet Process selection operator for the BN-Pool operator (:class:`~tgp.poolers.BNPool`)
     as proposed in the paper `"BN-Pool: a Bayesian Nonparametric Approach for Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
     (Castellana D., and Bianchi F.M., preprint, 2025).
 
-    It provides a mechanism for performing dense Dirichlet Process-based selection.
-    This class extends the DenseSelect class and is designed to compute the assignment matrix S by leveraging
-    a truncated stick-breaking variational approximation of the DP posterior. To this end, an MLP is used to compute
-    the alpha and beta parameters of the stick fractions' variational distribution; then, the final assignment matrix is
-    obtained by simulating the stick breaking process.
+    **Overview:**
+
+    DPSelect implements a Bayesian nonparametric selection mechanism using a truncated stick-breaking
+    representation of the Dirichlet Process. This allows the model to automatically learn both
+    the number of clusters and their assignments through variational inference.
+
+    **Mathematical Formulation:**
+
+    The method uses a truncated stick-breaking process to model cluster assignments:
+
+    .. math::
+        \mathbf{v}_{ik} \sim \text{Beta}(\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}), \quad k = 1, \ldots, K-1, \quad i = 1, \ldots, N
+
+    where :math:`\mathbf{v}_{ik}` are the stick-breaking fractions. The assignment of node :math:`i` to cluster :math:`k` is computed as:
+
+    .. math::
+        \boldsymbol{\pi}_{ik} = \mathbf{v}_{ik} \prod_{j=1}^{k-1} (1 - \mathbf{v}_{ij}) \quad \text{for } k = 1, \ldots, K-1
+
+    The variational parameters :math:`\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}` are computed by an MLP from node features:
+
+    .. math::
+        [\boldsymbol{\alpha}_{i,1}, \ldots, \boldsymbol{\alpha}_{i,K-1}, \boldsymbol{\beta}_{i,1}, \ldots, \boldsymbol{\beta}_{i,K-1}] = \text{softplus}(\text{MLP}(\mathbf{x}_i))
+
+    **Architecture:**
+
+    1. **Feature Processing**: Node features :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}` are processed
+       by an MLP to produce :math:`2(K-1)` outputs per node.
+
+    2. **Parameter Extraction**: The MLP output is split into :math:`\alpha` and :math:`\beta` parameters
+       for :math:`K-1` Beta distributions.
+
+    3. **Sampling**: Stick-breaking fractions are obtained from the sampling procedure implemented in :class:`~torch.distributions.beta.Beta`:
+       :math:`\mathbf{v}_{ik} = \text{Beta}(\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}).rsample()`.
+
+    4. **Cluster Assignment**: The assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
+       is computed via the stick-breaking construction: :math:`\mathbf{S}_{[i,:]} = \mathbf{v}_{[i,:]}`.
 
     Args:
-        in_channels: Input channels, defined as either an integer or a list
-            of integers, which represent the number of channels.
-        k: The maximum number of clusters.
-        act: Name of the activation function to be used. Defaults to None if
-            no activation is specified.
-        dropout: Dropout probability applied during training for regularization.
-            Takes values between 0.0 and 1.0. Defaults to 0.0.
-        s_inv_op: An operation type to handle invariant operations for specific
-            models. Accepts values of the SinvType enumeration. Defaults to
-            "transpose".
+        in_channels (Union[int, List[int]]): Input feature dimensions. If an integer, specifies the input size.
+            If a list, defines the full MLP architecture including hidden layers.
+        k (int): Maximum number of clusters :math:`K`. The actual number of active clusters is learned
+            through the stick-breaking process.
+        act (str, optional): Activation function for the MLP hidden layers.
+            See :class:`~torch_geometric.nn.models.mlp.MLP` for available options.
+            (default: :obj:`None`)
+        dropout (float, optional): Dropout probability in the MLP for regularization during training.
+            Must be between 0.0 and 1.0.
+            (default: :obj:`0.0`)
+        s_inv_op (:class:`~tgp.utils.typing.SinvType`, optional): Method for computing the pseudo-inverse
+            :math:`\mathbf{S}^{-1}` of the assignment matrix for lifting operations.
+
+            - :obj:`"transpose"`: Use :math:`\mathbf{S}^{-1} = \mathbf{S}^{\top}`
+            - :obj:`"inverse"`: Use Moore-Penrose pseudoinverse :math:`\mathbf{S}^{-1} = \mathbf{S}^{+}`
+
+            (default: :obj:`"transpose"`)
+
+    Note:
+        This class extends :class:`~tgp.select.DenseSelect` but replaces the softmax assignment
+        with the stick-breaking construction. The output includes both the assignment matrix
+        :math:`\mathbf{S}` and the posterior distributions :math:`q(\mathbf{v}_k)` for computing KL divergence losses.
+
     """
 
     is_dense = True
@@ -91,25 +135,39 @@ class DPSelect(DenseSelect):
     def forward(
         self, x: Tensor, mask: Optional[Tensor] = None, **kwargs
     ) -> SelectOutput:
-        """Applies the selection operator to the input data.
+        r"""Applies the Dirichlet Process selection operator to compute cluster assignments.
 
-        This function takes input data to compute the parameters (q_v_alpha, q_v_beta) of the stick fractions'
-        variational approximation. Then, a sample from the posterior is obtained by using the rsample method of the
-        Beta distribution. This allows backpropagate through the sampling step. Finally, the assignment matrix S is
-        obtained by simulating the stick breaking process.
+        This method performs the following steps:
+
+        1. Processes node features through an MLP to obtain Beta distribution parameters
+        2. Samples stick-breaking fractions using the reparameterization trick
+        3. Computes cluster assignment probabilities via stick-breaking construction
+        4. Applies optional masking for variable-sized graphs
 
         Args:
-            x (Tensor): The input tensor to be processed. Typically expected to be
-                either a 2D tensor (batch, features) or a 3D tensor with additional dimensions.
-                If the input tensor has 2D, it is unsqueezed to 3D before further processing.
-            mask (Optional[Tensor]): A tensor to mask portions of the generated output.
-                The mask is expected to be applied along the last dimension of the output.
-            **kwargs: Additional keyword arguments that can be passed to extend functionality
-                or adapt the processing behavior as needed.
+            x (~torch.Tensor): Input node features of shape :math:`(B, N, F)` where:
+                - :math:`B` is batch size
+                - :math:`N` is number of nodes per graph
+                - :math:`F` is feature dimension
+                If input is 2D with shape :math:`(N, F)`, it will be unsqueezed to :math:`(1, N, F)`.
+            mask (Optional[~torch.Tensor]): Boolean mask of shape :math:`(B, N)` indicating valid nodes.
+                Applied element-wise to zero out assignments for invalid nodes.
+                (default: :obj:`None`)
+            **kwargs: Additional keyword arguments (unused, for compatibility with base class).
 
         Returns:
-            SelectOutput: An object containing the processed output `s`, its inverse
-                operation `s_inv_op`, the optional mask, and the sampled distribution `q_z`.
+            :class:`~tgp.select.SelectOutput`: Selection output containing:
+                - :attr:`s`: Assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}` with
+                  cluster probabilities for each node
+                - :attr:`s_inv_op`: Method used for computing :math:`\mathbf{S}^{-1}`
+                - :attr:`mask`: Copy of the input mask (if provided)
+                - :attr:`q_z`: Posterior Beta distributions :math:`q(\mathbf{v}_k)` for each stick-breaking fraction,
+                  used for computing KL divergence losses
+
+        Note:
+            The sampling method :meth:`~torch.distributions.beta.Beta.rsample` implements a pathwise gradient estimator
+            that allows to back-propagate the gradient from the samples to the distribution parameters,
+            making the method end-to-end differentiable.
         """
         x = x.unsqueeze(0) if x.dim() == 2 else x
 
