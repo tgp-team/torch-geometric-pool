@@ -18,8 +18,8 @@ from tgp.utils.typing import LiftType, SinvType
 
 
 class BNPool(DenseSRCPooling):
-    r"""The BN-Pool operator from the paper `"BN-Pool: a Bayesian Nonparametric Approach for Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
-    (Castellana D., and Bianchi F.M., preprint, 2025).
+    r"""The BN-Pool operator from the paper `"BN-Pool: Bayesian Nonparametric Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
+    (Castellana & Bianchi, 2025).
 
     BN-Pool implements a Bayesian nonparametric approach to graph pooling using a Dirichlet Process
     with stick-breaking construction for cluster assignment. The method learns both the number of clusters
@@ -37,13 +37,13 @@ class BNPool(DenseSRCPooling):
     The method uses a truncated stick-breaking representation of the Dirichlet Process:
 
     .. math::
-        \mathbf{v}_{ik} \sim \text{Beta}(\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}), \quad i = 1, \ldots, N \quad k = 1, \ldots, K-1
+        v_{ik} \sim \text{Beta}(\alpha_{ik}, \beta_{ik}), \quad i = 1, \ldots, N \quad k = 1, \ldots, K-1
 
     .. math::
-        \boldsymbol{\pi}_{ik} = \mathbf{v}_{ik} \prod_{j=1}^{k-1} (1 - \mathbf{v}_{ij})
+        \pi_{ik} = v_{ik} \prod_{j=1}^{k-1} (1 - v_{ij})
 
-    where :math:`\boldsymbol{\pi}_{ik}` represents the probability of assigning node :math:`i` to cluster :math:`k`.
-    The coefficients :math:`\boldsymbol{\alpha}_{ik}` and :math:`\boldsymbol{\beta}_{ik}` are computed by an MLP
+    where :math:`\pi_{ik}` represents the probability of assigning node :math:`i` to cluster :math:`k`.
+    The coefficients :math:`\alpha_{ik}` and :math:`\beta_{ik}` are computed by an MLP
     from node features :math:`\mathbf{x}_i`.
 
     The cluster connectivity is modeled through a learnable matrix :math:`\mathbf{K} \in \mathbb{R}^{K \times K}`
@@ -51,6 +51,8 @@ class BNPool(DenseSRCPooling):
 
     .. math::
         \mathbf{A}_{\text{rec}} = \mathbf{S} \mathbf{K} \mathbf{S}^{\top}
+
+    where :math:`S_{ik} = \pi_{ik}`.
 
     **Loss Functions:**
 
@@ -90,17 +92,31 @@ class BNPool(DenseSRCPooling):
             (default: :obj:`None`)
         dropout (float, optional): Dropout rate in the MLP of :class:`~tgp.select.DPSelect`.
             (default: :obj:`0.0`)
-        adj_transpose (bool, optional): If :obj:`True`, adjacency matrices are transposed for compatibility
-            with dense message-passing layers.
+        adj_transpose (bool, optional):
+            If :obj:`True`, the preprocessing step in :class:`tgp.src.DenseSRCPooling` and
+            the :class:`tgp.connect.DenseConnect` operation returns transposed
+            adjacency matrices, so that they could be passed "as is" to the dense
+            message-passing layers.
             (default: :obj:`True`)
-        lift (LiftType, optional): Specifies the operation used in the lifting step.
-            See :class:`~tgp.lift.BaseLift` for available options.
-            (default: :obj:`"precomputed"`)
-        s_inv_op (SinvType, optional): Specifies the method for computing :math:`\mathbf{S}^{-1}` in the selector.
-            See :class:`~tgp.select.DPSelect` for available options.
-            (default: :obj:`"transpose"`)
+        lift (~tgp.typing.LiftType, optional):
+            Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
+            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the :obj:`"s_inv"` attribute of the :class:`tgp.select.SelectOutput`.
+            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+              the transpose of :math:`\mathbf{S}`.
+            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+              the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
 
+        s_inv_op (~tgp.typing.SinvType, optional):
+            The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            the :class:`tgp.select.SelectOutput`. It can be one of:
+
+            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+              the transpose of :math:`\mathbf{S}`.
+            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+              the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
     def __init__(
@@ -189,31 +205,22 @@ class BNPool(DenseSRCPooling):
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor): Input node feature tensor of shape :math:`(B, N, F)` where:
-                - :math:`B` is the batch size
-                - :math:`N` is the (maximum) number of nodes per graph
-                - :math:`F` is the number of node features
-            adj (Optional[~torch.Tensor]): Dense adjacency tensor of shape :math:`(B, N, N)` representing
-                the graph structure. If :obj:`None`, no connectivity information is used.
+            x (~torch.Tensor): Node feature tensor
+                :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`, with
+                batch-size :math:`B`, (maximum) number of nodes :math:`N` for
+                each graph, and feature dimension :math:`F`.
+            adj (~torch.Tensor): Adjacency tensor
+                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
+            so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
-            so (Optional[:class:`~tgp.select.SelectOutput`]): Pre-computed selection output from a previous
-                forward pass. Used for lifting operations or when reusing assignments.
-                (default: :obj:`None`)
-            mask (Optional[~torch.Tensor]): Boolean node mask of shape :math:`(B, N)` indicating valid nodes
-                in each graph. Used to handle variable-sized graphs within batches.
-                (default: :obj:`None`)
-            lifting (bool): If :obj:`True`, performs lifting operation to map features from :math:`K` supernodes
-                back to :math:`N` original nodes using :math:`\mathbf{X}_{\text{lifted}} = \mathbf{S}^{-1} \mathbf{X}_{\text{pool}}`.
-                If :obj:`False`, performs standard pooling operation.
+            mask (~torch.Tensor, optional): Mask matrix
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
+                the valid nodes in each graph. (default: :obj:`None`)
+            lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
-            **kwargs: Additional keyword arguments passed to the underlying operators.
 
         Returns:
-            :class:`~tgp.src.PoolingOutput`: Pooling output containing:
-                - :attr:`x`: Pooled node features of shape :math:`(B, K, F)` where :math:`K \leq` :obj:`k`
-                - :attr:`edge_index`: Coarsened adjacency matrix of shape :math:`(B, K, K)`
-                - :attr:`so`: Selection output with assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
-                - :attr:`loss`: Dictionary with loss components: :obj:`'quality'`, :obj:`'kl'`, :obj:`'K_prior'`
+            ~tgp.src.PoolingOutput: The output of the pooling operator.
         """
         if lifting:
             # Lift

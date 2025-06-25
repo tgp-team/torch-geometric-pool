@@ -500,17 +500,15 @@ def weighted_bce_reconstruction_loss(
     non-edges in sparse graphs. When :obj:`normalize_loss` is :obj:`True`, it normalizes by
     the square of the number of nodes per graph.
 
-    **Mathematical Formulation:**
-
     The weighted BCE loss is computed as:
 
     .. math::
-        \mathcal{L}_{\text{BCE}} = \text{BCE}(\mathbf{A}_{\text{rec}}, \mathbf{A}, w)
+        \mathcal{L}_{\text{BCE}} = \text{BCE}(\mathbf{A}_{\text{rec}}, \mathbf{A}, \mathbf{W})
 
-    where the weight matrix :math:`w` is computed to balance positive and negative samples:
+    where the weight matrix :math:`\mathbf{W}` is computed to balance positive and negative samples:
 
     .. math::
-        w_{ij} = \frac{N^2}{n_{\text{edges}}} \cdot A_{ij} + \frac{N^2}{n_{\text{non-edges}}} \cdot (1 - A_{ij})
+        W_{ij} = \frac{N^2}{n_{\text{edges}}} \cdot A_{ij} + \frac{N^2}{n_{\text{non-edges}}} \cdot (1 - A_{ij})
 
     with :math:`n_{\text{edges}} = \sum_{i,j} A_{ij}` and :math:`n_{\text{non-edges}} = N^2 - n_{\text{edges}}`.
 
@@ -530,8 +528,7 @@ def weighted_bce_reconstruction_loss(
             node pairs contribute to the loss computation.
             (default: :obj:`None`)
         balance_links (bool, optional): Whether to apply class-balancing weights to handle
-            edge/non-edge imbalance. When :obj:`True`, positive samples (edges) are weighted
-            by :math:`\frac{N^2 - n_{\text{edges}}}{n_{\text{edges}}}` to balance sparse graphs.
+            edge/non-edge imbalance.
             (default: :obj:`True`)
         normalize_loss (bool, optional): Whether to normalize the loss by the square of the
             number of nodes per graph :math:`N^2`. This ensures consistent scaling across
@@ -543,13 +540,6 @@ def weighted_bce_reconstruction_loss(
 
     Returns:
         ~torch.Tensor: The weighted BCE reconstruction loss, reduced according to :obj:`reduction`.
-
-    Note:
-        - When :obj:`balance_links=False`, this reduces to standard binary cross-entropy loss
-        - The class balancing prevents the model from trivially predicting all zeros for sparse graphs
-        - Masking ensures that padding nodes in batched graphs don't contribute to the loss
-        - Used as the reconstruction loss in :class:`~tgp.poolers.BNPool` to measure how well
-          the cluster connectivity matrix :math:`\mathbf{K}` reconstructs the original adjacency
     """
     pos_weight = None
     if balance_links:
@@ -618,14 +608,14 @@ def kl_loss(
         q (~torch.distributions.Distribution): The approximate posterior distribution.
         p (~torch.distributions.Distribution): The prior distribution.
         mask (Optional[~torch.Tensor]): A mask for handling variable-sized inputs.
-            Applied along the node_axis if specified. Default is None.
+            Applied along the node_axis if specified. (default: :obj:`None`)
         node_axis (Optional[int]): The axis along which nodes are arranged.
-            The mask will be applied along this axis. Default is None.
+            The mask will be applied along this axis. (default: :obj:`None`)
         sum_axes (Optional[list]): List of axes to sum over after masking but before
-            final reduction. If None, sums over all axes except batch (axis 0).
-            Default is None.
+            final reduction. If :obj:`None`, sums over all axes except batch (axis 0).
+            (default: :obj:`None`)
         reduction (str): Reduction method applied to the batch dimension.
-            Can be 'mean' or 'sum'. Default is 'mean'.
+            Can be :obj:`'mean'` or :obj:`'sum'`. (default: :obj:`'mean'`).
 
     Returns:
         ~torch.Tensor: The KL divergence loss (scalar after reduction).
@@ -748,15 +738,14 @@ def cluster_connectivity_prior_loss(
             (default: :obj:`None`)
         reduction (:class:`~tgp.utils.typing.ReductionType`, optional): Reduction method applied to the batch dimension when
             :obj:`normalize_loss` is :obj:`True`. Can be :obj:`'mean'` or :obj:`'sum'`.
-            (default: :obj:`"mean"`)
+            (default: :obj:`'mean'`)
 
     Returns:
-        ~torch.Tensor: The cluster connectivity prior loss. Returns a scalar when
-            :obj:`normalize_loss=False`, or a reduced tensor when :obj:`normalize_loss=True`.
+        ~torch.Tensor: The cluster connectivity prior loss.
 
     Note:
         - Typically used with :math:`\mu_{\text{diag}} > 0` and :math:`\mu_{\text{off}} < 0`
-        - The loss strength can be controlled through both :obj:`K_var`
+        - The loss strength can be controlled through :obj:`K_var`
     """
     prior_loss = (0.5 * (K - K_mu) ** 2 / K_var).sum()
 
