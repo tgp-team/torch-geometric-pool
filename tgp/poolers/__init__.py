@@ -39,6 +39,7 @@ pooler_classes = [
 pooler_map = {
     "asap": ASAPooling,
     "acc": AsymCheegerCutPooling,
+    "bnpool": BNPool,
     "diff": DiffPool,
     "dmon": DMoNPooling,
     "ec": EdgeContractionPooling,
@@ -53,7 +54,6 @@ pooler_map = {
     "pan": PANPooling,
     "sag": SAGPooling,
     "topk": TopkPooling,
-    "bnpool": BNPool,
 }
 
 

@@ -609,7 +609,7 @@ def kl_loss(
     .. math::
         D_{KL}(q \parallel p) = \mathbb{E}_{x \sim q}[\log q(x) - \log p(x)]
 
-    When `normalize_loss` is True, the loss is normalized by :math:`N^2` per graph:
+    When :obj:`normalize_loss` is True, the loss is normalized by :math:`N^2`:
 
     .. math::
         D_{KL,\text{normalized}} = \frac{D_{KL}(q \parallel p)}{N^2}
@@ -649,7 +649,6 @@ def kl_loss(
         ... )
         >>> # Compute KL loss: sum over K-1 components, then over nodes
         >>> loss = kl_loss(q_sb, p_sb, mask=mask, node_axis=1, sum_axes=[2, 1])
-        >>> print(f"KL loss: {loss.item():.4f}")
     """
     loss = kl_divergence(q, p)
 
@@ -699,16 +698,12 @@ def cluster_connectivity_prior_loss(
     mask: Optional[Tensor] = None,
     reduction: ReductionType = "mean",
 ) -> Tensor:
-    r"""Prior loss for cluster connectivity matrix in Bayesian nonparametric pooling.
+    r"""Prior loss for cluster connectivity matrix in :class:`~tgp.poolers.BNPool`.
 
     This function computes the prior loss for the cluster connectivity matrix :math:`\mathbf{K}`,
     which regularizes the learned cluster-cluster connectivity probabilities
-    towards a prior distribution. The loss implements a Gaussian prior that encourages
-    specific structural patterns in the connectivity matrix.
-
-    **Mathematical Formulation:**
-
-    The prior loss is computed as the negative log-likelihood of a Gaussian prior:
+    towards a prior distribution. The prior loss is computed as the negative
+    log-likelihood of a Gaussian prior:
 
     .. math::
         \mathcal{L}_{\mathbf{K}} = \frac{1}{2} \sum_{i,j} \frac{(K_{ij} - \mu_{ij})^2}{\sigma^2}
@@ -760,15 +755,8 @@ def cluster_connectivity_prior_loss(
             :obj:`normalize_loss=False`, or a reduced tensor when :obj:`normalize_loss=True`.
 
     Note:
-        - This loss is one of the three components in :class:`~tgp.poolers.BNPool` training
-        - The prior structure promotes interpretable clustering by encouraging block-diagonal
-          adjacency reconstruction patterns
         - Typically used with :math:`\mu_{\text{diag}} > 0` and :math:`\mu_{\text{off}} < 0`
-        - The loss strength can be controlled through both :obj:`K_var` and external weighting
-
-    See Also:
-        :func:`~tgp.utils.losses.weighted_bce_reconstruction_loss`: Reconstruction loss component
-        :func:`~tgp.utils.losses.kl_loss`: KL divergence loss component for stick-breaking variables
+        - The loss strength can be controlled through both :obj:`K_var`
     """
     prior_loss = (0.5 * (K - K_mu) ** 2 / K_var).sum()
 

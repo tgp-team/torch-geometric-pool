@@ -17,7 +17,7 @@ class DPSelect(DenseSelect):
     **Overview:**
 
     DPSelect implements a Bayesian nonparametric selection mechanism using a truncated stick-breaking
-    representation of the Dirichlet Process (DP). This allows the model to automatically learn both
+    representation of the Dirichlet Process. This allows the model to automatically learn both
     the number of clusters and their assignments through variational inference.
 
     **Mathematical Formulation:**
@@ -25,20 +25,17 @@ class DPSelect(DenseSelect):
     The method uses a truncated stick-breaking process to model cluster assignments:
 
     .. math::
-        v_k \sim \text{Beta}(\alpha_k, \beta_k), \quad k = 1, \ldots, K-1
+        \mathbf{v}_{ik} \sim \text{Beta}(\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}), \quad k = 1, \ldots, K-1, \quad i = 1, \ldots, N
 
-    where :math:`v_k` are the stick-breaking fractions. The cluster probabilities are computed as:
-
-    .. math::
-        \pi_k = \begin{cases}
-        v_k \prod_{j=1}^{k-1} (1 - v_j) & \text{for } k = 1, \ldots, K-1 \\
-        \prod_{j=1}^{K-1} (1 - v_j) & \text{for } k = K
-        \end{cases}
-
-    The variational parameters :math:`\alpha_k, \beta_k` are computed by an MLP from node features:
+    where :math:`\mathbf{v}_{ik}` are the stick-breaking fractions. The assignment of node :math:`i` to cluster :math:`k` is computed as:
 
     .. math::
-        [\alpha_1, \ldots, \alpha_{K-1}, \beta_1, \ldots, \beta_{K-1}] = \text{softplus}(\text{MLP}(\mathbf{X}))
+        \boldsymbol{\pi}_{ik} = \mathbf{v}_{ik} \prod_{j=1}^{k-1} (1 - \mathbf{v}_{ij}) \quad \text{for } k = 1, \ldots, K-1
+
+    The variational parameters :math:`\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}` are computed by an MLP from node features:
+
+    .. math::
+        [\boldsymbol{\alpha}_{i,1}, \ldots, \boldsymbol{\alpha}_{i,K-1}, \boldsymbol{\beta}_{i,1}, \ldots, \boldsymbol{\beta}_{i,K-1}] = \text{softplus}(\text{MLP}(\mathbf{x}_i))
 
     **Architecture:**
 
@@ -48,11 +45,11 @@ class DPSelect(DenseSelect):
     2. **Parameter Extraction**: The MLP output is split into :math:`\alpha` and :math:`\beta` parameters
        for :math:`K-1` Beta distributions.
 
-    3. **Sampling**: Stick-breaking fractions are sampled using the reparameterization trick:
-       :math:`v_k = \text{Beta}(\alpha_k, \beta_k).rsample()`.
+    3. **Sampling**: Stick-breaking fractions are obtained from the sampling procedure implemented in :class:`~torch.distributions.beta.Beta`:
+       :math:`\mathbf{v}_{ik} = \text{Beta}(\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}).rsample()`.
 
     4. **Cluster Assignment**: The assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
-       is computed via the stick-breaking construction.
+       is computed via the stick-breaking construction: :math:`\mathbf{S}_{[i,:]} = \mathbf{v}_{[i,:]}`.
 
     Args:
         in_channels (Union[int, List[int]]): Input feature dimensions. If an integer, specifies the input size.
@@ -76,7 +73,7 @@ class DPSelect(DenseSelect):
     Note:
         This class extends :class:`~tgp.select.DenseSelect` but replaces the softmax assignment
         with the stick-breaking construction. The output includes both the assignment matrix
-        :math:`\mathbf{S}` and the posterior distributions :math:`q(v_k)` for computing KL divergence losses.
+        :math:`\mathbf{S}` and the posterior distributions :math:`q(\mathbf{v}_k)` for computing KL divergence losses.
 
     """
 
@@ -147,28 +144,6 @@ class DPSelect(DenseSelect):
         3. Computes cluster assignment probabilities via stick-breaking construction
         4. Applies optional masking for variable-sized graphs
 
-        **Mathematical Details:**
-
-        The MLP output is processed as:
-
-        .. math::
-            \text{output} = \text{clamp}(\text{softplus}(\text{MLP}(\mathbf{X})), \text{min}=10^{-3}, \text{max}=10^3)
-
-        Then split into parameters:
-
-        .. math::
-            \alpha_k, \beta_k = \text{split}(\text{output}, K-1)
-
-        Stick-breaking fractions are sampled:
-
-        .. math::
-            v_k \sim \text{Beta}(\alpha_k, \beta_k), \quad k = 1, \ldots, K-1
-
-        And cluster probabilities computed via:
-
-        .. math::
-            \pi_1 = v_1, \quad \pi_k = v_k \prod_{j=1}^{k-1}(1-v_j) \text{ for } k > 1
-
         Args:
             x (~torch.Tensor): Input node features of shape :math:`(B, N, F)` where:
                 - :math:`B` is batch size
@@ -186,12 +161,13 @@ class DPSelect(DenseSelect):
                   cluster probabilities for each node
                 - :attr:`s_inv_op`: Method used for computing :math:`\mathbf{S}^{-1}`
                 - :attr:`mask`: Copy of the input mask (if provided)
-                - :attr:`q_z`: Posterior Beta distributions :math:`q(v_k)` for each stick-breaking fraction,
+                - :attr:`q_z`: Posterior Beta distributions :math:`q(\mathbf{v}_k)` for each stick-breaking fraction,
                   used for computing KL divergence losses
 
         Note:
-            The reparameterization trick (:meth:`torch.distributions.Beta.rsample`) enables
-            backpropagation through the sampling operation, making the method end-to-end differentiable.
+            The sampling method :meth:`~torch.distributions.beta.Beta.rsample` implements a pathwise gradient estimator
+            that allows to back-propagate the gradient from the samples to the distribution parameters,
+            making the method end-to-end differentiable.
         """
         x = x.unsqueeze(0) if x.dim() == 2 else x
 

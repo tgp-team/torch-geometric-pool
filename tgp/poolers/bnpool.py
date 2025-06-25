@@ -21,7 +21,7 @@ class BNPool(DenseSRCPooling):
     r"""The BN-Pool operator from the paper `"BN-Pool: a Bayesian Nonparametric Approach for Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
     (Castellana D., and Bianchi F.M., preprint, 2025).
 
-    BN-Pool implements a Bayesian nonparametric approach to graph pooling using a Dirichlet Process (DP)
+    BN-Pool implements a Bayesian nonparametric approach to graph pooling using a Dirichlet Process
     with stick-breaking construction for cluster assignment. The method learns both the number of clusters
     and their assignments through variational inference.
 
@@ -37,14 +37,17 @@ class BNPool(DenseSRCPooling):
     The method uses a truncated stick-breaking representation of the Dirichlet Process:
 
     .. math::
-        v_k \sim \text{Beta}(\alpha_{k}, \beta_{k}), \quad k = 1, \ldots, K-1
+        \mathbf{v}_{ik} \sim \text{Beta}(\boldsymbol{\alpha}_{ik}, \boldsymbol{\beta}_{ik}), \quad i = 1, \ldots, N \quad k = 1, \ldots, K-1
 
     .. math::
-        \pi_k = v_k \prod_{j=1}^{k-1} (1 - v_j)
+        \boldsymbol{\pi}_{ik} = \mathbf{v}_{ik} \prod_{j=1}^{k-1} (1 - \mathbf{v}_{ij})
 
-    where :math:`\pi_k` represents the probability of assignment to cluster :math:`k`.
+    where :math:`\boldsymbol{\pi}_{ik}` represents the probability of assigning node :math:`i` to cluster :math:`k`.
+    The coefficients :math:`\boldsymbol{\alpha}_{ik}` and :math:`\boldsymbol{\beta}_{ik}` are computed by an MLP
+    from node features :math:`\mathbf{x}_i`.
 
-    The cluster connectivity is modeled through a learnable matrix :math:`\mathbf{K} \in \mathbb{R}^{K \times K}`:
+    The cluster connectivity is modeled through a learnable matrix :math:`\mathbf{K} \in \mathbb{R}^{K \times K}`
+    and the pooled adjacency matrix is computed as:
 
     .. math::
         \mathbf{A}_{\text{rec}} = \mathbf{S} \mathbf{K} \mathbf{S}^{\top}
@@ -211,10 +214,6 @@ class BNPool(DenseSRCPooling):
                 - :attr:`edge_index`: Coarsened adjacency matrix of shape :math:`(B, K, K)`
                 - :attr:`so`: Selection output with assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
                 - :attr:`loss`: Dictionary with loss components: :obj:`'quality'`, :obj:`'kl'`, :obj:`'K_prior'`
-
-        Note:
-            When :obj:`lifting=True`, only the lifted features are returned as a :class:`~torch.Tensor`,
-            not a full :class:`~tgp.src.PoolingOutput`.
         """
         if lifting:
             # Lift
