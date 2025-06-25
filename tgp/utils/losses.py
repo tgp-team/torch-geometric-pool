@@ -495,22 +495,26 @@ def weighted_bce_reconstruction_loss(
     r"""Weighted binary cross-entropy reconstruction loss for adjacency matrices.
 
     This function computes the binary cross-entropy loss between a reconstructed
-    adjacency matrix and the true adjacency matrix. When `balance_links` is True,
+    adjacency matrix and the true adjacency matrix. When :obj:`balance_links` is :obj:`True`,
     it applies class-balancing weights to handle the imbalance between edges and
-    non-edges in sparse graphs. When `normalize_loss` is True, it normalizes by
+    non-edges in sparse graphs. When :obj:`normalize_loss` is :obj:`True`, it normalizes by
     the square of the number of nodes per graph.
+
+    **Mathematical Formulation:**
 
     The weighted BCE loss is computed as:
 
     .. math::
-        \mathcal{L}_{\text{BCE}} = \text{BCE}(\text{rec\_adj}, \text{adj}, \text{weight})
+        \mathcal{L}_{\text{BCE}} = \text{BCE}(\mathbf{A}_{\text{rec}}, \mathbf{A}, w)
 
-    where the weight is computed to balance positive and negative samples:
+    where the weight matrix :math:`w` is computed to balance positive and negative samples:
 
     .. math::
-        w_{ij} = \frac{N^2}{n_{\text{edges}}} \cdot \text{adj}_{ij} + \frac{N^2}{n_{\text{non-edges}}} \cdot (1 - \text{adj}_{ij})
+        w_{ij} = \frac{N^2}{n_{\text{edges}}} \cdot A_{ij} + \frac{N^2}{n_{\text{non-edges}}} \cdot (1 - A_{ij})
 
-    When `normalize_loss` is True, the loss is normalized by :math:`N^2` per graph:
+    with :math:`n_{\text{edges}} = \sum_{i,j} A_{ij}` and :math:`n_{\text{non-edges}} = N^2 - n_{\text{edges}}`.
+
+    When :obj:`normalize_loss` is :obj:`True`, the loss is normalized by :math:`N^2` per graph:
 
     .. math::
         \mathcal{L}_{\text{normalized}} = \frac{\mathcal{L}_{\text{BCE}}}{N^2}
@@ -518,19 +522,34 @@ def weighted_bce_reconstruction_loss(
     Args:
         rec_adj (~torch.Tensor): The reconstructed adjacency matrix (logits) of shape
             :math:`(B, N, N)`, where :math:`B` is the batch size and :math:`N` is
-            the number of nodes.
-        adj (~torch.Tensor): The true adjacency matrix of shape :math:`(B, N, N)`.
-        mask (Optional[~torch.Tensor]): A node mask of shape :math:`(B, N)` for
-            handling graphs with variable sizes within a batch. Default is None.
-        balance_links (bool): Whether to apply class-balancing weights to handle
-            edge/non-edge imbalance. Default is True.
-        normalize_loss (bool): Whether to normalize the loss by the square of the
-            number of nodes per graph. Default is False.
-        reduction (str): Reduction method applied to the batch dimension.
-            Can be 'mean' or 'sum'. Default is 'mean'.
+            the number of nodes. Contains the predicted edge probabilities.
+        adj (~torch.Tensor): The true binary adjacency matrix of shape :math:`(B, N, N)`
+            with values in :math:`\{0, 1\}` indicating actual edges.
+        mask (Optional[~torch.Tensor]): A boolean node mask of shape :math:`(B, N)` for
+            handling graphs with variable sizes within a batch. If provided, only valid
+            node pairs contribute to the loss computation.
+            (default: :obj:`None`)
+        balance_links (bool, optional): Whether to apply class-balancing weights to handle
+            edge/non-edge imbalance. When :obj:`True`, positive samples (edges) are weighted
+            by :math:`\frac{N^2 - n_{\text{edges}}}{n_{\text{edges}}}` to balance sparse graphs.
+            (default: :obj:`True`)
+        normalize_loss (bool, optional): Whether to normalize the loss by the square of the
+            number of nodes per graph :math:`N^2`. This ensures consistent scaling across
+            graphs of different sizes.
+            (default: :obj:`False`)
+        reduction (:class:`~tgp.utils.typing.ReductionType`, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
 
     Returns:
-        ~torch.Tensor: The weighted BCE reconstruction loss.
+        ~torch.Tensor: The weighted BCE reconstruction loss, reduced according to :obj:`reduction`.
+
+    Note:
+        - When :obj:`balance_links=False`, this reduces to standard binary cross-entropy loss
+        - The class balancing prevents the model from trivially predicting all zeros for sparse graphs
+        - Masking ensures that padding nodes in batched graphs don't contribute to the loss
+        - Used as the reconstruction loss in :class:`~tgp.poolers.BNPool` to measure how well
+          the cluster connectivity matrix :math:`\mathbf{K}` reconstructs the original adjacency
     """
     pos_weight = None
     if balance_links:
@@ -612,14 +631,25 @@ def kl_loss(
         ~torch.Tensor: The KL divergence loss (scalar after reduction).
 
     Examples:
-        # Stick-breaking: (B, N, K-1) -> sum over K-1, then N
-        kl_loss(q, p, mask, node_axis=1, sum_axes=[2, 1])
-
-        # VAE latent: (B, latent_dim) -> sum over latent_dim
-        kl_loss(q, p, sum_axes=[1])
-
-        # Per-node but single dist: (B, N) -> sum over N
-        kl_loss(q, p, mask, node_axis=1, sum_axes=[1])
+        >>> import torch
+        >>> from torch.distributions import Beta
+        >>> from tgp.utils.losses import kl_loss
+        >>> # Example: Stick-breaking process in BNPool
+        >>> # Shape: (B=2, N=4, K-1=3) for 4 nodes, max 4 clusters
+        >>> alpha_sb = torch.ones(2, 4, 3) + 0.5  # Posterior Alpha parameters
+        >>> beta_sb = torch.ones(2, 4, 3) + 1.0  # Posterior Beta parameters
+        >>> q_sb = Beta(alpha_sb, beta_sb)  # Posterior distributions
+        >>> # Prior: Beta(1, alpha_DP) for each stick-breaking fraction
+        >>> alpha_prior = torch.ones(3)
+        >>> beta_prior = torch.ones(3) * 2.0  # alpha_DP = 2.0
+        >>> p_sb = Beta(alpha_prior, beta_prior)
+        >>> # Node mask for variable-sized graphs
+        >>> mask = torch.tensor(
+        ...     [[True, True, True, False], [True, True, True, True]], dtype=torch.bool
+        ... )
+        >>> # Compute KL loss: sum over K-1 components, then over nodes
+        >>> loss = kl_loss(q_sb, p_sb, mask=mask, node_axis=1, sum_axes=[2, 1])
+        >>> print(f"KL loss: {loss.item():.4f}")
     """
     loss = kl_divergence(q, p)
 
@@ -671,32 +701,74 @@ def cluster_connectivity_prior_loss(
 ) -> Tensor:
     r"""Prior loss for cluster connectivity matrix in Bayesian nonparametric pooling.
 
-    This function computes the prior loss for the cluster connectivity matrix,
+    This function computes the prior loss for the cluster connectivity matrix :math:`\mathbf{K}`,
     which regularizes the learned cluster-cluster connectivity probabilities
-    towards a prior distribution.
+    towards a prior distribution. The loss implements a Gaussian prior that encourages
+    specific structural patterns in the connectivity matrix.
 
-    The prior loss is computed as:
+    **Mathematical Formulation:**
+
+    The prior loss is computed as the negative log-likelihood of a Gaussian prior:
 
     .. math::
-        \mathcal{L}_{\text{K\_prior}} = \frac{1}{2} \sum_{i,j} \frac{(K_{ij} - \mu_{ij})^2}{\sigma^2}
+        \mathcal{L}_{\mathbf{K}} = \frac{1}{2} \sum_{i,j} \frac{(K_{ij} - \mu_{ij})^2}{\sigma^2}
 
-    where :math:`K` is the cluster connectivity matrix, :math:`\mu` is the prior mean,
+    where :math:`\mathbf{K} \in \mathbb{R}^{C \times C}` is the cluster connectivity matrix,
+    :math:`\boldsymbol{\mu} \in \mathbb{R}^{C \times C}` is the prior mean matrix,
     and :math:`\sigma^2` is the prior variance.
 
+    The prior mean :math:`\boldsymbol{\mu}` typically has the structure:
+
+    .. math::
+        \mu_{ij} = \begin{cases}
+        \mu_{\text{diag}} & \text{if } i = j \text{ (within-cluster connectivity)} \\
+        \mu_{\text{off}} & \text{if } i \neq j \text{ (between-cluster connectivity)}
+        \end{cases}
+
+    This structure encourages block-diagonal patterns in the reconstructed adjacency matrix
+    :math:`\mathbf{A}_{\text{rec}} = \mathbf{S} \mathbf{K} \mathbf{S}^{\top}`, promoting well-separated clusters.
+
+    When :obj:`normalize_loss` is :obj:`True`, the loss is normalized by :math:`N^2` per graph:
+
+    .. math::
+        \mathcal{L}_{\text{normalized}} = \frac{\mathcal{L}_{\mathbf{K}}}{N^2}
+
     Args:
-        K (~torch.Tensor): The cluster connectivity matrix of shape :math:`(K, K)`,
-            where :math:`K` is the number of clusters.
-        K_mu (~torch.Tensor): Prior mean matrix of shape :math:`(K, K)`.
-        K_var (~torch.Tensor): Prior variance (scalar).
-        normalize_loss (bool): Whether to normalize the loss by the square of the
-            number of nodes per graph. Default is False.
-        mask (Optional[~torch.Tensor]): A node mask for normalization. Only used
-            if normalize_loss is True. Default is None.
-        reduction (str): Reduction method applied to the batch dimension when
-            normalize_loss is True. Can be 'mean' or 'sum'. Default is 'mean'.
+        K (~torch.Tensor): The learnable cluster connectivity matrix of shape :math:`(C, C)`,
+            where :math:`C` is the number of clusters. This matrix models the expected
+            connectivity patterns between different clusters.
+        K_mu (~torch.Tensor): Prior mean matrix of shape :math:`(C, C)` specifying the
+            expected values for the connectivity matrix. Usually designed to encourage
+            higher within-cluster than between-cluster connectivity.
+        K_var (~torch.Tensor): Prior variance parameter :math:`\sigma^2` (scalar tensor).
+            Controls the strength of the regularization - smaller values impose stronger
+            constraints towards the prior mean.
+        normalize_loss (bool, optional): Whether to normalize the loss by the square of the
+            number of nodes per graph :math:`N^2`. This ensures consistent scaling across
+            graphs of different sizes when used in conjunction with other losses.
+            (default: :obj:`False`)
+        mask (Optional[~torch.Tensor]): A node mask for normalization of shape :math:`(B, N)`.
+            Only used if :obj:`normalize_loss` is :obj:`True` to compute the effective number
+            of nodes per graph in the batch.
+            (default: :obj:`None`)
+        reduction (:class:`~tgp.utils.typing.ReductionType`, optional): Reduction method applied to the batch dimension when
+            :obj:`normalize_loss` is :obj:`True`. Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
 
     Returns:
-        ~torch.Tensor: The cluster connectivity prior loss (scalar).
+        ~torch.Tensor: The cluster connectivity prior loss. Returns a scalar when
+            :obj:`normalize_loss=False`, or a reduced tensor when :obj:`normalize_loss=True`.
+
+    Note:
+        - This loss is one of the three components in :class:`~tgp.poolers.BNPool` training
+        - The prior structure promotes interpretable clustering by encouraging block-diagonal
+          adjacency reconstruction patterns
+        - Typically used with :math:`\mu_{\text{diag}} > 0` and :math:`\mu_{\text{off}} < 0`
+        - The loss strength can be controlled through both :obj:`K_var` and external weighting
+
+    See Also:
+        :func:`~tgp.utils.losses.weighted_bce_reconstruction_loss`: Reconstruction loss component
+        :func:`~tgp.utils.losses.kl_loss`: KL divergence loss component for stick-breaking variables
     """
     prior_loss = (0.5 * (K - K_mu) ** 2 / K_var).sum()
 
