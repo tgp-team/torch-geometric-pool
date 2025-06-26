@@ -144,11 +144,11 @@ def check_and_filter_edge_weights(edge_weight: Tensor) -> Optional[Tensor]:
 
 
 def delta_gcn_matrix(
-    edge_index: Tensor,
+    edge_index: Adj,
     edge_weight: Optional[Tensor] = None,
     delta: float = 2.0,
     num_nodes: Optional[int] = None,
-) -> Tuple[Tensor, Tensor]:
+) -> Tuple[Adj, Optional[Tensor]]:
     r"""Compute the Delta-GCN propagation matrix for heterophilic message passing.
     
     Constructs the Delta-GCN propagation matrix from `MaxCutPool: differentiable 
@@ -163,7 +163,8 @@ def delta_gcn_matrix(
     different values.
     
     Args:
-        edge_index (~torch.Tensor): Graph connectivity in COO format of shape :math:`(2, E)`.
+        edge_index (~torch.Tensor or SparseTensor): Graph connectivity in COO format of shape :math:`(2, E)`
+            or as SparseTensor.
         edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
             (default: :obj:`None`)
         delta (float, optional): Delta parameter for heterophilic message passing. When 
@@ -173,14 +174,21 @@ def delta_gcn_matrix(
         
     Returns:
         tuple:
-            - **edge_index** (*Tensor*): Updated edge indices of shape :math:`(2, E')`.
-            - **edge_weight** (*Tensor*): Updated edge weights of shape :math:`(E',)`.
+            - **edge_index** (*Tensor or SparseTensor*): Updated connectivity in the same format as input.
+            - **edge_weight** (*Tensor or None*): Updated edge weights of shape :math:`(E',)` if input was Tensor,
+              or None if input was SparseTensor.
     """
-    num_nodes = maybe_num_nodes(edge_index, num_nodes)
+    # Remember the input type to return the same format
+    input_is_sparse = isinstance(edge_index, SparseTensor)
+    
+    # Convert input to edge_index, edge_weight format for processing
+    edge_index_tensor, edge_weight_tensor = connectivity_to_edge_index(edge_index, edge_weight)
+    
+    num_nodes = maybe_num_nodes(edge_index_tensor, num_nodes)
 
     # Get symmetric normalized Laplacian: L_sym = D^(-1/2) (D - A) D^(-1/2)
     edge_index_laplacian, edge_weight_laplacian = get_laplacian(
-        edge_index, edge_weight, normalization='sym', num_nodes=num_nodes
+        edge_index_tensor, edge_weight_tensor, normalization='sym', num_nodes=num_nodes
     )
     
     # Scale by delta and negate: -delta * L_sym
@@ -188,7 +196,7 @@ def delta_gcn_matrix(
     
     # Create identity matrix: I
     eye_index, eye_weight = torch_sparse_eye(
-        num_nodes, device=edge_index.device, dtype=edge_weight_scaled.dtype
+        num_nodes, device=edge_index_tensor.device, dtype=edge_weight_scaled.dtype
     )
     
     # Combine to form Delta-GCN propagation matrix: P = I - delta * L_sym
@@ -199,8 +207,11 @@ def delta_gcn_matrix(
         sparse_sizes=(num_nodes, num_nodes)
     ).coalesce("sum")  # Sum weights for overlapping edges (diagonal elements)
     
-    # Convert back to COO format
-    row, col, edge_weight_out = propagation_matrix.coo()
-    edge_index_out = torch.stack([row, col], dim=0)
-
-    return edge_index_out, edge_weight_out
+    # Return in the same format as input
+    if input_is_sparse:
+        return propagation_matrix, None
+    else:
+        # Convert back to COO format
+        row, col, edge_weight_out = propagation_matrix.coo()
+        edge_index_out = torch.stack([row, col], dim=0)
+        return edge_index_out, edge_weight_out

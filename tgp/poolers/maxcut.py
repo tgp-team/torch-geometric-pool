@@ -1,5 +1,6 @@
 from typing import Optional, Union
 
+import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 
@@ -9,6 +10,7 @@ from tgp.reduce import BaseReduce
 from tgp.select import MaxCutSelect, SelectOutput
 from tgp.src import PoolingOutput, SRCPooling
 from tgp.utils.losses import maxcut_loss
+from tgp.utils.ops import connectivity_to_edge_index
 from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 
@@ -146,9 +148,14 @@ class MaxCutPooling(SRCPooling):
 
         # Select phase
         so = self.select(x=x, edge_index=adj, edge_weight=edge_weight, batch=batch)
-        
-        # Compute auxiliary loss
-        loss = self.compute_loss(so, batch)
+
+        if adj is None:
+            # If no adjacency matrix is provided, we can't compute the MaxCut loss
+            # Set loss to 0 and continue with the pooling operation
+            loss = {"maxcut_loss": torch.tensor(0.0, device=x.device)}
+        else:
+            # Compute auxiliary loss
+            loss = self.compute_loss(so.scores, adj, edge_weight, batch)
 
         # Reduce phase
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
@@ -169,7 +176,7 @@ class MaxCutPooling(SRCPooling):
             loss=loss,
         )
 
-    def compute_loss(self, so: SelectOutput, batch: Optional[Tensor] = None) -> dict:
+    def compute_loss(self, scores: Tensor, adj: Adj, edge_weight: Optional[Tensor] = None, batch: Optional[Tensor] = None) -> dict:
         """Compute the auxiliary MaxCut loss.
 
         Args:
@@ -180,16 +187,7 @@ class MaxCutPooling(SRCPooling):
         Returns:
             dict: A dictionary with the MaxCut loss term.
         """
-        # Extract scores and connectivity from SelectOutput
-        if not hasattr(so, 'scores'):
-            raise ValueError("SelectOutput must contain 'scores' for MaxCut loss computation")
-        
-        scores = so.scores  # type: ignore
-        edge_index = getattr(so, 'edge_index', None)
-        edge_weight = getattr(so, 'edge_weight', None)
-        
-        if edge_index is None:
-            raise ValueError("SelectOutput must contain 'edge_index' for MaxCut loss computation")
+        edge_index, edge_weight = connectivity_to_edge_index(adj, edge_weight)
 
         # Compute MaxCut loss
         maxcut_loss_val = maxcut_loss(

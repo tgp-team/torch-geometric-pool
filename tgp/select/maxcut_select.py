@@ -1,3 +1,4 @@
+import select
 from typing import Callable, Optional, Union
 
 import torch
@@ -53,7 +54,6 @@ class MaxCutScoreNet(torch.nn.Module):
         self.mp_convs = torch.nn.ModuleList()
         in_units = in_channels
         for out_units in mp_units:
-            print(f"GCNConv(in_units={in_units}, out_units={out_units}, normalize=False, cached=False)")
             self.mp_convs.append(
                 GCNConv(in_units, out_units, normalize=False, cached=False)
             )
@@ -84,7 +84,7 @@ class MaxCutScoreNet(torch.nn.Module):
     def forward(
         self,
         x: Tensor,
-        edge_index: Tensor,
+        edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
     ) -> Tensor:
         r"""Compute MaxCut scores for each node.
@@ -239,25 +239,29 @@ class MaxCutSelect(TopkSelect):
         if edge_index is None:
             raise ValueError("edge_index cannot be None for MaxCutSelect")
         
-        # Compute MaxCut scores
+
         scores = self.score_net(x, edge_index, edge_weight)  # Shape: (N, 1)
 
         # Perform top-k selection using computed scores - call parent forward
         # The parent TopkSelect.forward expects scores as x parameter
-        select_output = super().forward(x=scores, batch=batch)
+        topk_select_output = super().forward(x=scores, batch=batch)
+        
+        # Create SelectOutput with proper weight parameter (scores of selected nodes)
+        select_output = SelectOutput(
+            node_index=topk_select_output.node_index,
+            num_nodes=topk_select_output.num_nodes,
+            cluster_index=topk_select_output.cluster_index,
+            num_clusters=topk_select_output.num_clusters,
+            weight=scores.squeeze(-1)[topk_select_output.node_index],  # Scores of selected nodes
+            s_inv_op=self.s_inv_op,
+            scores=scores.squeeze(-1),  # Store all scores for loss computation
+        )
 
         # Store the scores and connectivity info in SelectOutput for loss computation
         # The pooler will access these to compute the MaxCut loss
         # We need to create a new SelectOutput with the additional attributes
-        enhanced_output = SelectOutput(
-            s=select_output.s,
-            s_inv=select_output.s_inv,
-            scores=scores.squeeze(-1),  # Store as (N,) for loss function
-            edge_index=edge_index,
-            edge_weight=edge_weight,
-        )
-
-        return enhanced_output
+        
+        return select_output
 
     def __repr__(self) -> str:
         return (
