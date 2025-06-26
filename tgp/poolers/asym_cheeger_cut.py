@@ -21,7 +21,7 @@ class AsymCheegerCutPooling(DenseSRCPooling):
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
-    This layer provides two auxiliary losses:
+    This layer optimizes two auxiliary losses:
 
     + the total variation loss (:class:`~tgp.utils.losses.totvar_loss`),
     + the asymmetric norm loss (:class:`~tgp.utils.losses.asym_norm_loss`).

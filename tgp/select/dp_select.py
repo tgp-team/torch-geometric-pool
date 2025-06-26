@@ -10,20 +10,19 @@ from tgp.utils.typing import SinvType
 
 
 class DPSelect(DenseSelect):
-    r"""The Dirichlet Process selection operator for the BN-Pool operator (:class:`~tgp.poolers.BNPool`)
+    r"""The Dirichlet Process selection operator for the :class:`~tgp.poolers.BNPool` operator,
     as proposed in the paper `"BN-Pool: Bayesian Nonparametric Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
     (Castellana & Bianchi, 2025).
 
-    DPSelect implements a Bayesian nonparametric selection mechanism using a truncated stick-breaking
-    representation of the Dirichlet Process. This allows the model to automatically learn both
-    the number of clusters and their assignments through variational inference.
-
-    The method uses a truncated stick-breaking process to model cluster assignments:
+    DPSelect implements a Bayesian nonparametric selection mechanism to automatically learn both
+    the number of clusters and their assignments through variational inference. The method uses
+    a truncated stick-breaking representation of the Dirichlet Process to model cluster assignments:
 
     .. math::
         v_{ik} \sim \text{Beta}(\alpha_{ik}, \beta_{ik}), \quad k = 1, \ldots, K-1, \quad i = 1, \ldots, N
 
-    where :math:`v_{ik}` are the stick-breaking fractions. The assignment of node :math:`i` to cluster :math:`k` is computed as:
+    where :math:`v_{ik}` are the stick-breaking fractions.
+    The assignment of node :math:`i` to cluster :math:`k` is computed as:
 
     .. math::
         \pi_{ik} = v_{ik} \prod_{j=1}^{k-1} (1 - v_{ij}) \quad \text{for } k = 1, \ldots, K-1

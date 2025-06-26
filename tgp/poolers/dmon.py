@@ -21,7 +21,7 @@ class DMoNPooling(DenseSRCPooling):
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
-    This layer provides two auxiliary losses:
+    This layer optimizes two auxiliary losses:
 
     + the spectral loss (:class:`~tgp.utils.losses.spectral_loss`),
     + the cluster loss (:class:`~tgp.utils.losses.cluster_loss`),

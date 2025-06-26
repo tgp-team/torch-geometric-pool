@@ -25,14 +25,10 @@ class BNPool(DenseSRCPooling):
     with stick-breaking construction for cluster assignment. The method learns both the number of clusters
     and their assignments through variational inference.
 
-    **Architecture:**
-
     + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.DPSelect` to perform variational inference of the stick-breaking process.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
-
-    **Mathematical Formulation:**
 
     The method uses a truncated stick-breaking representation of the Dirichlet Process:
 
@@ -54,9 +50,7 @@ class BNPool(DenseSRCPooling):
 
     where :math:`S_{ik} = \pi_{ik}`.
 
-    **Loss Functions:**
-
-    This layer provides three auxiliary losses:
+    This layer optimizes three auxiliary losses:
 
     + **Reconstruction loss** (:func:`~tgp.utils.losses.weighted_bce_reconstruction_loss`): Binary cross-entropy loss between the true and reconstructed adjacency matrix :math:`\mathbf{A}_{\text{rec}}`.
     + **KL divergence loss** (:func:`~tgp.utils.losses.kl_loss`): KL divergence between the prior and posterior variational approximation of the stick-breaking variables.
@@ -77,7 +71,7 @@ class BNPool(DenseSRCPooling):
             (default: :obj:`10.0`)
         K_init (float, optional): Initial value for the cluster connectivity matrix :math:`\mathbf{K}`.
             (default: :obj:`1.0`)
-        eta (float, optional): Coefficient :math:`\eta` for weighting the KL divergence loss term.
+        eta (float, optional): Weights the KL divergence loss term.
             (default: :obj:`1.0`)
         rescale_loss (bool, optional): If :obj:`True`, losses are normalized by the number of nodes :math:`N^2`
             to ensure proper scaling across different graph sizes.

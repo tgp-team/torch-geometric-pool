@@ -51,7 +51,8 @@ def mincut_loss(
             :math:`(B, N, K)`, where :math:`K` is the number of clusters.
         adj_pooled (~torch.Tensor): The pooled adjacency matrix :math:`\mathbf{S}^{\top}
             \mathbf{A}\mathbf{S}` of shape :math:`(B, K, K)`.
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -87,7 +88,8 @@ def orthogonality_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
         S (~torch.Tensor): The dense cluster assignment matrix of shape
             :math:`(B, N, K)`, where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -126,7 +128,8 @@ def hosc_orthogonality_loss(
         mask (Optional[~torch.Tensor]): A mask matrix
             :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
             the valid nodes for each graph. (default: :obj:`None`)
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -199,7 +202,8 @@ def entropy_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
         S (~torch.Tensor): The dense cluster assignment matrix of shape
             :math:`(B, N, K)` where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -240,7 +244,8 @@ def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "mean") -> Te
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
         adj (~torch.Tensor): The adjacency matrix of shape
             :math:`(B, N, N)`.
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -291,7 +296,8 @@ def asym_norm_loss(S: Tensor, k: int, reduction: ReductionType = "mean") -> Tens
         k (int): The number of clusters (:math:`K`). This is used
             internally to set :math:`\rho = K - 1` if no other
             value of :math:`\rho` is explicitly chosen.
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -348,7 +354,8 @@ def just_balance_loss(
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -465,7 +472,8 @@ def cluster_loss(
             the valid nodes for each graph. (default: :obj:`None`)
         num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
-        reduction (str, optional): The reduction method to apply to the loss.
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
@@ -497,8 +505,7 @@ def weighted_bce_reconstruction_loss(
     This function computes the binary cross-entropy loss between a reconstructed
     adjacency matrix and the true adjacency matrix. When :obj:`balance_links` is :obj:`True`,
     it applies class-balancing weights to handle the imbalance between edges and
-    non-edges in sparse graphs. When :obj:`normalize_loss` is :obj:`True`, it normalizes by
-    the square of the number of nodes per graph.
+    non-edges in sparse graphs.
 
     The weighted BCE loss is computed as:
 
@@ -521,12 +528,10 @@ def weighted_bce_reconstruction_loss(
         rec_adj (~torch.Tensor): The reconstructed adjacency matrix (logits) of shape
             :math:`(B, N, N)`, where :math:`B` is the batch size and :math:`N` is
             the number of nodes. Contains the predicted edge probabilities.
-        adj (~torch.Tensor): The true binary adjacency matrix of shape :math:`(B, N, N)`
-            with values in :math:`\{0, 1\}` indicating actual edges.
-        mask (Optional[~torch.Tensor]): A boolean node mask of shape :math:`(B, N)` for
-            handling graphs with variable sizes within a batch. If provided, only valid
-            node pairs contribute to the loss computation.
-            (default: :obj:`None`)
+        adj (~torch.Tensor): The true adjacency matrix of shape :math:`(B, N, N)`.
+        mask (Optional[~torch.Tensor]): A mask matrix
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
+            the valid nodes for each graph. (default: :obj:`None`)
         balance_links (bool, optional): Whether to apply class-balancing weights to handle
             edge/non-edge imbalance.
             (default: :obj:`True`)
@@ -534,12 +539,12 @@ def weighted_bce_reconstruction_loss(
             number of nodes per graph :math:`N^2`. This ensures consistent scaling across
             graphs of different sizes.
             (default: :obj:`False`)
-        reduction (:class:`~tgp.utils.typing.ReductionType`, optional): Reduction method applied to the batch dimension.
+        reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
     Returns:
-        ~torch.Tensor: The weighted BCE reconstruction loss, reduced according to :obj:`reduction`.
+        ~torch.Tensor: The weighted BCE reconstruction loss.
     """
     pos_weight = None
     if balance_links:
@@ -607,18 +612,20 @@ def kl_loss(
     Args:
         q (~torch.distributions.Distribution): The approximate posterior distribution.
         p (~torch.distributions.Distribution): The prior distribution.
-        mask (Optional[~torch.Tensor]): A mask for handling variable-sized inputs.
-            Applied along the node_axis if specified. (default: :obj:`None`)
+        mask (Optional[~torch.Tensor]): A mask matrix
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
+            the valid nodes for each graph. (default: :obj:`None`)
         node_axis (Optional[int]): The axis along which nodes are arranged.
             The mask will be applied along this axis. (default: :obj:`None`)
         sum_axes (Optional[list]): List of axes to sum over after masking but before
             final reduction. If :obj:`None`, sums over all axes except batch (axis 0).
             (default: :obj:`None`)
-        reduction (str): Reduction method applied to the batch dimension.
-            Can be :obj:`'mean'` or :obj:`'sum'`. (default: :obj:`'mean'`).
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
 
     Returns:
-        ~torch.Tensor: The KL divergence loss (scalar after reduction).
+        ~torch.Tensor: The KL divergence loss.
 
     Examples:
         >>> import torch
@@ -720,7 +727,7 @@ def cluster_connectivity_prior_loss(
 
     Args:
         K (~torch.Tensor): The learnable cluster connectivity matrix of shape :math:`(C, C)`,
-            where :math:`C` is the number of clusters. This matrix models the expected
+            where :math:`C` is the maximum number of clusters. This matrix models the expected
             connectivity patterns between different clusters.
         K_mu (~torch.Tensor): Prior mean matrix of shape :math:`(C, C)` specifying the
             expected values for the connectivity matrix. Usually designed to encourage
@@ -736,9 +743,9 @@ def cluster_connectivity_prior_loss(
             Only used if :obj:`normalize_loss` is :obj:`True` to compute the effective number
             of nodes per graph in the batch.
             (default: :obj:`None`)
-        reduction (:class:`~tgp.utils.typing.ReductionType`, optional): Reduction method applied to the batch dimension when
-            :obj:`normalize_loss` is :obj:`True`. Can be :obj:`'mean'` or :obj:`'sum'`.
-            (default: :obj:`'mean'`)
+        reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The cluster connectivity prior loss.

@@ -21,7 +21,7 @@ class DiffPool(DenseSRCPooling):
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
-    This layer provides two auxiliary losses:
+    This layer optimizes two auxiliary losses:
 
     + the link prediction loss (:class:`~tgp.utils.losses.link_pred_loss`),
     + the entropy regularization loss (:class:`~tgp.utils.losses.entropy_loss`)
