@@ -9,21 +9,24 @@ from torch.distributions import Distribution, kl_divergence
 from tgp import eps
 from tgp.utils import rank3_diag, rank3_trace
 
-ReductionType = Literal["mean", "sum"]
+BatchReductionType = Literal["mean", "sum"]
 
 
-def _reduce_loss(loss: Tensor, reduction: ReductionType) -> Tensor:
-    if reduction == "mean":
+def _batch_reduce_loss(loss: Tensor, batch_reduction: BatchReductionType) -> Tensor:
+    if batch_reduction == "mean":
         return torch.mean(loss)
-    if reduction == "sum":
+    if batch_reduction == "sum":
         return torch.sum(loss)
     raise ValueError(
-        f"Reduction {reduction} not allowed, must be one of ['mean', 'sum']."
+        f"Batch reduction {batch_reduction} not allowed, must be one of ['mean', 'sum']."
     )
 
 
 def mincut_loss(
-    adj: Tensor, S: Tensor, adj_pooled: Tensor, reduction: ReductionType = "mean"
+    adj: Tensor,
+    S: Tensor,
+    adj_pooled: Tensor,
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary mincut loss used by :class:`~tgp.poolers.MinCutPooling` operator
     from the paper `"Spectral Clustering in Graph Neural Networks for Graph Pooling"
@@ -51,7 +54,7 @@ def mincut_loss(
             :math:`(B, N, K)`, where :math:`K` is the number of clusters.
         adj_pooled (~torch.Tensor): The pooled adjacency matrix :math:`\mathbf{S}^{\top}
             \mathbf{A}\mathbf{S}` of shape :math:`(B, K, K)`.
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -63,10 +66,12 @@ def mincut_loss(
     d = rank3_diag(d_flat)
     den = rank3_trace(torch.matmul(torch.matmul(S.transpose(-2, -1), d), S))
     cut_loss = -(num / den)
-    return _reduce_loss(cut_loss, reduction)
+    return _batch_reduce_loss(cut_loss, batch_reduction)
 
 
-def orthogonality_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
+def orthogonality_loss(
+    S: Tensor, batch_reduction: BatchReductionType = "mean"
+) -> Tensor:
     r"""Auxiliary orthogonality loss used by :class:`~tgp.poolers.MinCutPooling`
     operator from the paper `"Spectral Clustering in Graph Neural Networks for Graph
     Pooling" <https://arxiv.org/abs/1907.00481>`_ (Bianchi et al., ICML 2020).
@@ -88,7 +93,7 @@ def orthogonality_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
         S (~torch.Tensor): The dense cluster assignment matrix of shape
             :math:`(B, N, K)`, where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -100,11 +105,13 @@ def orthogonality_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
     k = S.size(-1)
     id_k = torch.eye(k, device=S.device, dtype=S.dtype) / math.sqrt(k)
     ortho_loss = torch.norm(STS_term - id_k, dim=(-2, -1))
-    return _reduce_loss(ortho_loss, reduction)
+    return _batch_reduce_loss(ortho_loss, batch_reduction)
 
 
 def hosc_orthogonality_loss(
-    S: Tensor, mask: Optional[Tensor] = None, reduction: ReductionType = "mean"
+    S: Tensor,
+    mask: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary orthogonality loss used by :class:`~tgp.poolers.HOSCPooling`
     operator from the paper `"Higher-order Clustering and Pooling for Graph Neural Networks"
@@ -128,7 +135,7 @@ def hosc_orthogonality_loss(
         mask (Optional[~torch.Tensor]): A mask matrix
             :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
             the valid nodes for each graph. (default: :obj:`None`)
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -141,7 +148,7 @@ def hosc_orthogonality_loss(
     sqrt_nodes = mask.sum(1).sqrt() if mask is not None else math.sqrt(num_nodes)
     ortho_num = -norm / sqrt_nodes + sqrt_k
     ortho_loss = ortho_num / (sqrt_k - 1)
-    return _reduce_loss(ortho_loss, reduction)
+    return _batch_reduce_loss(ortho_loss, batch_reduction)
 
 
 def link_pred_loss(S: Tensor, adj: Tensor, normalize_loss: bool = True) -> Tensor:
@@ -182,7 +189,7 @@ def link_pred_loss(S: Tensor, adj: Tensor, normalize_loss: bool = True) -> Tenso
     return link_loss
 
 
-def entropy_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
+def entropy_loss(S: Tensor, batch_reduction: BatchReductionType = "mean") -> Tensor:
     r"""Auxiliary entropy regularization loss used by :class:`~tgp.poolers.DiffPool`
     operator from the paper `"Hierarchical Graph Representation Learning with
     Differentiable Pooling" <https://arxiv.org/abs/1806.08804>`_ (Ying et al., NeurIPS 2018).
@@ -211,10 +218,12 @@ def entropy_loss(S: Tensor, reduction: ReductionType = "mean") -> Tensor:
     """
     entropy = -S * torch.log(S + eps)
     entropy = torch.sum(entropy, dim=-1)
-    return _reduce_loss(entropy, reduction)
+    return _batch_reduce_loss(entropy, batch_reduction)
 
 
-def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "mean") -> Tensor:
+def totvar_loss(
+    S: Tensor, adj: Tensor, batch_reduction: BatchReductionType = "mean"
+) -> Tensor:
     r"""The total variation regularization loss used by
     :class:`~tgp.poolers.AsymCheegerCutPooling` operator from the paper
     `"Total Variation Graph Neural Networks" <https://arxiv.org/abs/2211.06218>`_
@@ -244,7 +253,7 @@ def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "mean") -> Te
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
         adj (~torch.Tensor): The adjacency matrix of shape
             :math:`(B, N, N)`.
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -255,10 +264,12 @@ def totvar_loss(S: Tensor, adj: Tensor, reduction: ReductionType = "mean") -> Te
     loss = torch.sum(adj * l1_norm, dim=(-1, -2))
     n_edges = torch.count_nonzero(adj, dim=(-1, -2))
     loss *= 1 / (2 * n_edges)
-    return _reduce_loss(loss, reduction)
+    return _batch_reduce_loss(loss, batch_reduction)
 
 
-def asym_norm_loss(S: Tensor, k: int, reduction: ReductionType = "mean") -> Tensor:
+def asym_norm_loss(
+    S: Tensor, k: int, batch_reduction: BatchReductionType = "mean"
+) -> Tensor:
     r"""Auxiliary asymmetrical norm term used by :class:`~tgp.poolers.AsymCheegerCutPooling`
     operator from the paper `"Total Variation Graph Neural Networks"
     <https://arxiv.org/abs/2211.06218>`_ (Hansen & Bianchi, ICML 2023).
@@ -296,7 +307,7 @@ def asym_norm_loss(S: Tensor, k: int, reduction: ReductionType = "mean") -> Tens
         k (int): The number of clusters (:math:`K`). This is used
             internally to set :math:`\rho = K - 1` if no other
             value of :math:`\rho` is explicitly chosen.
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -314,16 +325,16 @@ def asym_norm_loss(S: Tensor, k: int, reduction: ReductionType = "mean") -> Tens
     loss = (loss >= 0) * (k - 1) * loss + (loss < 0) * (-loss)
     loss = torch.sum(loss, dim=(-1, -2))  # shape [B]
     loss = 1 / (n_nodes * (k - 1)) * (n_nodes * (k - 1) - loss)
-    return _reduce_loss(loss, reduction)
+    return _batch_reduce_loss(loss, batch_reduction)
 
 
 def just_balance_loss(
     S: Tensor,
     mask: Optional[Tensor] = None,
     normalize_loss: bool = True,
-    num_nodes: int = None,
-    num_clusters: int = None,
-    reduction: ReductionType = "mean",
+    num_nodes: Optional[int] = None,
+    num_clusters: Optional[int] = None,
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary balance regularization loss used by
     :class:`~tgp.poolers.JustBalancePooling` operator from the paper
@@ -354,7 +365,7 @@ def just_balance_loss(
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -375,7 +386,7 @@ def just_balance_loss(
         else:
             loss = loss / torch.sqrt(mask.sum() / mask.size(0) * num_clusters)
 
-    return _reduce_loss(loss, reduction)
+    return _batch_reduce_loss(loss, batch_reduction)
 
 
 def spectral_loss(
@@ -383,8 +394,8 @@ def spectral_loss(
     S: Tensor,
     adj_pooled: Tensor,
     mask: Optional[Tensor] = None,
-    num_clusters: int = None,
-    reduction: ReductionType = "mean",
+    num_clusters: Optional[int] = None,
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary spectral regularization loss used by
     :class:`~tgp.poolers.DMoNPooling` operator from the paper
@@ -416,8 +427,9 @@ def spectral_loss(
             the valid nodes for each graph. (default: :obj:`None`)
         num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
-        reduction (str, optional): The reduction method to apply to the loss.
-            (default: :obj:`"none"`)
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
 
     Returns:
         ~torch.Tensor: The spectral regularization loss.
@@ -437,14 +449,14 @@ def spectral_loss(
     normalizer = torch.einsum("bk, bm -> bkm", ca, cb) / 2 / m_expand
     decompose = adj_pooled - normalizer
     spectral_loss = -rank3_trace(decompose) / 2 / m
-    return _reduce_loss(spectral_loss, reduction)
+    return _batch_reduce_loss(spectral_loss, batch_reduction)
 
 
 def cluster_loss(
     S: Tensor,
     mask: Optional[Tensor] = None,
-    num_clusters: int = None,
-    reduction: ReductionType = "mean",
+    num_clusters: Optional[int] = None,
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary cluster regularization loss used by
     :class:`~tgp.poolers.DMoNPooling` operator from the paper
@@ -472,7 +484,7 @@ def cluster_loss(
             the valid nodes for each graph. (default: :obj:`None`)
         num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -489,7 +501,7 @@ def cluster_loss(
     cluster_size = torch.einsum("ijk->ik", S)  # B x K
     cluster_loss = torch.norm(input=cluster_size, dim=1)
     cluster_loss = cluster_loss / mask.sum(dim=1) * torch.norm(i_s) - 1
-    return _reduce_loss(cluster_loss, reduction)
+    return _batch_reduce_loss(cluster_loss, batch_reduction)
 
 
 def weighted_bce_reconstruction_loss(
@@ -498,7 +510,7 @@ def weighted_bce_reconstruction_loss(
     mask: Optional[Tensor] = None,
     balance_links: bool = True,
     normalize_loss: bool = False,
-    reduction: ReductionType = "mean",
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Weighted binary cross-entropy reconstruction loss for adjacency matrices.
 
@@ -539,7 +551,7 @@ def weighted_bce_reconstruction_loss(
             number of nodes per graph :math:`N^2`. This ensures consistent scaling across
             graphs of different sizes.
             (default: :obj:`False`)
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -583,7 +595,7 @@ def weighted_bce_reconstruction_loss(
             N_squared = adj.shape[-1] ** 2  # All nodes are valid
         loss = loss / N_squared
 
-    return _reduce_loss(loss, reduction)
+    return _batch_reduce_loss(loss, batch_reduction)
 
 
 def kl_loss(
@@ -593,7 +605,7 @@ def kl_loss(
     node_axis: Optional[int] = None,
     sum_axes: Optional[List[int]] = None,
     normalize_loss: bool = False,
-    reduction: ReductionType = "mean",
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Compute KL divergence between two distributions with flexible axis control.
 
@@ -620,7 +632,7 @@ def kl_loss(
         sum_axes (Optional[list]): List of axes to sum over after masking but before
             final reduction. If :obj:`None`, sums over all axes except batch (axis 0).
             (default: :obj:`None`)
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -684,7 +696,7 @@ def kl_loss(
         N_squared = num_nodes**2  # (B,) - use stored num_nodes
         loss = loss / N_squared
 
-    return _reduce_loss(loss, reduction)
+    return _batch_reduce_loss(loss, batch_reduction)
 
 
 def cluster_connectivity_prior_loss(
@@ -693,7 +705,7 @@ def cluster_connectivity_prior_loss(
     K_var: Tensor,
     normalize_loss: bool = False,
     mask: Optional[Tensor] = None,
-    reduction: ReductionType = "mean",
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Prior loss for cluster connectivity matrix in :class:`~tgp.poolers.BNPool`.
 
@@ -743,7 +755,7 @@ def cluster_connectivity_prior_loss(
             Only used if :obj:`normalize_loss` is :obj:`True` to compute the effective number
             of nodes per graph in the batch.
             (default: :obj:`None`)
-        reduction (str, optional): Reduction method applied to the batch dimension.
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
 
@@ -765,6 +777,6 @@ def cluster_connectivity_prior_loss(
 
         prior_loss = prior_loss / N_squared  # scalar / vector = vector
 
-        return _reduce_loss(prior_loss, reduction)
+        return _batch_reduce_loss(prior_loss, batch_reduction)
 
     return prior_loss

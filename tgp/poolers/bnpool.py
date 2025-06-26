@@ -295,7 +295,7 @@ class BNPool(DenseSRCPooling):
             mask,
             balance_links=self.balance_links,
             normalize_loss=self.rescale_loss,
-            reduction="mean",
+            batch_reduction="mean",
         )
 
         # KL loss
@@ -309,7 +309,7 @@ class BNPool(DenseSRCPooling):
             node_axis=1,  # Nodes are on axis 1: (B, N, K-1)
             sum_axes=[2, 1],  # Sum over K-1 components (axis 2), then nodes (axis 1)
             normalize_loss=self.rescale_loss,
-            reduction="mean",
+            batch_reduction="mean",
         )
 
         # K prior loss
@@ -320,7 +320,7 @@ class BNPool(DenseSRCPooling):
                 self.get_buffer("K_var"),
                 normalize_loss=self.rescale_loss,
                 mask=mask,
-                reduction="mean",
+                batch_reduction="mean",
             )
         else:
             K_prior_loss = torch.tensor(0.0)
