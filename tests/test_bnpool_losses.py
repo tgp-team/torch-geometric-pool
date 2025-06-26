@@ -123,17 +123,19 @@ class TestWeightedBCEReconstructionLoss:
         assert loss.dim() == 0
         assert loss.item() >= 0
 
-    def test_reduction_methods(self, small_batch_data):
-        """Test different reduction methods."""
+    def test_batch_reduction_methods(self, small_batch_data):
+        """Test different batch reduction methods."""
         x, adj, mask = small_batch_data
         batch_size, n_nodes = adj.shape[:2]
         rec_adj = torch.randn(batch_size, n_nodes, n_nodes)
 
-        # Test different reduction methods
+        # Test different batch reduction methods
         loss_mean = weighted_bce_reconstruction_loss(
-            rec_adj, adj, mask, reduction="mean"
+            rec_adj, adj, mask, batch_reduction="mean"
         )
-        loss_sum = weighted_bce_reconstruction_loss(rec_adj, adj, mask, reduction="sum")
+        loss_sum = weighted_bce_reconstruction_loss(
+            rec_adj, adj, mask, batch_reduction="sum"
+        )
 
         assert isinstance(loss_mean, torch.Tensor)
         assert isinstance(loss_sum, torch.Tensor)
@@ -327,8 +329,8 @@ class TestKLLoss:
         # Normalized loss should be smaller
         assert loss_normalized.item() <= loss_unnormalized.item()
 
-    def test_reduction_methods(self, set_random_seed):
-        """Test different reduction methods."""
+    def test_batch_reduction_methods(self, set_random_seed):
+        """Test different batch reduction methods."""
         batch_size, n_nodes, n_components = 2, 4, 3
 
         # Create distributions
@@ -340,9 +342,9 @@ class TestKLLoss:
         beta_prior = torch.ones(n_components) * 2.0
         p = Beta(alpha_prior, beta_prior)
 
-        # Test different reduction methods
-        loss_mean = kl_loss(q, p, reduction="mean")
-        loss_sum = kl_loss(q, p, reduction="sum")
+        # Test different batch reduction methods
+        loss_mean = kl_loss(q, p, batch_reduction="mean")
+        loss_sum = kl_loss(q, p, batch_reduction="sum")
 
         assert isinstance(loss_mean, torch.Tensor)
         assert isinstance(loss_sum, torch.Tensor)
@@ -431,8 +433,8 @@ class TestClusterConnectivityPriorLoss:
         # Normalized loss should be smaller
         assert loss_normalized.mean().item() <= loss_unnormalized.item()
 
-    def test_reduction_methods(self, set_random_seed):
-        """Test different reduction methods when normalization is used."""
+    def test_batch_reduction_methods(self, set_random_seed):
+        """Test different batch reduction methods when normalization is used."""
         k = 3
         K = torch.randn(k, k)
         K_mu = torch.zeros(k, k)
@@ -441,12 +443,12 @@ class TestClusterConnectivityPriorLoss:
         # Create a mask for normalization (this creates a tensor loss)
         mask = torch.ones(2, 4, dtype=torch.bool)
 
-        # Test different reduction methods
+        # Test different batch reduction methods
         loss_mean = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, reduction="mean"
+            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="mean"
         )
         loss_sum = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, reduction="sum"
+            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="sum"
         )
 
         assert isinstance(loss_mean, torch.Tensor)

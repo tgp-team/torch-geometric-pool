@@ -49,18 +49,18 @@ def test_data_transforms_returns_normalizeadj():
     assert hasattr(transform, "delta")
 
 
-@pytest.mark.parametrize("reduction", ["sum", "mean"])
-def test_just_balance_loss(reduction):
+@pytest.mark.parametrize("batch_reduction", ["sum", "mean"])
+def test_just_balance_loss(batch_reduction):
     S = torch.tensor(
         [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0]], dtype=torch.float
     ).unsqueeze(0)
 
-    loss_balanced = just_balance_loss(S, reduction=reduction)
+    loss_balanced = just_balance_loss(S, batch_reduction=batch_reduction)
     assert pytest.approx(loss_balanced.item(), rel=1e-6) == -1.0
 
     # Check if it raises ValueError for non valid reduction
     with pytest.raises(ValueError):
-        _ = just_balance_loss(S, reduction="not_implemented")
+        _ = just_balance_loss(S, batch_reduction="not_implemented")
 
 
 if __name__ == "__main__":
