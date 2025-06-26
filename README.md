@@ -1,6 +1,6 @@
 <div align="center">
     <br><br>
-    <img alt="Torch Geometric Pool" src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/tgp-logo.svg" width="55%"/>
+    <img alt="Torch Geometric Pool" src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo-bar.svg" width="55%"/>
     <h3>The library for pooling in Graph Neural Networks</h3>
     <hr>
     <p>
