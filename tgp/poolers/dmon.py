@@ -181,9 +181,9 @@ class DMoNPooling(DenseSRCPooling):
             dict: A dictionary with the different terms of
             the auxiliary loss.
         """
-        loss_1 = spectral_loss(adj, S, adj_pooled, mask)
-        loss_2 = cluster_loss(S, mask=mask)
-        loss_3 = orthogonality_loss(S)
+        loss_1 = spectral_loss(adj, S, adj_pooled, mask, batch_reduction="mean")
+        loss_2 = cluster_loss(S, mask=mask, batch_reduction="mean")
+        loss_3 = orthogonality_loss(S, batch_reduction="mean")
 
         return {
             "spectral_loss": loss_1 * self.spectral_loss_coeff,

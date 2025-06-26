@@ -210,10 +210,10 @@ class HOSCPooling(DenseSRCPooling):
             ortho_loss = torch.tensor(0)
         elif self.hosc_ortho:
             # Hosc orthogonality regularization
-            ortho_loss = hosc_orthogonality_loss(S, mask)
+            ortho_loss = hosc_orthogonality_loss(S, mask, batch_reduction="mean")
         else:
             # Standard orthogonality regularization of MinCutPool
-            ortho_loss = orthogonality_loss(S)
+            ortho_loss = orthogonality_loss(S, batch_reduction="mean")
 
         return {"hosc_loss": hosc_loss, "ortho_loss": self.mu * ortho_loss}
 

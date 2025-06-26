@@ -185,6 +185,7 @@ class JustBalancePooling(DenseSRCPooling):
             num_nodes=num_nodes,
             num_clusters=num_clusters,
             normalize_loss=self.normalize_loss,
+            batch_reduction="mean",
         )
 
         if torch.isnan(loss):

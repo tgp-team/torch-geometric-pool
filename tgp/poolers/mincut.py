@@ -171,8 +171,8 @@ class MinCutPooling(DenseSRCPooling):
             dict: A dictionary with the different terms of
             the auxiliary loss.
         """
-        cut_loss = mincut_loss(adj, S, adj_pooled)
-        ortho_loss = orthogonality_loss(S)
+        cut_loss = mincut_loss(adj, S, adj_pooled, batch_reduction="mean")
+        ortho_loss = orthogonality_loss(S, batch_reduction="mean")
 
         return {
             "cut_loss": cut_loss * self.cut_loss_coeff,

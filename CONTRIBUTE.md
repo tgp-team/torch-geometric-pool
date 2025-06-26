@@ -34,7 +34,7 @@ make clean html
 - Run the tests
 
 ```bash
-pytests --cov=tgp --cov-report=term-missing --cov-report=html
+pytest --cov=tgp --cov-report=term-missing --cov-report=html
 ```
 - Check the code coverage report to see if all the code is covered and correctly executed.
 - If you are using VSCode, go on `Testing`, select `pytests` and `/tests`as the target folder.
