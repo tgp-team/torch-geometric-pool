@@ -4,6 +4,7 @@ from torch import Tensor
 from torch_sparse import SparseTensor
 
 from tgp.select.maxcut_select import MaxCutScoreNet, MaxCutSelect
+from tgp.select.topk_select import TopkSelect
 from tgp.utils.losses import maxcut_loss
 from tgp.utils.ops import delta_gcn_matrix
 
@@ -123,7 +124,8 @@ class TestMaxCutSelect:
         assert selector.in_channels == 4
         assert selector.ratio == 0.6
         assert hasattr(selector, 'score_net')
-        assert hasattr(selector, 'topk_selector')
+        # MaxCutSelect now inherits from TopkSelect, so no topk_selector attribute
+        assert isinstance(selector, TopkSelect)
     
     def test_maxcut_select_forward(self, small_graph):
         """Test MaxCutSelect forward pass."""
@@ -181,22 +183,16 @@ class TestMaxCutSelect:
         
         assert out.node_index.size(0) == expected_k
     
-    def test_maxcut_select_custom_score_net(self, small_graph):
-        """Test using custom score network."""
+    def test_maxcut_select_custom_parameters(self, small_graph):
+        """Test using custom score network parameters."""
         x, edge_index, edge_weight, batch = small_graph
-        
-        # Custom score network
-        custom_score_net = MaxCutScoreNet(
-            in_channels=x.size(1),
-            mp_units=[6],
-            mlp_units=[3],
-            delta=1.0
-        )
         
         selector = MaxCutSelect(
             in_channels=x.size(1),
             ratio=0.5,
-            score_net=custom_score_net
+            mp_units=[6],
+            mlp_units=[3],
+            delta=1.0
         )
         selector.eval()
         
@@ -237,16 +233,16 @@ class TestMaxCutLoss:
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            reduction="mean"
+            batch_reduction="mean"
         )
         
         assert isinstance(loss, Tensor)
         assert loss.dim() == 0  # scalar
         assert torch.isfinite(loss).all()
     
-    @pytest.mark.parametrize("reduction", ["mean", "sum"])
-    def test_maxcut_loss_different_reductions(self, small_graph, reduction):
-        """Test different reduction methods."""
+    @pytest.mark.parametrize("batch_reduction", ["mean", "sum"])
+    def test_maxcut_loss_different_batch_reductions(self, small_graph, batch_reduction):
+        """Test different batch_reduction methods."""
         x, edge_index, edge_weight, batch = small_graph
         scores = torch.randn(x.size(0))
         
@@ -255,7 +251,7 @@ class TestMaxCutLoss:
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            reduction=reduction
+            batch_reduction=batch_reduction
         )
         
         assert isinstance(loss, Tensor)
@@ -271,7 +267,7 @@ class TestMaxCutLoss:
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            reduction="mean"
+            batch_reduction="mean"
         )
         
         assert isinstance(loss, Tensor)
@@ -290,7 +286,7 @@ class TestMaxCutLoss:
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            reduction="mean"
+            batch_reduction="mean"
         )
         
         # Backward pass
@@ -300,8 +296,8 @@ class TestMaxCutLoss:
         assert scores.grad is not None
         assert torch.isfinite(scores.grad).all()
     
-    def test_maxcut_loss_invalid_reduction(self, small_graph):
-        """Test invalid reduction parameter."""
+    def test_maxcut_loss_invalid_batch_reduction(self, small_graph):
+        """Test invalid batch_reduction parameter."""
         x, edge_index, edge_weight, batch = small_graph
         scores = torch.randn(x.size(0))
         
@@ -311,7 +307,7 @@ class TestMaxCutLoss:
                 edge_index=edge_index,
                 edge_weight=edge_weight,
                 batch=batch,
-                reduction="invalid"  # type: ignore
+                batch_reduction="invalid"  # type: ignore
             )
     
     def test_maxcut_loss_score_shapes(self, small_graph):
@@ -345,7 +341,7 @@ class TestMaxCutLoss:
             edge_index=edge_index,
             edge_weight=None,  # No edge weights
             batch=batch,
-            reduction="mean"
+            batch_reduction="mean"
         )
         
         assert isinstance(loss, Tensor)
@@ -361,7 +357,7 @@ class TestMaxCutLoss:
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=None,  # No batch
-            reduction="mean"
+            batch_reduction="mean"
         )
         
         assert isinstance(loss, Tensor)
@@ -523,6 +519,11 @@ class TestMaxCutPoolingIntegration:
             "in_channels": 16,
             "ratio": 0.7,
             "loss_coeff": 2.5,
+            "mp_units": [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
+            "mp_act": "tanh",
+            "mlp_units": [16, 16],
+            "mlp_act": "relu",
+            "delta": 2.0,
         }
         
         assert extra_args == expected_args
@@ -556,10 +557,13 @@ class TestMaxCutSelectEdgeCases:
         
         mock_score_net = MockScoreNet()
         
+        # Since we removed score_net parameter, we need to create a custom selector differently
+        # For now, let's just test with default parameters to check the reset functionality
         selector = MaxCutSelect(
             in_channels=x.size(1),
             ratio=0.5,
-            score_net=mock_score_net
+            mp_units=[4],
+            mlp_units=[2]
         )
         
         # This should cover line 177: the conditional check for hasattr(self.score_net, 'reset_parameters')
@@ -605,7 +609,7 @@ class TestMaxCutSelectEdgeCases:
         selector = MaxCutSelect(in_channels=64, ratio=0.3)
         
         repr_str = repr(selector)
-        expected = "MaxCutSelect(in_channels=64, ratio=0.3)"
+        expected = "MaxCutSelect(in_channels=64, ratio=0.3, mp_units=[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8], mp_act='tanh', mlp_units=[16, 16], mlp_act='relu', delta=2.0)"
         
         assert repr_str == expected
     

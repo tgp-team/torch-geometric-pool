@@ -790,7 +790,7 @@ def maxcut_loss(
     edge_index: Tensor,
     edge_weight: Optional[Tensor] = None,
     batch: Optional[Tensor] = None,
-    reduction: ReductionType = "mean",
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary MaxCut loss used by :class:`~tgp.poolers.MaxCutPooling`
     operator from the paper `"MaxCutPool: differentiable feature-aware Maxcut for 
@@ -875,4 +875,4 @@ def maxcut_loss(
     # Normalize by volume and take mean across graphs
     normalized_cut_losses = cut_losses / volumes
     
-    return _reduce_loss(normalized_cut_losses, reduction)
+    return _batch_reduce_loss(normalized_cut_losses, batch_reduction)

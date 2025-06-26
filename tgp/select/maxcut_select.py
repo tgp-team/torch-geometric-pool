@@ -8,8 +8,10 @@ from torch_sparse import SparseTensor
 
 from tgp.select.base_select import Select, SelectOutput
 from tgp.select.topk_select import TopkSelect
-from tgp.utils.ops import delta_gcn_matrix
+from tgp.utils.ops import delta_gcn_matrix, connectivity_to_edge_index, check_and_filter_edge_weights
 from tgp.utils.typing import SinvType
+
+from torch_geometric.typing import Adj
 
 
 class MaxCutScoreNet(torch.nn.Module):
@@ -51,6 +53,7 @@ class MaxCutScoreNet(torch.nn.Module):
         self.mp_convs = torch.nn.ModuleList()
         in_units = in_channels
         for out_units in mp_units:
+            print(f"GCNConv(in_units={in_units}, out_units={out_units}, normalize=False, cached=False)")
             self.mp_convs.append(
                 GCNConv(in_units, out_units, normalize=False, cached=False)
             )
@@ -113,7 +116,7 @@ class MaxCutScoreNet(torch.nn.Module):
         return torch.tanh(score)
 
 
-class MaxCutSelect(Select):
+class MaxCutSelect(TopkSelect):
     r"""The MaxCut :math:`\texttt{select}` operator from the paper
     `"MaxCutPool: differentiable feature-aware Maxcut for pooling in graph neural networks"
     <https://arxiv.org/abs/2409.05100>`_ (Abate & Bianchi, ICLR 2025).
@@ -141,52 +144,73 @@ class MaxCutSelect(Select):
         in_channels (int): Size of each input feature.
         ratio (Union[int, float]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
-        score_net (Optional[Callable]): Custom score network. If :obj:`None`,
-            uses :class:`MaxCutScoreNet`. (default: :obj:`None`)
+        mp_units (list, optional): List of hidden units for message passing layers.
+            (default: :obj:`[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]`)
+        mp_act (str, optional): Activation function for message passing layers.
+            (default: :obj:`"tanh"`)
+        mlp_units (list, optional): List of hidden units for MLP layers.
+            (default: :obj:`[16, 16]`)
+        mlp_act (str, optional): Activation function for MLP layers.
+            (default: :obj:`"relu"`)
+        delta (float, optional): Delta parameter for propagation matrix computation.
+            (default: :obj:`2.0`)
+        min_score (float, optional): Minimal node score threshold.
+            Inherited from TopkSelect. (default: :obj:`None`)
         s_inv_op (SinvType): Operation for computing :math:`\mathbf{S}^{-1}`.
             (default: :obj:`"transpose"`)
-        **score_net_kwargs: Additional arguments for :class:`MaxCutScoreNet`.
     """
 
     def __init__(
         self,
         in_channels: int,
         ratio: Union[int, float] = 0.5,
-        score_net: Optional[Callable] = None,
+        mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
+        mp_act: str = "tanh",
+        mlp_units: list = [16, 16],
+        mlp_act: str = "relu",
+        delta: float = 2.0,
+        min_score: Optional[float] = None,
         s_inv_op: SinvType = "transpose",
-        **score_net_kwargs,
     ):
-        super().__init__()
-
-        self.in_channels = in_channels
-        self.ratio = ratio
-
-        # Score network
-        if score_net is None:
-            self.score_net = MaxCutScoreNet(
-                in_channels=in_channels, **score_net_kwargs
-            )
-        else:
-            self.score_net = score_net
-
-        # TopK selector for actual selection
-        self.topk_selector = TopkSelect(
+        # Initialize TopkSelect with None in_channels since we'll compute scores ourselves
+        super().__init__(
             in_channels=None,  # We'll provide scores directly
             ratio=ratio,
+            min_score=min_score,
             act="identity",  # No additional activation on scores
             s_inv_op=s_inv_op,
         )
 
+        self.in_channels = in_channels
+        self.mp_units = mp_units
+        self.mp_act = mp_act
+        self.mlp_units = mlp_units
+        self.mlp_act = mlp_act
+        self.delta = delta
+
+        # Score network - initialize after calling super().__init__
+        self.score_net = MaxCutScoreNet(
+            in_channels=in_channels,
+            mp_units=mp_units,
+            mp_act=mp_act,
+            mlp_units=mlp_units,
+            mlp_act=mlp_act,
+            delta=delta,
+        )
+
     def reset_parameters(self):
         r"""Resets all learnable parameters of the module."""
-        if hasattr(self.score_net, 'reset_parameters'):
+        # Call parent reset_parameters (which handles the weight parameter if needed)
+        super().reset_parameters()
+        
+        # Reset score network parameters (only if score_net exists)
+        if hasattr(self, 'score_net') and hasattr(self.score_net, 'reset_parameters'):
             self.score_net.reset_parameters()
-        self.topk_selector.reset_parameters()
 
     def forward(
         self,
         x: Tensor,
-        edge_index: Union[Tensor, SparseTensor],
+        edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
         batch: Optional[Tensor] = None,
         **kwargs,
@@ -206,29 +230,43 @@ class MaxCutSelect(Select):
         """
         # Convert SparseTensor to edge_index format if needed
         if isinstance(edge_index, SparseTensor):
-            row, col, edge_weight = edge_index.coo()
-            edge_index = torch.stack([row, col], dim=0)
-        elif edge_index is None:
+            edge_index, edge_weight = connectivity_to_edge_index(
+                edge_index, edge_weight
+            )
+        if edge_weight is not None:
+            edge_weight = check_and_filter_edge_weights(edge_weight)
+
+        if edge_index is None:
             raise ValueError("edge_index cannot be None for MaxCutSelect")
         
         # Compute MaxCut scores
         scores = self.score_net(x, edge_index, edge_weight)  # Shape: (N, 1)
 
-        # Perform top-k selection using computed scores
-        select_output = self.topk_selector(x=scores, batch=batch)
+        # Perform top-k selection using computed scores - call parent forward
+        # The parent TopkSelect.forward expects scores as x parameter
+        select_output = super().forward(x=scores, batch=batch)
 
         # Store the scores and connectivity info in SelectOutput for loss computation
         # The pooler will access these to compute the MaxCut loss
-        select_output.scores = scores.squeeze(-1)  # Store as (N,) for loss function
-        select_output.edge_index = edge_index
-        select_output.edge_weight = edge_weight
-        select_output._extra_args.update({'scores', 'edge_index', 'edge_weight'})
+        # We need to create a new SelectOutput with the additional attributes
+        enhanced_output = SelectOutput(
+            s=select_output.s,
+            s_inv=select_output.s_inv,
+            scores=scores.squeeze(-1),  # Store as (N,) for loss function
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+        )
 
-        return select_output
+        return enhanced_output
 
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
             f"in_channels={self.in_channels}, "
-            f"ratio={self.ratio})"
+            f"ratio={self.ratio}, "
+            f"mp_units={self.mp_units}, "
+            f"mp_act='{self.mp_act}', "
+            f"mlp_units={self.mlp_units}, "
+            f"mlp_act='{self.mlp_act}', "
+            f"delta={self.delta})"
         ) 

@@ -37,6 +37,16 @@ class MaxCutPooling(SRCPooling):
             (default: :obj:`0.5`)
         loss_coeff (float): Coefficient for the MaxCut auxiliary loss.
             (default: :obj:`1.0`)
+        mp_units (list, optional): List of hidden units for message passing layers.
+            (default: :obj:`[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]`)
+        mp_act (str, optional): Activation function for message passing layers.
+            (default: :obj:`"tanh"`)
+        mlp_units (list, optional): List of hidden units for MLP layers.
+            (default: :obj:`[16, 16]`)
+        mlp_act (str, optional): Activation function for MLP layers.
+            (default: :obj:`"relu"`)
+        delta (float, optional): Delta parameter for propagation matrix computation.
+            (default: :obj:`2.0`)
         lift (LiftType): Matrix operation for lifting pooled features.
             (default: :obj:`"precomputed"`)
         s_inv_op (SinvType): Operation for computing :math:`\mathbf{S}^{-1}`.
@@ -47,7 +57,6 @@ class MaxCutPooling(SRCPooling):
             (default: :obj:`"sum"`)
         lift_red_op (ReduceType): Aggregation function for lifting operation.
             (default: :obj:`"sum"`)
-        **score_net_kwargs: Additional arguments for the MaxCut score network.
 
     Example:
         >>> pooler = MaxCutPooling(in_channels=64, ratio=0.5, loss_coeff=1.0)
@@ -63,19 +72,27 @@ class MaxCutPooling(SRCPooling):
         in_channels: int,
         ratio: Union[float, int] = 0.5,
         loss_coeff: float = 1.0,
+        mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
+        mp_act: str = "tanh",
+        mlp_units: list = [16, 16],
+        mlp_act: str = "relu",
+        delta: float = 2.0,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
-        **score_net_kwargs,
     ):
         super().__init__(
             selector=MaxCutSelect(
                 in_channels=in_channels,
                 ratio=ratio,
+                mp_units=mp_units,
+                mp_act=mp_act,
+                mlp_units=mlp_units,
+                mlp_act=mlp_act,
+                delta=delta,
                 s_inv_op=s_inv_op,
-                **score_net_kwargs,
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             connector=SparseConnect(reduce_op=connect_red_op),
@@ -85,6 +102,11 @@ class MaxCutPooling(SRCPooling):
         self.in_channels = in_channels
         self.ratio = ratio
         self.loss_coeff = loss_coeff
+        self.mp_units = mp_units
+        self.mp_act = mp_act
+        self.mlp_units = mlp_units
+        self.mlp_act = mlp_act
+        self.delta = delta
 
     def forward(
         self,
@@ -175,7 +197,7 @@ class MaxCutPooling(SRCPooling):
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            reduction="mean",
+            batch_reduction="mean",
         )
 
         return {"maxcut_loss": maxcut_loss_val * self.loss_coeff}
@@ -191,4 +213,9 @@ class MaxCutPooling(SRCPooling):
             "in_channels": self.in_channels,
             "ratio": self.ratio,
             "loss_coeff": self.loss_coeff,
+            "mp_units": self.mp_units,
+            "mp_act": self.mp_act,
+            "mlp_units": self.mlp_units,
+            "mlp_act": self.mlp_act,
+            "delta": self.delta,
         } 

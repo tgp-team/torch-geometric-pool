@@ -4,6 +4,7 @@ from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor
+from torch_geometric.typing import Adj
 
 from tgp.imports import SparseTensor
 from tgp.utils.ops import pseudo_inverse
@@ -267,7 +268,7 @@ class Select(torch.nn.Module):
     def forward(
         self,
         x: Optional[Tensor] = None,
-        edge_index: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
         edge_weight: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
