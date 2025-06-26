@@ -852,6 +852,10 @@ def maxcut_loss(
     
     if edge_weight is None:
         edge_weight = torch.ones(edge_index.size(1), device=scores.device)
+    else:
+        # Ensure edge_weight is 1D - squeeze if it has shape (E, 1)
+        if edge_weight.dim() > 1:
+            edge_weight = edge_weight.squeeze()
 
     # Construct sparse adjacency matrix
     adj = SparseTensor(

@@ -159,5 +159,6 @@ cython_debug/
 
 # IDE settings
 .idea/
+.cursor/
 .vscode/
 MaxCutPool/

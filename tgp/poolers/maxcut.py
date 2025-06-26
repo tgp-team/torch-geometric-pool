@@ -37,6 +37,10 @@ class MaxCutPooling(SRCPooling):
         in_channels (int): Size of each input sample.
         ratio (Union[float, int]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
+        assignment_mode (bool, optional): Whether to create assignment matrices that map
+            ALL nodes to supernodes (True) or perform standard top-k selection (False).
+            When True, mimics the original MaxCutPool "expressive" mode.
+            (default: :obj:`True`)
         loss_coeff (float): Coefficient for the MaxCut auxiliary loss.
             (default: :obj:`1.0`)
         mp_units (list, optional): List of hidden units for message passing layers.
@@ -61,7 +65,7 @@ class MaxCutPooling(SRCPooling):
             (default: :obj:`"sum"`)
 
     Example:
-        >>> pooler = MaxCutPooling(in_channels=64, ratio=0.5, loss_coeff=1.0)
+        >>> pooler = MaxCutPooling(in_channels=64, ratio=0.5, assignment_mode=True, loss_coeff=1.0)
         >>> x = torch.randn(100, 64)  # 100 nodes, 64 features
         >>> edge_index = torch.randint(0, 100, (2, 200))  # 200 edges
         >>> out = pooler(x=x, edge_index=edge_index)
@@ -73,6 +77,7 @@ class MaxCutPooling(SRCPooling):
         self,
         in_channels: int,
         ratio: Union[float, int] = 0.5,
+        assignment_mode: bool = True,
         loss_coeff: float = 1.0,
         mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
         mp_act: str = "tanh",
@@ -89,6 +94,7 @@ class MaxCutPooling(SRCPooling):
             selector=MaxCutSelect(
                 in_channels=in_channels,
                 ratio=ratio,
+                assignment_mode=assignment_mode,
                 mp_units=mp_units,
                 mp_act=mp_act,
                 mlp_units=mlp_units,
@@ -103,6 +109,7 @@ class MaxCutPooling(SRCPooling):
 
         self.in_channels = in_channels
         self.ratio = ratio
+        self.assignment_mode = assignment_mode
         self.loss_coeff = loss_coeff
         self.mp_units = mp_units
         self.mp_act = mp_act
@@ -154,8 +161,13 @@ class MaxCutPooling(SRCPooling):
             # Set loss to 0 and continue with the pooling operation
             loss = {"maxcut_loss": torch.tensor(0.0, device=x.device)}
         else:
-            # Compute auxiliary loss
-            loss = self.compute_loss(so.scores, adj, edge_weight, batch)
+            # Compute auxiliary loss - check if scores exist in SelectOutput
+            scores = getattr(so, 'scores', None)
+            if scores is not None:
+                loss = self.compute_loss(scores, adj, edge_weight, batch)
+            else:
+                # Fallback: set loss to 0 if scores are not available
+                loss = {"maxcut_loss": torch.tensor(0.0, device=x.device)}
 
         # Reduce phase
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
@@ -210,6 +222,7 @@ class MaxCutPooling(SRCPooling):
         return {
             "in_channels": self.in_channels,
             "ratio": self.ratio,
+            "assignment_mode": self.assignment_mode,
             "loss_coeff": self.loss_coeff,
             "mp_units": self.mp_units,
             "mp_act": self.mp_act,
