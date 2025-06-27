@@ -4,7 +4,7 @@ html.dark {
 }
 
 html.light .dark-code {
-    --syntax-pre-bg: #222222;
+    --syntax-pre-bg: #262c36;
 }
 
 html.light {

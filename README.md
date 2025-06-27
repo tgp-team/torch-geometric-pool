@@ -1,12 +1,13 @@
 <div align="center">
     <br><br>
-    <img alt="Torch Geometric Pool" src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo-bar.svg" width="55%"/>
+    <img alt="Torch Geometric Pool" src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo-full.svg" width="65%"/>
     <h3>The library for pooling in Graph Neural Networks</h3>
     <hr>
     <p>
-    <a href='https://github.com/FilippoMB/torch-geometric-pool/actions/workflows/ci.yaml'><img alt="CI status" src="https://github.com/FilippoMB/torch-geometric-pool/actions/workflows/ci.yaml/badge.svg"></a>
     <a href='https://pypi.org/project/torch-geometric-pool/'><img alt="PyPI" src="https://img.shields.io/pypi/v/torch-geometric-pool"></a>
     <img alt="PyPI - Python Version" src="https://img.shields.io/badge/python-%3E%3D3.9-blue">
+    <a href='https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml'><img alt="CI status" src="https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml/badge.svg"></a>
+    <a href='https://torch-geometric-pool.readthedocs.io/en/latest/?badge=latest'><img src='https://readthedocs.org/projects/torch-geometric-pool/badge/?version=latest' alt='Documentation Status' /></a>
     </p>
     <p>
     📚 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/">Documentation</a> - 🚀 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/content/quickstart.html">Getting Started</a> - 💻 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/tutorials/index.html">Introductory notebooks</a>
