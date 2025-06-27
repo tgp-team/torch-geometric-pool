@@ -10,7 +10,7 @@ from torch_geometric.utils import scatter, coalesce, remove_self_loops
 
 from tgp.select.base_select import Select, SelectOutput
 from tgp.select.topk_select import TopkSelect
-from tgp.utils.ops import delta_gcn_matrix, connectivity_to_edge_index, check_and_filter_edge_weights, generate_maxcut_assignment_matrix
+from tgp.utils.ops import delta_gcn_matrix, connectivity_to_edge_index, check_and_filter_edge_weights
 from tgp.utils.typing import SinvType
 
 from torch_geometric.typing import Adj
@@ -169,7 +169,7 @@ class MaxCutSelect(TopkSelect):
         self,
         in_channels: int,
         ratio: Union[int, float] = 0.5,
-        assignment_mode: bool = True,
+        assign_all_nodes: bool = True,
         mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
@@ -193,7 +193,7 @@ class MaxCutSelect(TopkSelect):
         self.mlp_units = mlp_units
         self.mlp_act = mlp_act
         self.delta = delta
-        self.assignment_mode = assignment_mode
+        self.assign_all_nodes = assign_all_nodes
 
         # Score network - initialize after calling super().__init__
         self.score_net = MaxCutScoreNet(
@@ -252,55 +252,25 @@ class MaxCutSelect(TopkSelect):
         # Perform top-k selection using computed scores - call parent forward
         # The parent TopkSelect.forward expects scores as x parameter
         topk_select_output = super().forward(x=scores, batch=batch)
-        
-        if self.assignment_mode:
-            # Generate assignment matrix that maps ALL nodes to supernodes
-            # This mimics the original MaxCutPool "expressive" mode
-            
-            # Convert edge_index to tensor format if needed for assignment matrix generation
-            edge_index_tensor, _ = connectivity_to_edge_index(edge_index, edge_weight)
-            
-            # Ensure we have valid node indices from TopK selection
-            if topk_select_output.node_index is None:
-                raise ValueError("TopK selection failed to return node indices")
-            
-            assignment_matrix = generate_maxcut_assignment_matrix(
-                edge_index=edge_index_tensor,
-                kept_nodes=topk_select_output.node_index,
-                max_iter=5,  # Maximum propagation iterations
+
+        if self.assign_all_nodes:
+            select_output = topk_select_output.assign_all_nodes(
+                adj=edge_index,
+                weight=scores.squeeze(-1),
+                max_iter=5,
                 batch=batch,
-                num_nodes=x.size(0)
+                strategy="closest_node",
             )
-            
-            # Create SelectOutput with assignment matrix
-            # The assignment_matrix contains [original_node_indices, supernode_indices]
-            select_output = SelectOutput(
-                node_index=assignment_matrix[0],  # All original nodes
-                num_nodes=x.size(0),
-                cluster_index=assignment_matrix[1],  # Corresponding supernodes
-                num_clusters=topk_select_output.num_clusters,
-                weight=scores.squeeze(-1),  # Scores for ALL nodes
-                s_inv_op=self.s_inv_op,
-                scores=scores.squeeze(-1),  # Store all scores for loss computation
-            )
-            
         else:
-            # Standard top-k selection mode - only selected nodes are included
-            # This is the traditional TopkSelect behavior
-            
-            # Ensure we have valid outputs from TopK selection
-            if topk_select_output.node_index is None or topk_select_output.cluster_index is None:
-                raise ValueError("TopK selection failed to return valid indices")
-                
-            select_output = SelectOutput(
-                node_index=topk_select_output.node_index,
-                num_nodes=x.size(0),
-                cluster_index=topk_select_output.cluster_index,
-                num_clusters=topk_select_output.num_clusters,
-                weight=topk_select_output.weight,  # Scores of selected nodes only
-                s_inv_op=self.s_inv_op,
-                scores=scores.squeeze(-1),  # Store all scores for loss computation
-            )
+            select_output = topk_select_output
+
+        # Add scores to the select output for later use
+        # This allows downstream components to access the node scores
+        setattr(select_output, 'scores', scores.squeeze(-1))
+        
+        # Register 'scores' as an extra argument so it's properly tracked
+        if hasattr(select_output, '_extra_args'):
+            select_output._extra_args.add('scores')
 
         return select_output
 
@@ -309,7 +279,7 @@ class MaxCutSelect(TopkSelect):
             f"{self.__class__.__name__}("
             f"in_channels={self.in_channels}, "
             f"ratio={self.ratio}, "
-            f"assignment_mode={self.assignment_mode}, "
+            f"assign_all_nodes={self.assign_all_nodes}, "
             f"mp_units={self.mp_units}, "
             f"mp_act='{self.mp_act}', "
             f"mlp_units={self.mlp_units}, "

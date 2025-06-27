@@ -7,7 +7,7 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 
 from tgp.imports import SparseTensor
-from tgp.utils.ops import pseudo_inverse
+from tgp.utils.ops import pseudo_inverse, get_assignments, connectivity_to_edge_index
 
 
 def cluster_to_s(
@@ -250,6 +250,72 @@ class SelectOutput:
     def requires_grad_(self, requires_grad: bool = True) -> "SelectOutput":
         r"""Tracks gradient computation for both :obj:`s` and :obj:`s_inv`."""
         return self.apply(lambda x: x.requires_grad_(requires_grad=requires_grad))
+
+    def assign_all_nodes(self,
+        adj: Optional[Adj] = None,
+        weight: Optional[Tensor] = None,
+        max_iter: int = 5,
+        batch: Optional[Tensor] = None,
+        strategy: str = "closest_node",
+    ) -> "SelectOutput":
+        """Create a new SelectOutput with updated cluster assignments using get_assignments.
+        
+        This function takes a SelectOutput (with cluster_index attribute) and an adjacency
+        matrix, uses the get_assignments function to compute new node-to-cluster mappings,
+        and returns a new SelectOutput with updated cluster_index.
+        
+        Args:
+            select_output (SelectOutput): Original SelectOutput with cluster_index attribute
+            adj (Adj): Adjacency matrix (edge_index tensor or SparseTensor)
+            edge_weight (Tensor, optional): Edge weights. Defaults to None.
+            max_iter (int, optional): Maximum propagation iterations. Defaults to 5.
+            batch (Tensor, optional): Batch assignments. Defaults to None.
+            
+        Returns:
+            SelectOutput: New SelectOutput with updated cluster assignments
+        """
+
+        if strategy == "closest_node":
+            assert adj is not None, "adj must be provided for closest_node strategy"
+
+            # Convert adjacency to edge_index format if needed
+            if isinstance(adj, SparseTensor):
+                edge_index, edge_weight = connectivity_to_edge_index(adj)
+            elif isinstance(adj, Tensor):
+                edge_index = adj
+
+            else:
+                raise ValueError(f"Invalid adjacency type: {type(adj)}")
+            
+            # Handle the weight parameter if provided
+            if weight is not None:
+                # Ensure weight has the same number of elements as nodes
+                if weight.size(0) != edge_index.max().item() + 1:
+                    raise ValueError(
+                        f"Weight tensor size ({weight.size(0)}) must match the number of nodes ({edge_index.max().item() + 1})"
+                    )
+            # Get the kept nodes indices of the original graph from the original select output
+            kept_nodes = self.node_index
+            
+            # Use get_assignments to compute new node-to-cluster mappings
+            assignments = get_assignments(edge_index, kept_nodes, max_iter, batch)
+            
+            # Create new SelectOutput with updated cluster assignments
+            new_select_output = SelectOutput(
+                cluster_index=assignments[1],  # New cluster assignments
+                s_inv_op=getattr(self, 's_inv_op', 'transpose'),
+                weight=weight,
+            )
+
+        # Copy any additional attributes from the original SelectOutput
+            for attr_name in self._extra_args if hasattr(self, '_extra_args') else []:
+                if hasattr(self, attr_name):
+                    setattr(new_select_output, attr_name, getattr(self, attr_name))
+            
+            return new_select_output
+            
+
+
 
 
 class Select(torch.nn.Module):

@@ -77,7 +77,7 @@ class MaxCutPooling(SRCPooling):
         self,
         in_channels: int,
         ratio: Union[float, int] = 0.5,
-        assignment_mode: bool = True,
+        assign_all_nodes: bool = True,
         loss_coeff: float = 1.0,
         mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
         mp_act: str = "tanh",
@@ -94,7 +94,7 @@ class MaxCutPooling(SRCPooling):
             selector=MaxCutSelect(
                 in_channels=in_channels,
                 ratio=ratio,
-                assignment_mode=assignment_mode,
+                assign_all_nodes=assign_all_nodes,
                 mp_units=mp_units,
                 mp_act=mp_act,
                 mlp_units=mlp_units,
@@ -109,7 +109,7 @@ class MaxCutPooling(SRCPooling):
 
         self.in_channels = in_channels
         self.ratio = ratio
-        self.assignment_mode = assignment_mode
+        self.assign_all_nodes = assign_all_nodes
         self.loss_coeff = loss_coeff
         self.mp_units = mp_units
         self.mp_act = mp_act
@@ -222,7 +222,7 @@ class MaxCutPooling(SRCPooling):
         return {
             "in_channels": self.in_channels,
             "ratio": self.ratio,
-            "assignment_mode": self.assignment_mode,
+            "assign_all_nodes": self.assign_all_nodes,
             "loss_coeff": self.loss_coeff,
             "mp_units": self.mp_units,
             "mp_act": self.mp_act,
