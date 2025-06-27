@@ -318,61 +318,83 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
     return mappa
 
 
-def get_assignments(edge_index, kept_node_indices, max_iter=5, batch=None):
+def get_assignments(kept_node_indices, edge_index=None, max_iter=5, batch=None, num_nodes=None):
     """
     
     Performs hierarchical node assignment and constructs the pooled graph structure.
     
     Args:
-        edge_index (Tensor): Original graph connectivity
         kept_node_indices (Tensor): Indices of nodes to keep
-        max_iter (int, optional): Maximum propagation iterations. Defaults to 5.
+        edge_index (Tensor, optional): Original graph connectivity. Required if max_iter > 0. Defaults to None.
+        max_iter (int, optional): Maximum propagation iterations. If 0, uses random assignment only. Defaults to 5.
         batch (Tensor, optional): Batch assignments. Defaults to None.
+        num_nodes (int, optional): Total number of nodes. If None, inferred from edge_index or batch. Defaults to None.
         
     Returns:
-        tuple:
-            - Tensor: New edge indices
-            - Tensor: New edge weights
-            - Tensor: Node assignment matrix
-            - list: Hierarchical assignment mappings
+        Tensor: Node assignments mapping
     """
     if isinstance(kept_node_indices, torch.Tensor):
         kept_node_tensor = torch.squeeze(kept_node_indices).to(torch.long)
     else:
         kept_node_tensor = torch.tensor(kept_node_indices, dtype=torch.long)
 
-    if batch is None:
-        num_nodes = edge_index.max().item() + 1
+    # Determine number of nodes and device
+    if num_nodes is None:
+        if batch is not None:
+            num_nodes = batch.size(0)
+        elif edge_index is not None:
+            num_nodes = edge_index.max().item() + 1
+        else:
+            raise ValueError("Either num_nodes, batch, or edge_index must be provided to determine the number of nodes")
+    
+    # Determine device
+    if edge_index is not None:
+        device = edge_index.device
+    elif batch is not None:
+        device = batch.device
     else:
-        num_nodes = batch.size(0)
-    device = edge_index.device
-    
-    edge_index = edge_index.clone()
-    
-    x = create_one_hot_tensor(num_nodes, kept_node_tensor, device) # initialize the one-hot tensor for x
+        device = kept_node_tensor.device
     
     maps_list = []
-    mask = torch.zeros(num_nodes, device=device, dtype=torch.bool) # initialize the mask
-    mask[kept_node_indices] = True # set the mask to True for the supernodes
-
-    _map = torch.stack([kept_node_tensor, kept_node_tensor]) # create the first map
-    maps_list.append(_map) # append the first map to the list of maps
     
-    for _ in range(max_iter): # iterate over the max path length
-        if mask.all(): # if the mask is all True
-            break # break the loop
-        x, _map, mask = get_sparse_map_mask(x, edge_index, kept_node_tensor, mask) # propagate the kept nodes for one step
-        maps_list.append(_map)
-
+    # Initialize mask for assigned nodes
+    mask = torch.zeros(num_nodes, device=device, dtype=torch.bool)
+    mask[kept_node_indices] = True
+    
+    # Create initial mapping for kept nodes
+    _map = torch.stack([kept_node_tensor, kept_node_tensor])
+    maps_list.append(_map)
+    
+    # Only perform iterative assignment if max_iter > 0 and edge_index is provided
+    if max_iter > 0:
+        if edge_index is None:
+            raise ValueError("edge_index must be provided when max_iter > 0")
+        
+        # Clone edge_index to avoid modifying the original
+        edge_index = edge_index.clone()
+        
+        # Initialize one-hot tensor for propagation
+        x = create_one_hot_tensor(num_nodes, kept_node_tensor, device)
+        
+        # Iterative assignment through message passing
+        for _ in range(max_iter):
+            if mask.all():  # All nodes assigned
+                break
+            x, _map, mask = get_sparse_map_mask(x, edge_index, kept_node_tensor, mask)
+            maps_list.append(_map)
+    
+    # Randomly assign any remaining unassigned nodes
     if not mask.all():
-        _map = get_random_map_mask(kept_node_tensor, mask, batch) # randomly assign unassigned nodes
+        _map = get_random_map_mask(kept_node_tensor, mask, batch)
         maps_list.append(_map)
     
-    # Get the assignments from the old to the pooled graph
+    # Combine all mappings and sort by node index
     assignments = torch.cat(maps_list, dim=1)
     assignments = assignments[:, assignments[0].argsort()]
-    _, unique_one = torch.unique(assignments[1], return_inverse=True) # get idx of pooled graph
-    assignments[1] = unique_one # get the unique supernodes
+    
+    # Renumber target indices to be consecutive
+    _, unique_one = torch.unique(assignments[1], return_inverse=True)
+    assignments[1] = unique_one
 
     return assignments
 

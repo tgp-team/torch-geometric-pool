@@ -298,7 +298,7 @@ class SelectOutput:
             kept_nodes = self.node_index
             
             # Use get_assignments to compute new node-to-cluster mappings
-            assignments = get_assignments(edge_index, kept_nodes, max_iter, batch)
+            assignments = get_assignments(kept_nodes, edge_index=edge_index, max_iter=max_iter, batch=batch)
             
             # Create new SelectOutput with updated cluster assignments
             new_select_output = SelectOutput(
