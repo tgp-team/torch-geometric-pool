@@ -19,7 +19,7 @@ class MaxCutPooling(SRCPooling):
     `"MaxCutPool: differentiable feature-aware Maxcut for pooling in graph neural networks"
     <https://arxiv.org/abs/2409.05100>`_ (Abate & Bianchi, ICLR 2025).
 
-    This pooling layer uses a differentiable MaxCut objective to learn 
+    This pooling layer uses a differentiable MaxCut objective to learn
     node assignments. It is particularly effective for heterophilic graphs
     and provides robust pooling through graph topology-aware scoring.
 
@@ -182,7 +182,7 @@ class MaxCutPooling(SRCPooling):
             loss = {"maxcut_loss": torch.tensor(0.0, device=x.device)}
         else:
             # Compute auxiliary loss - check if scores exist in SelectOutput
-            scores = getattr(so, 'scores', None)
+            scores = getattr(so, "scores", None)
             if scores is not None:
                 loss = self.compute_loss(scores, adj, edge_weight, batch)
             else:
@@ -192,7 +192,7 @@ class MaxCutPooling(SRCPooling):
         # Reduce phase
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
-        # Connect phase  
+        # Connect phase
         edge_index_pooled, edge_weight_pooled = self.connect(
             edge_index=adj, so=so, edge_weight=edge_weight
         )
@@ -206,7 +206,13 @@ class MaxCutPooling(SRCPooling):
             loss=loss,
         )
 
-    def compute_loss(self, scores: Tensor, adj: Adj, edge_weight: Optional[Tensor] = None, batch: Optional[Tensor] = None) -> dict:
+    def compute_loss(
+        self,
+        scores: Tensor,
+        adj: Adj,
+        edge_weight: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+    ) -> dict:
         """Compute the auxiliary MaxCut loss.
 
         Args:
@@ -251,4 +257,4 @@ class MaxCutPooling(SRCPooling):
             "mlp_units": self.mlp_units,
             "mlp_act": self.mlp_act,
             "delta": self.delta,
-        } 
+        }

@@ -1,19 +1,20 @@
-import select
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
 from torch_geometric.nn import GCNConv, Linear
 from torch_geometric.nn.resolver import activation_resolver
-from torch_sparse import SparseTensor
-from torch_geometric.utils import scatter, coalesce, remove_self_loops
-
-from tgp.select.base_select import Select, SelectOutput
-from tgp.select.topk_select import TopkSelect
-from tgp.utils.ops import delta_gcn_matrix, connectivity_to_edge_index, check_and_filter_edge_weights
-from tgp.utils.typing import SinvType
-
 from torch_geometric.typing import Adj
+from torch_sparse import SparseTensor
+
+from tgp.select.base_select import SelectOutput
+from tgp.select.topk_select import TopkSelect
+from tgp.utils.ops import (
+    check_and_filter_edge_weights,
+    connectivity_to_edge_index,
+    delta_gcn_matrix,
+)
+from tgp.utils.typing import SinvType
 
 
 class MaxCutScoreNet(torch.nn.Module):
@@ -51,7 +52,7 @@ class MaxCutScoreNet(torch.nn.Module):
             self.mp_act = lambda x: x
         else:
             self.mp_act = activation_resolver(mp_act)
-        
+
         self.mp_convs = torch.nn.ModuleList()
         in_units = in_channels
         for out_units in mp_units:
@@ -65,7 +66,7 @@ class MaxCutScoreNet(torch.nn.Module):
             self.mlp_act = lambda x: x
         else:
             self.mlp_act = activation_resolver(mlp_act)
-        
+
         self.mlp = torch.nn.ModuleList()
         for out_units in mlp_units:
             self.mlp.append(Linear(in_units, out_units))
@@ -100,7 +101,9 @@ class MaxCutScoreNet(torch.nn.Module):
             ~torch.Tensor: Node scores of shape :math:`(N, 1)`, normalized to :math:`[-1, 1]` via tanh.
         """
         # Get Delta-GCN propagation matrix for heterophilic message passing
-        edge_index, edge_weight = delta_gcn_matrix(edge_index, edge_weight, delta=self.delta)
+        edge_index, edge_weight = delta_gcn_matrix(
+            edge_index, edge_weight, delta=self.delta
+        )
 
         # Message passing layers
         for mp_conv in self.mp_convs:
@@ -216,9 +219,9 @@ class MaxCutSelect(TopkSelect):
         r"""Resets all learnable parameters of the module."""
         # Call parent reset_parameters (which handles the weight parameter if needed)
         super().reset_parameters()
-        
+
         # Reset score network parameters (only if score_net exists)
-        if hasattr(self, 'score_net') and hasattr(self.score_net, 'reset_parameters'):
+        if hasattr(self, "score_net") and hasattr(self.score_net, "reset_parameters"):
             self.score_net.reset_parameters()
 
     def forward(
@@ -245,7 +248,7 @@ class MaxCutSelect(TopkSelect):
         if edge_index is None:
             edge_index = torch.tensor([[], []], dtype=torch.long)
             edge_weight = None
-        
+
         # Convert SparseTensor to edge_index format if needed
         if isinstance(edge_index, SparseTensor):
             edge_index, edge_weight = connectivity_to_edge_index(
@@ -253,7 +256,6 @@ class MaxCutSelect(TopkSelect):
             )
         if edge_weight is not None:
             edge_weight = check_and_filter_edge_weights(edge_weight)
-        
 
         scores = self.score_net(x, edge_index, edge_weight)  # Shape: (N, 1)
 
@@ -274,11 +276,11 @@ class MaxCutSelect(TopkSelect):
 
         # Add scores to the select output for later use
         # This allows downstream components to access the node scores
-        setattr(select_output, 'scores', scores.squeeze(-1))
-        
+        setattr(select_output, "scores", scores.squeeze(-1))
+
         # Register 'scores' as an extra argument so it's properly tracked
-        if hasattr(select_output, '_extra_args'):
-            select_output._extra_args.add('scores')
+        if hasattr(select_output, "_extra_args"):
+            select_output._extra_args.add("scores")
 
         return select_output
 
@@ -293,4 +295,4 @@ class MaxCutSelect(TopkSelect):
             f"mlp_units={self.mlp_units}, "
             f"mlp_act='{self.mlp_act}', "
             f"delta={self.delta})"
-        ) 
+        )

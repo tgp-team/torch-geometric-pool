@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Distribution, kl_divergence
-
 from torch_geometric.utils import scatter
 from torch_sparse import SparseTensor
 
@@ -793,8 +792,8 @@ def maxcut_loss(
     batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary MaxCut loss used by :class:`~tgp.poolers.MaxCutPooling`
-    operator from the paper `"MaxCutPool: differentiable feature-aware Maxcut for 
-    pooling in graph neural networks" <https://arxiv.org/abs/2409.05100>`_ 
+    operator from the paper `"MaxCutPool: differentiable feature-aware Maxcut for
+    pooling in graph neural networks" <https://arxiv.org/abs/2409.05100>`_
     (Abate & Bianchi, ICLR 2025).
 
     The MaxCut objective aims to maximize the sum of edge weights crossing a graph partition.
@@ -828,7 +827,7 @@ def maxcut_loss(
         scores (~torch.Tensor): Node scores/assignments of shape :math:`(N,)` or :math:`(N, 1)`.
             Typically normalized to :math:`[-1, 1]` via :obj:`tanh` activation.
         edge_index (~torch.Tensor): Graph connectivity in COO format of shape :math:`(2, E)`.
-        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`. 
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
             If :obj:`None`, all edges have weight :obj:`1.0`. (default: :obj:`None`)
         batch (~torch.Tensor, optional): Batch assignments for each node of shape :math:`(N,)`.
             If :obj:`None`, assumes single graph. (default: :obj:`None`)
@@ -844,19 +843,19 @@ def maxcut_loss(
         magnitude is comparable across graphs of different sizes and densities, making it
         suitable for batched training scenarios.
     """
-
-
     # Handle score shapes
     if scores.dim() == 2 and scores.size(1) == 1:
         scores = scores.squeeze(-1)
     elif scores.dim() != 1:
-        raise ValueError(f"Expected scores to have shape [N] or [N, 1], got {scores.shape}")
-    
+        raise ValueError(
+            f"Expected scores to have shape [N] or [N, 1], got {scores.shape}"
+        )
+
     num_nodes = scores.size(0)
-    
+
     if batch is None:
         batch = torch.zeros(num_nodes, dtype=torch.long, device=scores.device)
-    
+
     if edge_weight is None:
         edge_weight = torch.ones(edge_index.size(1), device=scores.device)
     else:
@@ -866,24 +865,24 @@ def maxcut_loss(
 
     # Construct sparse adjacency matrix
     adj = SparseTensor(
-        row=edge_index[0], 
-        col=edge_index[1], 
-        value=edge_weight, 
-        sparse_sizes=(num_nodes, num_nodes)
+        row=edge_index[0],
+        col=edge_index[1],
+        value=edge_weight,
+        sparse_sizes=(num_nodes, num_nodes),
     )
-    
+
     # Compute A * z (adjacency matrix times scores)
     az = adj.matmul(scores.unsqueeze(-1)).squeeze(-1)
-    
+
     # Compute z^T * A * z for each graph in the batch
     cut_values = scores * az
-    cut_losses = scatter(cut_values, batch, dim=0, reduce='sum')
-    
+    cut_losses = scatter(cut_values, batch, dim=0, reduce="sum")
+
     # Compute volume (total edge weight) for each graph
     edge_batch = batch[edge_index[0]]
-    volumes = scatter(edge_weight, edge_batch, dim=0, reduce='sum')
-    
+    volumes = scatter(edge_weight, edge_batch, dim=0, reduce="sum")
+
     # Normalize by volume and take mean across graphs
     normalized_cut_losses = cut_losses / volumes
-    
+
     return _batch_reduce_loss(normalized_cut_losses, batch_reduction)

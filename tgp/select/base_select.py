@@ -7,7 +7,7 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 
 from tgp.imports import SparseTensor
-from tgp.utils.ops import pseudo_inverse, get_assignments, connectivity_to_edge_index
+from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
 
 
 def cluster_to_s(
@@ -251,7 +251,8 @@ class SelectOutput:
         r"""Tracks gradient computation for both :obj:`s` and :obj:`s_inv`."""
         return self.apply(lambda x: x.requires_grad_(requires_grad=requires_grad))
 
-    def assign_all_nodes(self,
+    def assign_all_nodes(
+        self,
         adj: Optional[Adj] = None,
         weight: Optional[Tensor] = None,
         max_iter: int = 5,
@@ -310,36 +311,34 @@ class SelectOutput:
             >>> # Assume we have a SelectOutput from top-k selection
             >>> sparse_output = topk_selector(x, edge_index)  # Only k nodes selected
             >>> print(sparse_output.node_index.size(0))  # k nodes
-            >>> 
             >>> # Extend to assign all nodes using graph connectivity
             >>> full_output = sparse_output.assign_all_nodes(
-            ...     adj=edge_index,
-            ...     strategy="closest_node",
-            ...     max_iter=5
+            ...     adj=edge_index, strategy="closest_node", max_iter=5
             ... )
             >>> print(full_output.node_index.size(0))  # N nodes (all nodes)
             >>> print(full_output.num_clusters)  # Still k supernodes
         """
         # Get the kept nodes indices from the original SelectOutput
         kept_nodes = self.node_index
-        
+
         # If all nodes are already kept, no assignment is needed
         if len(kept_nodes) == self.num_nodes:
             return self
-        
+
         if strategy == "closest_node":
             assert adj is not None, "adj must be provided for closest_node strategy"
-            assert max_iter > 0, "max_iter must be greater than 0 for closest_node strategy"
+            assert max_iter > 0, (
+                "max_iter must be greater than 0 for closest_node strategy"
+            )
 
             # Convert adjacency to edge_index format if needed
             if isinstance(adj, SparseTensor):
-                edge_index, edge_weight = connectivity_to_edge_index(adj)
+                edge_index, _ = connectivity_to_edge_index(adj)
             elif isinstance(adj, Tensor):
                 edge_index = adj
-                edge_weight = weight
             else:
                 raise ValueError(f"Invalid adjacency type: {type(adj)}")
-            
+
             # Handle the weight parameter if provided
             if weight is not None:
                 # Ensure weight has the same number of elements as nodes
@@ -347,33 +346,40 @@ class SelectOutput:
                     raise ValueError(
                         f"Weight tensor size ({weight.size(0)}) must match the number of nodes ({self.num_nodes})"
                     )
-            
+
             # Use get_assignments with graph-aware assignment
-            assignments = get_assignments(kept_nodes, edge_index=edge_index, max_iter=max_iter, batch=batch)
-            
+            assignments = get_assignments(
+                kept_nodes, edge_index=edge_index, max_iter=max_iter, batch=batch
+            )
+
         elif strategy == "random":
             # Use get_assignments with random assignment only (max_iter=0)
-            assignments = get_assignments(kept_nodes, edge_index=None, max_iter=0, batch=batch, num_nodes=self.num_nodes)
-            
+            assignments = get_assignments(
+                kept_nodes,
+                edge_index=None,
+                max_iter=0,
+                batch=batch,
+                num_nodes=self.num_nodes,
+            )
+
         else:
-            raise ValueError(f"Unknown strategy: {strategy}. Supported strategies are 'closest_node' and 'random'.")
-            
+            raise ValueError(
+                f"Unknown strategy: {strategy}. Supported strategies are 'closest_node' and 'random'."
+            )
+
         # Create new SelectOutput with updated cluster assignments
         new_select_output = SelectOutput(
             cluster_index=assignments[1],  # New cluster assignments
-            s_inv_op=getattr(self, 's_inv_op', 'transpose'),
+            s_inv_op=getattr(self, "s_inv_op", "transpose"),
             weight=weight,
         )
 
         # Copy any additional attributes from the original SelectOutput
-        for attr_name in self._extra_args if hasattr(self, '_extra_args') else []:
+        for attr_name in self._extra_args if hasattr(self, "_extra_args") else []:
             if hasattr(self, attr_name):
                 setattr(new_select_output, attr_name, getattr(self, attr_name))
-        
+
         return new_select_output
-            
-
-
 
 
 class Select(torch.nn.Module):
