@@ -161,4 +161,3 @@ cython_debug/
 .idea/
 .cursor/
 .vscode/
-MaxCutPool/
