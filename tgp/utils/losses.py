@@ -797,26 +797,32 @@ def maxcut_loss(
     pooling in graph neural networks" <https://arxiv.org/abs/2409.05100>`_ 
     (Abate & Bianchi, ICLR 2025).
 
-    The loss computes the MaxCut objective for graph partitioning, which aims to 
-    maximize the sum of edge weights crossing the partition. For differentiable 
-    optimization, this is formulated as minimizing the negative MaxCut value:
+    The MaxCut objective aims to maximize the sum of edge weights crossing a graph partition.
+    For differentiable optimization, the loss minimizes the negative normalized MaxCut value:
 
     .. math::
-        \mathcal{L}_{\text{MaxCut}} = -\frac{1}{V} \sum_{i \sim j} w_{ij} \cdot z_i \cdot z_j
+        \mathcal{L}_{\text{MaxCut}} = -\frac{1}{V} \sum_{(i,j) \in E} w_{ij} \cdot z_i \cdot z_j
 
     where:
 
-    + :math:`z_i` are the node scores/assignments (typically in :math:`[-1, 1]`),
+    + :math:`z_i \in [-1, 1]` are the node scores/assignments,
     + :math:`w_{ij}` are the edge weights,
-    + :math:`V` is the total volume (sum of edge weights) for normalization,
-    + :math:`i \sim j` denotes edges in the graph.
+    + :math:`V = \sum_{(i,j) \in E} w_{ij}` is the graph volume (total edge weight),
+    + :math:`E` is the edge set.
 
-    The computation uses sparse matrix operations for efficiency:
+    The computation is performed efficiently using sparse matrix operations:
 
     .. math::
-        \mathcal{L}_{\text{MaxCut}} = \frac{1}{|V|} \sum_{\text{graphs}} \frac{\mathbf{z}^T \mathbf{A} \mathbf{z}}{\text{volume}}
+        \mathcal{L}_{\text{MaxCut}} = -\frac{\mathbf{z}^{\top} \mathbf{A} \mathbf{z}}{V}
 
-    where :math:`\mathbf{A}` is the adjacency matrix and :math:`\mathbf{z}` contains node scores.
+    where :math:`\mathbf{A}` is the weighted adjacency matrix and :math:`\mathbf{z}` contains node scores.
+
+    **Implementation Details:**
+
+    1. Node scores are normalized via :math:`\tanh` to :math:`[-1, 1]` range
+    2. Sparse matrix multiplication :math:`\mathbf{A} \mathbf{z}` is computed efficiently
+    3. Volume normalization ensures loss comparability across different graph sizes
+    4. Batch processing handles multiple graphs simultaneously
 
     Args:
         scores (~torch.Tensor): Node scores/assignments of shape :math:`(N,)` or :math:`(N, 1)`.
@@ -826,16 +832,17 @@ def maxcut_loss(
             If :obj:`None`, all edges have weight :obj:`1.0`. (default: :obj:`None`)
         batch (~torch.Tensor, optional): Batch assignments for each node of shape :math:`(N,)`.
             If :obj:`None`, assumes single graph. (default: :obj:`None`)
-        reduction (str, optional): The reduction method to apply to the loss. 
-            Can be :obj:`"mean"` or :obj:`"sum"`. (default: :obj:`"mean"`)
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
 
     Returns:
-        ~torch.Tensor: The MaxCut loss value.
+        ~torch.Tensor: The MaxCut loss value (scalar for single graph, or reduced across batch).
 
     Note:
-        This loss function is designed to work with sparse graphs and batched inputs.
-        The normalization by volume ensures that the loss is comparable across graphs
-        of different sizes.
+        The volume normalization :math:`V = \sum_{(i,j) \in E} w_{ij}` ensures that the loss
+        magnitude is comparable across graphs of different sizes and densities, making it
+        suitable for batched training scenarios.
     """
 
 

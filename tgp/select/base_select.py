@@ -258,22 +258,67 @@ class SelectOutput:
         batch: Optional[Tensor] = None,
         strategy: str = "closest_node",
     ) -> "SelectOutput":
-        """Create a new SelectOutput with updated cluster assignments using get_assignments.
-        
-        This function takes a SelectOutput (with cluster_index attribute) and an adjacency
-        matrix, uses the get_assignments function to compute new node-to-cluster mappings,
-        and returns a new SelectOutput with updated cluster_index.
-        
+        r"""Extends a sparse selection to assign ALL nodes to the selected supernodes.
+
+        This method converts a sparse selection (where only a subset of nodes
+        are initially selected, e.g. top-k selection) into a complete assignment where every node in the
+        graph is assigned to one of the selected supernodes.
+
+        **Assignment Strategies:**
+
+        - **"closest_node"**: Uses graph connectivity to assign nodes to the nearest
+          supernode through iterative message passing. Preserves graph topology.
+        - **"random"**: Randomly assigns unselected nodes to supernodes, respecting
+          batch boundaries if provided.
+
         Args:
-            adj (Adj, optional): Adjacency matrix (edge_index tensor or SparseTensor). 
-                Required for "closest_node" strategy. Defaults to None.
-            weight (Tensor, optional): Edge weights. Defaults to None.
-            max_iter (int, optional): Maximum propagation iterations. Used for "closest_node" strategy. Defaults to 5.
-            batch (Tensor, optional): Batch assignments. Defaults to None.
-            strategy (str, optional): Assignment strategy. Either "closest_node" or "random". Defaults to "closest_node".
-            
+            adj (~torch_geometric.typing.Adj, optional): Graph connectivity matrix.
+                Can be an edge_index tensor of shape :math:`(2, E)` or SparseTensor.
+                Required for :obj:`"closest_node"` strategy. (default: :obj:`None`)
+            weight (~torch.Tensor, optional): Node-level weights for the assignment.
+                Must have shape :math:`(N,)` where :math:`N` is the total number of nodes.
+                Note: This is different from edge weights. (default: :obj:`None`)
+            max_iter (int, optional): Maximum number of message passing iterations
+                for the :obj:`"closest_node"` strategy. Higher values allow assignment
+                of more distant nodes through graph connectivity. Must be :obj:`> 0`
+                for :obj:`"closest_node"` strategy. (default: :obj:`5`)
+            batch (~torch.Tensor, optional): Batch assignment vector of shape :math:`(N,)`
+                indicating which graph each node belongs to. When provided, ensures
+                nodes are only assigned to supernodes within the same graph.
+                (default: :obj:`None`)
+            strategy (str, optional): Assignment strategy to use. Options:
+
+                - :obj:`"closest_node"`: Graph-aware assignment using message passing
+                - :obj:`"random"`: Random assignment to supernodes
+
+                (default: :obj:`"closest_node"`)
+
         Returns:
-            SelectOutput: New SelectOutput with updated cluster assignments
+            SelectOutput: A new SelectOutput with complete node-to-supernode assignments.
+            The returned object has :obj:`num_nodes` assignments (one per node) and
+            :obj:`num_clusters` supernodes (same as the original selection).
+
+        Raises:
+            AssertionError: If :obj:`adj` is :obj:`None` for :obj:`"closest_node"` strategy.
+            AssertionError: If :obj:`max_iter <= 0` for :obj:`"closest_node"` strategy.
+            ValueError: If :obj:`weight` size doesn't match the number of nodes.
+            ValueError: If :obj:`adj` has an invalid type.
+            ValueError: If :obj:`strategy` is not recognized.
+
+        Example:
+            >>> # Convert sparse top-k selection to full assignment
+            >>> # Assume we have a SelectOutput from top-k selection
+            >>> sparse_output = topk_selector(x, edge_index)  # Only k nodes selected
+            >>> print(sparse_output.node_index.size(0))  # k nodes
+            >>> 
+            >>> # Extend to assign all nodes using graph connectivity
+            >>> full_output = sparse_output.assign_all_nodes(
+            ...     adj=edge_index,
+            ...     strategy="closest_node",
+            ...     max_iter=5
+            ... )
+            >>> print(full_output.node_index.size(0))  # N nodes (all nodes)
+            >>> print(full_output.num_clusters)  # Still k supernodes
         """
         # Get the kept nodes indices from the original SelectOutput
         kept_nodes = self.node_index

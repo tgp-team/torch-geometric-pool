@@ -145,7 +145,7 @@ class MaxCutSelect(TopkSelect):
         in_channels (int): Size of each input feature.
         ratio (Union[int, float]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
-        assignment_mode (bool, optional): Whether to create assignment matrices that map
+        assign_all_nodes (bool, optional): Whether to create assignment matrices that map
             ALL nodes to supernodes (True) or perform standard top-k selection (False).
             When True, mimics the original MaxCutPool "expressive" mode.
             (default: :obj:`True`)
@@ -161,8 +161,15 @@ class MaxCutSelect(TopkSelect):
             (default: :obj:`2.0`)
         min_score (float, optional): Minimal node score threshold.
             Inherited from TopkSelect. (default: :obj:`None`)
-        s_inv_op (SinvType): Operation for computing :math:`\mathbf{S}^{-1}`.
-            (default: :obj:`"transpose"`)
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
+            The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            the :class:`~tgp.select.SelectOutput`. It can be one of:
+
+            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+              the transpose of :math:`\mathbf{S}`.
+            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+              the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
     def __init__(

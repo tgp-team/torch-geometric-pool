@@ -324,19 +324,67 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
 
 
 def get_assignments(kept_node_indices, edge_index=None, max_iter=5, batch=None, num_nodes=None):
-    """
-    
-    Performs hierarchical node assignment and constructs the pooled graph structure.
-    
+    r"""Assigns all nodes in a graph to the closest kept nodes (supernodes) using
+    a hierarchical assignment strategy with message passing.
+
+    This function implements a graph-aware node assignment algorithm that combines
+    iterative message passing with random assignment fallback. It's designed to
+    create cluster assignments where each node in the graph is mapped to one of
+    the provided kept nodes (supernodes).
+
+    **Algorithm Overview:**
+
+    1. **Initial Assignment**: All kept nodes are assigned to themselves.
+    2. **Iterative Propagation**: For `max_iter` iterations, unassigned nodes
+       are assigned to supernodes by finding the closest supernode through
+       graph message passing.
+    3. **Random Fallback**: Any remaining unassigned nodes are randomly assigned
+       to supernodes (respecting batch boundaries if provided).
+
+    This approach ensures that all nodes receive assignments while prioritizing
+    graph connectivity and topology-aware clustering.
+
     Args:
-        kept_node_indices (Tensor): Indices of nodes to keep
-        edge_index (Tensor, optional): Original graph connectivity. Required if max_iter > 0. Defaults to None.
-        max_iter (int, optional): Maximum propagation iterations. If 0, uses random assignment only. Defaults to 5.
-        batch (Tensor, optional): Batch assignments. Defaults to None.
-        num_nodes (int, optional): Total number of nodes. If None, inferred from edge_index or batch. Defaults to None.
-        
+        kept_node_indices (~torch.Tensor or list): Indices of nodes to keep as supernodes.
+            These nodes will serve as cluster centers. Can be a tensor or list of integers.
+        edge_index (~torch.Tensor, optional): Graph connectivity in COO format of shape
+            :math:`(2, E)` where :math:`E` is the number of edges. Required when
+            :obj:`max_iter > 0` for graph-aware assignment. (default: :obj:`None`)
+        max_iter (int, optional): Maximum number of message passing iterations.
+            If :obj:`0`, uses only random assignment. Higher values allow more distant
+            nodes to be assigned through graph connectivity. (default: :obj:`5`)
+        batch (~torch.Tensor, optional): Batch assignment vector of shape :math:`(N,)`
+            indicating which graph each node belongs to. When provided, ensures nodes
+            are only assigned to supernodes within the same graph. (default: :obj:`None`)
+        num_nodes (int, optional): Total number of nodes in the graph(s). If :obj:`None`,
+            inferred from :obj:`edge_index` or :obj:`batch`. Must be provided if both
+            :obj:`edge_index` and :obj:`batch` are :obj:`None`. (default: :obj:`None`)
+
     Returns:
-        Tensor: Node assignments mapping
+        ~torch.Tensor: Assignment mapping tensor of shape :math:`(2, N)` where the first
+        row contains the original node indices :math:`[0, 1, ..., N-1]` and the second
+        row contains the corresponding cluster (supernode) indices. The cluster indices
+        are renumbered to be consecutive starting from :math:`0`.
+
+    Raises:
+        ValueError: If :obj:`num_nodes`, :obj:`batch`, and :obj:`edge_index` are all
+            :obj:`None` (cannot determine graph size).
+        ValueError: If :obj:`max_iter > 0` but :obj:`edge_index` is :obj:`None`
+            (cannot perform graph-aware assignment).
+
+    Example:
+        >>> # Basic usage with graph connectivity
+        >>> kept_nodes = torch.tensor([0, 3])  # Keep nodes 0 and 3 as supernodes
+        >>> edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])  # Cycle graph
+        >>> assignments = get_assignments(kept_nodes, edge_index, max_iter=3)
+        >>> print(assignments)
+        tensor([[0, 1, 2, 3],
+                [0, 0, 1, 1]])  # Nodes 0,1 -> supernode 0; nodes 2,3 -> supernode 1
+
+        >>> # Random assignment only (no graph connectivity)
+        >>> assignments = get_assignments(kept_nodes, max_iter=0, num_nodes=4)
+        >>> print(assignments.shape)
+        torch.Size([2, 4])  # All 4 nodes randomly assigned to 2 supernodes
     """
     if isinstance(kept_node_indices, torch.Tensor):
         kept_node_tensor = torch.squeeze(kept_node_indices).to(torch.long)

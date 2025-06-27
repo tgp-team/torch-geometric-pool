@@ -103,7 +103,7 @@ class TopkSelect(Select):
         self.reset_parameters()
 
     def reset_parameters(self):
-        if self.weight is not None:
+        if self.weight is not None and self.in_channels is not None:
             uniform(self.in_channels, self.weight)
 
     def forward(

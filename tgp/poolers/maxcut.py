@@ -37,11 +37,11 @@ class MaxCutPooling(SRCPooling):
         in_channels (int): Size of each input sample.
         ratio (Union[float, int]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
-        assignment_mode (bool, optional): Whether to create assignment matrices that map
+        assign_all_nodes (bool, optional): Whether to create assignment matrices that map
             ALL nodes to supernodes (True) or perform standard top-k selection (False).
             When True, mimics the original MaxCutPool "expressive" mode.
             (default: :obj:`True`)
-        loss_coeff (float): Coefficient for the MaxCut auxiliary loss.
+        loss_coeff (float, optional): Coefficient for the MaxCut auxiliary loss.
             (default: :obj:`1.0`)
         mp_units (list, optional): List of hidden units for message passing layers.
             (default: :obj:`[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]`)
@@ -53,24 +53,44 @@ class MaxCutPooling(SRCPooling):
             (default: :obj:`"relu"`)
         delta (float, optional): Delta parameter for propagation matrix computation.
             (default: :obj:`2.0`)
-        lift (LiftType): Matrix operation for lifting pooled features.
-            (default: :obj:`"precomputed"`)
-        s_inv_op (SinvType): Operation for computing :math:`\mathbf{S}^{-1}`.
-            (default: :obj:`"transpose"`)
-        reduce_red_op (ReduceType): Aggregation function for node reduction.
+        lift (~tgp.utils.typing.LiftType, optional):
+            Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
+
+            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
+            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+              the transpose of :math:`\mathbf{S}`.
+            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+              the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
+            The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            the :class:`~tgp.select.SelectOutput`. It can be one of:
+
+            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+              the transpose of :math:`\mathbf{S}`.
+            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+              the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
+        reduce_red_op (~tgp.utils.typing.ReduceType, optional):
+            The aggregation function to be applied to nodes in the same cluster. Can be
+            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
+            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
             (default: :obj:`"sum"`)
-        connect_red_op (ReduceType): Aggregation function for edge connection.
+        connect_red_op (~tgp.utils.typing.ConnectionType, optional):
+            The aggregation function to be applied to all edges connecting nodes assigned
+            to supernodes :math:`i` and :math:`j`.
+            Can be any string of class :class:`~tgp.utils.typing.ConnectionType` admitted by
+            :obj:`~torch_geometric.utils.coalesce`,
+            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
-        lift_red_op (ReduceType): Aggregation function for lifting operation.
+        lift_red_op (~tgp.utils.typing.ReduceType, optional):
+            The aggregation function to be applied to the lifted node features.
+            Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
+            :obj:`~torch_geometric.utils.scatter`,
+            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
 
-    Example:
-        >>> pooler = MaxCutPooling(in_channels=64, ratio=0.5, assignment_mode=True, loss_coeff=1.0)
-        >>> x = torch.randn(100, 64)  # 100 nodes, 64 features
-        >>> edge_index = torch.randint(0, 100, (2, 200))  # 200 edges
-        >>> out = pooler(x=x, edge_index=edge_index)
-        >>> print(out.x.shape, out.edge_index.shape)
-        >>> print(f"MaxCut loss: {out.get_loss_value('maxcut_loss')}")
+
     """
 
     def __init__(
@@ -190,9 +210,13 @@ class MaxCutPooling(SRCPooling):
         """Compute the auxiliary MaxCut loss.
 
         Args:
-            so (~tgp.select.SelectOutput): The output of the select operator,
-                which should contain scores, edge_index, and edge_weight.
-            batch (~torch.Tensor, optional): Batch assignments.
+            scores (~torch.Tensor): Node scores computed by the MaxCut selector.
+            adj (~torch_geometric.typing.Adj): Graph connectivity.
+                Can be edge_index tensor of shape :math:`(2, E)` or SparseTensor.
+            edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+                (default: :obj:`None`)
+            batch (~torch.Tensor, optional): Batch assignments of shape :math:`(N,)`.
+                (default: :obj:`None`)
 
         Returns:
             dict: A dictionary with the MaxCut loss term.
