@@ -245,8 +245,13 @@ def create_one_hot_tensor(num_nodes, kept_node_tensor, device):
     Returns:
         Tensor: One-hot encoding matrix [num_nodes, num_kept_nodes + 1]
     """
-    tensor = torch.zeros(num_nodes, len(kept_node_tensor)+1, device=device)
-    tensor[kept_node_tensor, 1:] = torch.eye(len(kept_node_tensor), device=device)
+    # Ensure kept_node_tensor is at least 1D to avoid issues with len()
+    if kept_node_tensor.dim() == 0:
+        kept_node_tensor = kept_node_tensor.unsqueeze(0)
+    
+    num_kept = kept_node_tensor.size(0)
+    tensor = torch.zeros(num_nodes, num_kept + 1, device=device)
+    tensor[kept_node_tensor, 1:] = torch.eye(num_kept, device=device)
     return tensor
 
 def get_sparse_map_mask(x, edge_index, kept_node_tensor, mask):

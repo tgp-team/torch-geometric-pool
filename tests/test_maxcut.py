@@ -2,11 +2,10 @@
 Comprehensive test suite for MaxCut pooling implementation.
 
 Tests all components systematically:
-1. Utility functions (assignment matrix generation)
-2. MaxCut loss function  
-3. MaxCutScoreNet
-4. MaxCutSelect (both assignment modes)
-5. MaxCutPooling (both assignment modes)
+1. MaxCut loss function  
+2. MaxCutScoreNet
+3. MaxCutSelect (both assignment modes)
+4. MaxCutPooling (both assignment modes)
 """
 
 import pytest
@@ -18,11 +17,6 @@ from torch_sparse import SparseTensor
 from tgp.select.maxcut_select import MaxCutScoreNet, MaxCutSelect
 from tgp.poolers.maxcut import MaxCutPooling
 from tgp.utils.losses import maxcut_loss
-from tgp.utils.ops import (
-    create_one_hot_assignment, 
-    propagate_assignments, 
-    generate_maxcut_assignment_matrix
-)
 
 
 @pytest.fixture(scope="module")
@@ -69,91 +63,6 @@ def batched_graph():
     batch = torch.cat([batch1, batch2], dim=0)
     
     return x, edge_index, edge_weight, batch
-
-
-class TestAssignmentMatrixOps:
-    """Test utility functions for assignment matrix generation."""
-    
-    def test_create_one_hot_assignment(self):
-        """Test one-hot assignment matrix creation."""
-        num_nodes = 5
-        kept_nodes = torch.tensor([1, 3])
-        device = torch.device('cpu')
-        
-        assignment = create_one_hot_assignment(num_nodes, kept_nodes, device)
-        
-        # Check shape: [num_nodes, num_kept_nodes + 1]
-        assert assignment.shape == (5, 3)
-        
-        # Check one-hot encoding for kept nodes
-        assert assignment[1, 1] == 1.0  # Node 1 -> Supernode 0
-        assert assignment[3, 2] == 1.0  # Node 3 -> Supernode 1
-        
-        # Check other nodes start unassigned (column 0)
-        assert assignment[0].sum() == 0  # Node 0 unassigned
-        assert assignment[2].sum() == 0  # Node 2 unassigned  
-        assert assignment[4].sum() == 0  # Node 4 unassigned
-        
-        # Check dtype and device
-        assert assignment.dtype == torch.float32
-        assert assignment.device == device
-    
-    def test_propagate_assignments(self, simple_graph):
-        """Test assignment propagation through message passing."""
-        x, edge_index, edge_weight, _ = simple_graph
-        N = x.size(0)
-        
-        # Setup: 2 supernodes
-        kept_nodes = torch.tensor([0, 3])
-        device = edge_index.device
-        
-        # Create initial assignment matrix
-        assignment_matrix = create_one_hot_assignment(N, kept_nodes, device)
-        mask = torch.zeros(N, dtype=torch.bool, device=device)
-        mask[kept_nodes] = True
-        
-        # Test propagation
-        new_assignment, mappings, new_mask = propagate_assignments(
-            assignment_matrix, edge_index, kept_nodes, mask
-        )
-        
-        # Check that some unassigned nodes got assigned
-        assert new_mask.sum() >= mask.sum()  # More nodes assigned
-        assert mappings.size(0) == 2  # Should return [original_indices, supernode_indices]
-        
-        # Check that mappings contain valid original node indices
-        assert torch.all(mappings[0] >= 0)
-        assert torch.all(mappings[0] < N)
-        
-        # Check that supernode assignments are valid (can be original kept_nodes indices)
-        valid_supernodes = torch.isin(mappings[1], kept_nodes)
-        assert torch.all(valid_supernodes)  # All assignments should be to valid supernodes
-    
-    def test_generate_maxcut_assignment_matrix(self, simple_graph):
-        """Test full assignment matrix generation."""
-        x, edge_index, edge_weight, batch = simple_graph
-        N = x.size(0)
-        
-        # Test with 2 supernodes
-        kept_nodes = torch.tensor([1, 4])
-        
-        assignment_matrix = generate_maxcut_assignment_matrix(
-            edge_index=edge_index,
-            kept_nodes=kept_nodes,
-            max_iter=3,
-            batch=batch,
-            num_nodes=N
-        )
-        
-        # Check output format: [original_indices, supernode_assignments]
-        assert assignment_matrix.size(0) == 2
-        assert assignment_matrix.size(1) >= len(kept_nodes)  # At least supernodes assigned
-        
-        # Check that all returned indices are valid
-        assert torch.all(assignment_matrix[0] >= 0)
-        assert torch.all(assignment_matrix[0] < N)
-        assert torch.all(assignment_matrix[1] >= 0)
-        assert torch.all(assignment_matrix[1] < len(kept_nodes))
 
 
 class TestMaxCutLoss:
@@ -323,29 +232,29 @@ class TestMaxCutSelect:
         selector = MaxCutSelect(in_channels=16, ratio=0.5)
         assert selector.in_channels == 16
         assert selector.ratio == 0.5
-        assert selector.assignment_mode == True  # Default
+        assert selector.assign_all_nodes == True  # Default
         assert hasattr(selector, 'score_net')
         
         # Custom parameters
         selector_custom = MaxCutSelect(
             in_channels=32,
             ratio=0.3,
-            assignment_mode=False,
+            assign_all_nodes=False,
             mp_units=[16],
             mlp_units=[8]
         )
-        assert selector_custom.assignment_mode == False
+        assert selector_custom.assign_all_nodes == False
         assert selector_custom.ratio == 0.3
     
-    def test_maxcut_select_assignment_mode_true(self, simple_graph):
-        """Test MaxCutSelect with assignment_mode=True (assignment matrix mode)."""
+    def test_maxcut_select_assign_all_nodes_true(self, simple_graph):
+        """Test MaxCutSelect with assign_all_nodes=True (assignment matrix mode)."""
         x, edge_index, edge_weight, batch = simple_graph
         N, F = x.shape
         
         selector = MaxCutSelect(
             in_channels=F,
             ratio=0.5,
-            assignment_mode=True,
+            assign_all_nodes=True,
             mp_units=[8, 4],
             mlp_units=[4]
         )
@@ -371,15 +280,15 @@ class TestMaxCutSelect:
         assert hasattr(out, 'scores')
         assert out.scores.size(0) == N
     
-    def test_maxcut_select_assignment_mode_false(self, simple_graph):
-        """Test MaxCutSelect with assignment_mode=False (standard TopK mode)."""
+    def test_maxcut_select_assign_all_nodes_false(self, simple_graph):
+        """Test MaxCutSelect with assign_all_nodes=False (standard TopK mode)."""
         x, edge_index, edge_weight, batch = simple_graph
         N, F = x.shape
         
         selector = MaxCutSelect(
             in_channels=F,
             ratio=0.5,
-            assignment_mode=False,
+            assign_all_nodes=False,
             mp_units=[8, 4],
             mlp_units=[4]
         )
@@ -409,7 +318,7 @@ class TestMaxCutSelect:
         selector = MaxCutSelect(
             in_channels=x.size(1),
             ratio=ratio,
-            assignment_mode=True,  # Test assignment mode
+            assign_all_nodes=True,  # Test assignment mode
             mp_units=[4],
             mlp_units=[2]
         )
@@ -446,7 +355,7 @@ class TestMaxCutSelect:
         selector = MaxCutSelect(
             in_channels=x.size(1),
             ratio=0.5,
-            assignment_mode=True,
+            assign_all_nodes=True,
             mp_units=[4],
             mlp_units=[2]
         )
@@ -468,7 +377,7 @@ class TestMaxCutPooling:
         pooler = MaxCutPooling(in_channels=16, ratio=0.5)
         assert pooler.in_channels == 16
         assert pooler.ratio == 0.5
-        assert pooler.assignment_mode == True  # Default
+        assert pooler.assign_all_nodes == True  # Default
         assert pooler.loss_coeff == 1.0
         assert pooler.has_loss == True
         
@@ -476,21 +385,21 @@ class TestMaxCutPooling:
         pooler_custom = MaxCutPooling(
             in_channels=32,
             ratio=0.3,
-            assignment_mode=False,
+            assign_all_nodes=False,
             loss_coeff=2.0
         )
-        assert pooler_custom.assignment_mode == False
+        assert pooler_custom.assign_all_nodes == False
         assert pooler_custom.loss_coeff == 2.0
     
-    def test_maxcut_pooling_assignment_mode_true(self, simple_graph):
-        """Test MaxCutPooling with assignment_mode=True."""
+    def test_maxcut_pooling_assign_all_nodes_true(self, simple_graph):
+        """Test MaxCutPooling with assign_all_nodes=True."""
         x, edge_index, edge_weight, batch = simple_graph
         N, F = x.shape
         
         pooler = MaxCutPooling(
             in_channels=F,
             ratio=0.5,
-            assignment_mode=True,
+            assign_all_nodes=True,
             mp_units=[8, 4],
             mlp_units=[4]
         )
@@ -515,15 +424,15 @@ class TestMaxCutPooling:
         assert 'maxcut_loss' in out.loss
         assert torch.isfinite(out.loss['maxcut_loss'])
     
-    def test_maxcut_pooling_assignment_mode_false(self, simple_graph):
-        """Test MaxCutPooling with assignment_mode=False."""
+    def test_maxcut_pooling_assign_all_nodes_false(self, simple_graph):
+        """Test MaxCutPooling with assign_all_nodes=False."""
         x, edge_index, edge_weight, batch = simple_graph
         N, F = x.shape
         
         pooler = MaxCutPooling(
             in_channels=F,
             ratio=0.5,
-            assignment_mode=False,
+            assign_all_nodes=False,
             mp_units=[8, 4],
             mlp_units=[4]
         )
@@ -596,7 +505,7 @@ class TestMaxCutPooling:
         pooler = MaxCutPooling(
             in_channels=x.size(1),
             ratio=0.5,
-            assignment_mode=True
+            assign_all_nodes=True
         )
         pooler.eval()
         
@@ -613,7 +522,7 @@ class TestMaxCutPooling:
         pooler = MaxCutPooling(
             in_channels=64,
             ratio=0.7,
-            assignment_mode=False,
+            assign_all_nodes=False,
             loss_coeff=2.5
         )
         
@@ -622,8 +531,180 @@ class TestMaxCutPooling:
         assert isinstance(extra_args, dict)
         assert extra_args["in_channels"] == 64
         assert extra_args["ratio"] == 0.7
-        assert extra_args["assignment_mode"] == False
+        assert extra_args["assign_all_nodes"] == False
         assert extra_args["loss_coeff"] == 2.5
+
+
+# New tests for additional functionality
+class TestBaseSelect:
+    """Test base select functionality and assign_all_nodes method."""
+    
+    def test_select_output_assign_all_nodes_closest_strategy(self, simple_graph):
+        """Test assign_all_nodes with closest_node strategy."""
+        x, edge_index, edge_weight, batch = simple_graph
+        N = x.size(0)
+        
+        # Create a MaxCutSelect to get initial SelectOutput
+        selector = MaxCutSelect(
+            in_channels=x.size(1),
+            ratio=0.5,
+            assign_all_nodes=False,  # Get TopK first
+            mp_units=[4],
+            mlp_units=[2]
+        )
+        selector.eval()
+        
+        # Get initial TopK selection
+        topk_output = selector(x, edge_index, edge_weight, batch)
+        
+        # Test assign_all_nodes method (pass edge_weight as None to avoid validation issues)
+        full_assignment = topk_output.assign_all_nodes(
+            adj=edge_index,
+            weight=None,  # Don't pass edge_weight here, it's for node weights
+            max_iter=5,
+            batch=batch,
+            strategy="closest_node"
+        )
+        
+        # Check that all nodes are now assigned
+        assert full_assignment.num_nodes == N
+        assert full_assignment.cluster_index.size(0) == N
+        assert torch.all(full_assignment.cluster_index >= 0)
+        assert torch.all(full_assignment.cluster_index < topk_output.num_clusters)
+    
+    def test_select_output_assign_all_nodes_random_strategy(self, simple_graph):
+        """Test assign_all_nodes with random strategy."""
+        x, edge_index, edge_weight, batch = simple_graph
+        N = x.size(0)
+        
+        # Create a MaxCutSelect to get initial SelectOutput
+        selector = MaxCutSelect(
+            in_channels=x.size(1),
+            ratio=0.33,  # Select fewer nodes
+            assign_all_nodes=False,
+            mp_units=[4],
+            mlp_units=[2]
+        )
+        selector.eval()
+        
+        # Get initial TopK selection
+        topk_output = selector(x, edge_index, edge_weight, batch)
+        
+        # Test assign_all_nodes with random strategy
+        full_assignment = topk_output.assign_all_nodes(
+            strategy="random",
+            batch=batch
+        )
+        
+        # Check that all nodes are now assigned
+        assert full_assignment.num_nodes == N
+        assert full_assignment.cluster_index.size(0) == N
+        assert torch.all(full_assignment.cluster_index >= 0)
+        assert torch.all(full_assignment.cluster_index < topk_output.num_clusters)
+    
+    def test_select_output_assign_all_nodes_error_cases(self, simple_graph):
+        """Test error cases for assign_all_nodes method."""
+        x, edge_index, edge_weight, batch = simple_graph
+        
+        # Create a SelectOutput
+        selector = MaxCutSelect(in_channels=x.size(1), ratio=0.5, assign_all_nodes=False)
+        selector.eval()
+        topk_output = selector(x, edge_index, edge_weight, batch)
+        
+        # Test error when adj is None but strategy is closest_node
+        with pytest.raises(AssertionError, match="adj must be provided for closest_node strategy"):
+            topk_output.assign_all_nodes(
+                adj=None,
+                strategy="closest_node"
+            )
+        
+        # Test error with invalid strategy
+        with pytest.raises(ValueError, match="Unknown strategy"):
+            topk_output.assign_all_nodes(
+                adj=edge_index,
+                strategy="invalid_strategy"
+            )
+    
+    def test_maxcut_select_already_all_nodes_assigned(self, simple_graph):
+        """Test that assign_all_nodes returns self when all nodes are already kept."""
+        x, edge_index, edge_weight, batch = simple_graph
+        
+        # Create selector that assigns all nodes to supernodes (this ensures all are kept)
+        selector = MaxCutSelect(
+            in_channels=x.size(1),
+            ratio=0.5,  # Use a normal ratio
+            assign_all_nodes=True,  # This ensures all nodes are assigned
+            mp_units=[4],
+            mlp_units=[2]
+        )
+        selector.eval()
+        
+        output = selector(x, edge_index, edge_weight, batch)
+        
+        # With assign_all_nodes=True, all nodes should be in the assignment
+        assert output.node_index.size(0) == x.size(0), "All nodes should be assigned with assign_all_nodes=True"
+        
+        # When all nodes are kept/assigned, assign_all_nodes should return the same object
+        assigned_output = output.assign_all_nodes(adj=edge_index)
+        assert assigned_output is output  # Should be the same object
+
+
+class TestGetAssignments:
+    """Test the get_assignments utility function."""
+    
+    def test_get_assignments_basic(self, simple_graph):
+        """Test basic get_assignments functionality."""
+        from tgp.utils.ops import get_assignments
+        
+        x, edge_index, edge_weight, batch = simple_graph
+        N = x.size(0)
+        
+        # Select some nodes to keep
+        kept_nodes = torch.tensor([0, 3])
+        
+        # Test assignment generation
+        assignments = get_assignments(
+            kept_node_indices=kept_nodes,
+            edge_index=edge_index,
+            max_iter=3,
+            batch=batch,
+            num_nodes=N
+        )
+        
+        # Check output format
+        assert assignments.size(0) == 2  # [node_indices, cluster_indices]
+        assert assignments.size(1) == N  # All nodes assigned
+        
+        # Check that kept nodes are mapped to themselves
+        kept_mask = torch.isin(assignments[0], kept_nodes)
+        assert kept_mask.sum() == len(kept_nodes)
+        
+        # Check all assignments are valid
+        assert torch.all(assignments[0] >= 0)
+        assert torch.all(assignments[0] < N)
+        assert torch.all(assignments[1] >= 0)
+    
+    def test_get_assignments_random_only(self, simple_graph):
+        """Test get_assignments with max_iter=0 (random only)."""
+        from tgp.utils.ops import get_assignments
+        
+        x, edge_index, edge_weight, batch = simple_graph
+        N = x.size(0)
+        
+        kept_nodes = torch.tensor([1, 4])
+        
+        # Test random assignment only
+        assignments = get_assignments(
+            kept_node_indices=kept_nodes,
+            edge_index=edge_index,
+            max_iter=0,  # Only random assignment
+            batch=batch,
+            num_nodes=N
+        )
+        
+        # Should still assign all nodes
+        assert assignments.size(1) == N
+        assert torch.all(assignments[0] >= 0)
 
 
 if __name__ == "__main__":
