@@ -298,9 +298,9 @@ class SelectOutput:
             # Handle the weight parameter if provided
             if weight is not None:
                 # Ensure weight has the same number of elements as nodes
-                if weight.size(0) != edge_index.max().item() + 1:
+                if weight.size(0) != self.num_nodes:
                     raise ValueError(
-                        f"Weight tensor size ({weight.size(0)}) must match the number of nodes ({edge_index.max().item() + 1})"
+                        f"Weight tensor size ({weight.size(0)}) must match the number of nodes ({self.num_nodes})"
                     )
             
             # Use get_assignments with graph-aware assignment

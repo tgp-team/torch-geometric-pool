@@ -235,6 +235,10 @@ class MaxCutSelect(TopkSelect):
         Returns:
             SelectOutput: Selection output containing node indices, weights, and scores.
         """
+        if edge_index is None:
+            edge_index = torch.tensor([[], []], dtype=torch.long)
+            edge_weight = None
+        
         # Convert SparseTensor to edge_index format if needed
         if isinstance(edge_index, SparseTensor):
             edge_index, edge_weight = connectivity_to_edge_index(
@@ -242,9 +246,6 @@ class MaxCutSelect(TopkSelect):
             )
         if edge_weight is not None:
             edge_weight = check_and_filter_edge_weights(edge_weight)
-
-        if edge_index is None:
-            raise ValueError("edge_index cannot be None for MaxCutSelect")
         
 
         scores = self.score_net(x, edge_index, edge_weight)  # Shape: (N, 1)

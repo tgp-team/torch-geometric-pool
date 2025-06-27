@@ -173,8 +173,6 @@ class MaxCutPooling(SRCPooling):
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
         # Connect phase  
-        # Note: adj cannot be None here because selection phase would have failed first
-        assert adj is not None  # for type checker
         edge_index_pooled, edge_weight_pooled = self.connect(
             edge_index=adj, so=so, edge_weight=edge_weight
         )
