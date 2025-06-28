@@ -232,13 +232,13 @@ def test_kronconnect_single_node_selection():
     assert isinstance(adj_pool_no_L, torch.Tensor)
     assert isinstance(edge_weight_pool_no_L, torch.Tensor)
 
-    # With SparseTensor edge_index (will be converted to regular tensor)
+    # With SparseTensor edge_index (should preserve SparseTensor output format)
     adj_pool_spt_no_L, edge_weight_pool_spt_no_L = kc(
         edge_index=edge_index_spt, so=so_without_L, edge_weight=edge_weight
     )
-    # After conversion, SparseTensor becomes regular tensor, so output will be regular tensors
-    assert isinstance(adj_pool_spt_no_L, torch.Tensor)
-    assert isinstance(edge_weight_pool_spt_no_L, torch.Tensor)
+    # Should return a SparseTensor with None edge weights (preserving input format)
+    assert isinstance(adj_pool_spt_no_L, SparseTensor)
+    assert edge_weight_pool_spt_no_L is None
 
 
 if __name__ == "__main__":

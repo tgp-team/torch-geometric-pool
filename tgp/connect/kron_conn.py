@@ -15,6 +15,7 @@ from torch_sparse import SparseTensor
 
 from tgp.connect import Connect
 from tgp.select import SelectOutput
+from tgp.utils.ops import connectivity_to_edge_index
 
 
 class KronConnect(Connect):
@@ -40,7 +41,7 @@ class KronConnect(Connect):
 
     def forward(
         self,
-        edge_index: Tensor,
+        edge_index: Adj,
         so: SelectOutput,
         edge_weight: Optional[Tensor] = None,
         **kwargs,
@@ -62,6 +63,10 @@ class KronConnect(Connect):
             edge weights. If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
             returns :obj:`None` as the edge weights.
         """
+        # Remember the original input type to preserve output format
+        edge_index_is_sparse = isinstance(edge_index, SparseTensor)
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
+
         # Compute the Laplacian (if not given)
         if hasattr(so, "L"):
             L = so.L
@@ -72,9 +77,7 @@ class KronConnect(Connect):
             assert len(so.node_index) == so.num_clusters, (
                 "Inconsistent number of clusters and node indices."
             )
-            if isinstance(edge_index, SparseTensor):
-                row, col, edge_weight = edge_index.coo()
-                edge_index = torch.stack([row, col], dim=0)
+
             eiL, ewL = get_laplacian(edge_index, edge_weight, normalization=None)
             L = to_scipy_sparse_matrix(eiL, ewL).tocsr()
 
@@ -113,8 +116,8 @@ class KronConnect(Connect):
         A_pool.eliminate_zeros()
         A_pool = A_pool.astype(np.float32)
 
-        if isinstance(edge_index, SparseTensor):
-            A_pool = SparseTensor.from_scipy(A_pool).to(edge_index.device())
+        if edge_index_is_sparse:
+            A_pool = SparseTensor.from_scipy(A_pool).to(edge_index.device)
             out = (A_pool, None)
         else:
             device = edge_index.device
