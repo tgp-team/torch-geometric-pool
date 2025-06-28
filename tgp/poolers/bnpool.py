@@ -73,7 +73,7 @@ class BNPool(DenseSRCPooling):
             (default: :obj:`1.0`)
         eta (float, optional): Weights the KL divergence loss term.
             (default: :obj:`1.0`)
-        rescale_loss (bool, optional): If :obj:`True`, losses are normalized by the number of nodes :math:`N^2`
+        rescale_loss (bool, optional): If :obj:`True`, losses are normalized by the square of the number of nodes :math:`N^2`
             to ensure proper scaling across different graph sizes.
             (default: :obj:`True`)
         balance_links (bool, optional): If :obj:`True`, applies class-balancing weights in the reconstruction loss

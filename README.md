@@ -41,7 +41,7 @@ Thanks to the modular SRC framework, the components of different pooling layers 
 
 ## Getting Started
 
-If you are unfamiliar with graph pooling, we recommend checking this [introduction](https://torch-geometric-pool.readthedocs.io/en/latest/content/src.html) to the SRC framework and this [blog](https://gnn-pooling.notion.site/) for a deeper dive into pooling in GNNs. 
+If you are unfamiliar with graph pooling, we recommend checking this [introduction](https://torch-geometric-pool.readthedocs.io/en/latest/content/src.html) to the SRC framework and this [blog](https://filippomb.github.io/blogs/gnn-pool-1/) for a deeper dive into pooling in GNNs. 
 Before you dive into using <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp, we recommend browsing the [Documentation](https://torch-geometric-pool.readthedocs.io/en/latest/) to familiarize yourself with the API.
 
 If you prefer a notebook-based introduction, check out the following tutorials:

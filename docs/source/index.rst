@@ -24,7 +24,7 @@ vanilla GNN into a **hierarchical** one with just a few lines of code.
 .. admonition:: Want to learn more about graph pooling?
    :class: tip
 
-   Read our series of `blog posts <https://gnn-pooling.notion.site/>`_ on the topic.
+   Read our series of `blog posts <https://filippomb.github.io/blogs/gnn-pool-1/>`_ on the topic.
 
 Features
 --------
