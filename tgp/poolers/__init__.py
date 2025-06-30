@@ -1,5 +1,6 @@
 from .asap import ASAPooling
 from .asym_cheeger_cut import AsymCheegerCutPooling
+from .bnpool import BNPool
 from .diffpool import DiffPool
 from .dmon import DMoNPooling
 from .edge_contraction import EdgeContractionPooling
@@ -8,6 +9,7 @@ from .hosc import HOSCPooling
 from .just_balance import JustBalancePooling
 from .kmis import KMISPooling
 from .lapool import LaPooling
+from .maxcut import MaxCutPooling
 from .mincut import MinCutPooling
 from .ndp import NDPPooling
 from .nmf import NMFPooling
@@ -18,6 +20,7 @@ from .topk import TopkPooling
 pooler_classes = [
     "ASAPooling",
     "AsymCheegerCutPooling",
+    "BNPool",
     "DiffPool",
     "DMoNPooling",
     "EdgeContractionPooling",
@@ -26,6 +29,7 @@ pooler_classes = [
     "LaPooling",
     "JustBalancePooling",
     "KMISPooling",
+    "MaxCutPooling",
     "MinCutPooling",
     "NDPPooling",
     "NMFPooling",
@@ -37,6 +41,7 @@ pooler_classes = [
 pooler_map = {
     "asap": ASAPooling,
     "acc": AsymCheegerCutPooling,
+    "bnpool": BNPool,
     "diff": DiffPool,
     "dmon": DMoNPooling,
     "ec": EdgeContractionPooling,
@@ -45,6 +50,7 @@ pooler_map = {
     "lap": LaPooling,
     "jb": JustBalancePooling,
     "kmis": KMISPooling,
+    "maxcut": MaxCutPooling,
     "mincut": MinCutPooling,
     "ndp": NDPPooling,
     "nmf": NMFPooling,

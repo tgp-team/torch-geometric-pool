@@ -13,7 +13,7 @@ from tgp.connect import Connect
 from tgp.lift import Lift
 from tgp.reduce import Reduce, dense_global_reduce, global_reduce
 from tgp.select import Select, SelectOutput
-from tgp.utils import Signature, foo_signature
+from tgp.utils import Signature, check_and_filter_edge_weights, foo_signature
 from tgp.utils.typing import ReduceType
 
 
@@ -412,7 +412,8 @@ class DenseSRCPooling(SRCPooling):
                 A tensor of of shape  :math:`[2, E]`,
                 where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):
-                A vector of shape  :math:`[E]` containing the weights of the edges.
+                A vector of shape  :math:`[E]` or :math:`[E, 1]` containing the weights
+                of the edges.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
@@ -445,6 +446,8 @@ class DenseSRCPooling(SRCPooling):
             if isinstance(edge_index, SparseTensor):
                 row, col, edge_weight = edge_index.coo()
                 edge_index = torch.stack([row, col])
+            else:
+                edge_weight = check_and_filter_edge_weights(edge_weight)
 
             adj = to_dense_adj(
                 edge_index=edge_index,
@@ -453,16 +456,6 @@ class DenseSRCPooling(SRCPooling):
                 batch=batch,
                 batch_size=batch_size,
             )
-
-            if adj.dim() > 3:
-                if adj.size(3) == 1:
-                    adj = adj.squeeze(-1)
-                else:
-                    raise ValueError(
-                        "Adjacency matrix must have shape [B, N, N] or [B, N, N, 1]."
-                        f" but got {adj.shape}."
-                        " Hint: did you pass a matrix as edge_attr?"
-                    )
 
             if self.adj_transpose:
                 adj = adj.transpose(-1, -2)

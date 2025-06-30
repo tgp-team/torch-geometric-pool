@@ -166,7 +166,7 @@ html_theme_options = {
     "nav_links": [
         {
             "title": "What is pooling?",
-            "url": "https://gnn-pooling.notion.site/",
+            "url": "https://filippomb.github.io/blogs/gnn-pool-1/",
             "external": True,
         },
     ]

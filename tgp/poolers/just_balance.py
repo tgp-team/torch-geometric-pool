@@ -22,7 +22,7 @@ class JustBalancePooling(DenseSRCPooling):
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
-    This layer provides an auxiliary balance loss (:func:`~tgp.utils.losses.just_balance_loss`)
+    This layer optimizes an auxiliary balance loss (:func:`~tgp.utils.losses.just_balance_loss`)
 
     Args:
         in_channels (int, list of int):
@@ -185,6 +185,7 @@ class JustBalancePooling(DenseSRCPooling):
             num_nodes=num_nodes,
             num_clusters=num_clusters,
             normalize_loss=self.normalize_loss,
+            batch_reduction="mean",
         )
 
         if torch.isnan(loss):

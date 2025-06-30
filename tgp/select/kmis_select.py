@@ -13,6 +13,7 @@ if HAS_TORCH_SCATTER:
     from torch_scatter import scatter_add, scatter_max, scatter_min
 from tgp.select import Select, SelectOutput
 from tgp.utils import (
+    check_and_filter_edge_weights,
     connectivity_to_edge_index,
     connectivity_to_row_col,
     connectivity_to_sparse_tensor,
@@ -362,7 +363,7 @@ class KMISSelect(Select):
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):
-                A vector of shape  :math:`[E]` containing the weights of the edges.
+                A vector of shape  :math:`[E]` or  :math:`[E, 1]` containing the weights of the edges.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
@@ -387,6 +388,7 @@ class KMISSelect(Select):
             edge_index, edge_weight = to_undirected(
                 edge_index, edge_weight, num_nodes, reduce="max"
             )
+        edge_weight = check_and_filter_edge_weights(edge_weight)
         adj = connectivity_to_sparse_tensor(
             edge_index, edge_weight, num_nodes=num_nodes
         )

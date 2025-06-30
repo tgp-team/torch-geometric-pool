@@ -15,7 +15,7 @@ from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_sparse import SparseTensor
 
 from tgp.select import Select, SelectOutput
-from tgp.utils import connectivity_to_edge_index
+from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
@@ -63,7 +63,7 @@ class NDPSelect(Select):
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):
-                A vector of shape  :math:`[E]` containing the weights of the edges.
+                A vector of shape  :math:`[E]` or :math:`[E, 1]` containing the weights of the edges.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
@@ -83,6 +83,7 @@ class NDPSelect(Select):
             edge_index, edge_weight = connectivity_to_edge_index(
                 edge_index, edge_weight
             )
+        edge_weight = check_and_filter_edge_weights(edge_weight)
         device = edge_index.device
 
         # If no batch is provided, treat everything as one subgraph (batch=0).
@@ -196,8 +197,7 @@ class NDPSelect(Select):
             device=device,
         ).coalesce()  # make indices unique
 
-        # Trivial case
-        if num_sub_nodes <= 1:
+        if num_sub_nodes <= 1:  # Trivial case
             idx_pos_local = np.array(list(range(num_sub_nodes)), dtype=int)
             idx_neg_local = np.array([], dtype=int)
         else:
@@ -225,7 +225,7 @@ class NDPSelect(Select):
             if cut_size < 0.5:
                 idx_pos_local, idx_neg_local = self.sign_partition(num_sub_nodes)
 
-        L = to_scipy_sparse_matrix(L.indices(), L.values())
+        L = to_scipy_sparse_matrix(L.indices(), L.values(), num_nodes=num_sub_nodes)
         return idx_pos_local, idx_neg_local, L
 
     def __repr__(self) -> str:

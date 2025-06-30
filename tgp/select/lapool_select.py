@@ -8,6 +8,7 @@ from torch_scatter import scatter_add, scatter_mul
 from torch_sparse import SparseTensor, spmm
 
 from tgp.select import Select, SelectOutput
+from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
@@ -124,11 +125,12 @@ class LaPoolSelect(Select):
                 The node feature matrix of shape :math:`[N, F]`,
                 where :math:`N` is the number of nodes in the batch and
                 :math:`F` is the number of node features.
-            edge_index (~torch.Tensor):
-                The edge indices. Is a tensor of of shape  :math:`[2, E]`,
-                where :math:`E` is the number of edges in the batch.
+            edge_index (~torch_geometric.typing.Adj, optional): The connectivity matrix.
+                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
+                :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):
-                A vector of shape  :math:`[E]` containing the weights of the edges.
+                A vector of shape  :math:`[E]` or :math:`[E, 1]` containing the weights of the edges.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
@@ -141,6 +143,12 @@ class LaPoolSelect(Select):
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
         """
+        if isinstance(edge_index, SparseTensor):
+            edge_index, edge_weight = connectivity_to_edge_index(
+                edge_index, edge_weight
+            )
+        edge_weight = check_and_filter_edge_weights(edge_weight)
+
         # Use dummy x if not provided (e.g., in precoarsening)
         if x is None:
             x = torch.ones((num_nodes, 1), device=edge_index.device)

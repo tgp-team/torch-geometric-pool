@@ -4,9 +4,10 @@ from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor
+from torch_geometric.typing import Adj
 
 from tgp.imports import SparseTensor
-from tgp.utils.ops import pseudo_inverse
+from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
 
 
 def cluster_to_s(
@@ -250,6 +251,113 @@ class SelectOutput:
         r"""Tracks gradient computation for both :obj:`s` and :obj:`s_inv`."""
         return self.apply(lambda x: x.requires_grad_(requires_grad=requires_grad))
 
+    def assign_all_nodes(
+        self,
+        adj: Optional[Adj] = None,
+        weight: Optional[Tensor] = None,
+        max_iter: int = 5,
+        batch: Optional[Tensor] = None,
+        closest_node_assignment: bool = True,
+    ) -> "SelectOutput":
+        r"""Extends a sparse selection to assign ALL nodes to the selected supernodes.
+
+        This method converts a sparse selection (where only a subset of nodes
+        are initially selected, e.g. top-k selection) into a complete assignment where every node in the
+        graph is assigned to one of the selected supernodes.
+
+        Args:
+            adj (~torch_geometric.typing.Adj, optional): Graph connectivity matrix.
+                Can be an edge_index tensor of shape :math:`(2, E)` or SparseTensor.
+                Required for :obj:`"closest_node"` strategy. (default: :obj:`None`)
+            weight (~torch.Tensor, optional): Node-level weights for the assignment.
+                Must have shape :math:`(N,)` where :math:`N` is the total number of nodes.
+                Note: This is different from edge weights. (default: :obj:`None`)
+            max_iter (int, optional): Maximum number of message passing iterations
+                for the :obj:`"closest_node"` strategy. Higher values allow assignment
+                of more distant nodes through graph connectivity. Must be :obj:`> 0`
+                for :obj:`"closest_node"` strategy. (default: :obj:`5`)
+            batch (~torch.Tensor, optional): Batch assignment vector of shape :math:`(N,)`
+                indicating which graph each node belongs to. When provided, ensures
+                nodes are only assigned to supernodes within the same graph.
+                (default: :obj:`None`)
+            closest_node_assignment (bool, optional): If True, assign unlabeled nodes to the
+                closest supernode. If False, use random assignment to supernodes.
+                (default: :obj:`True`)
+
+        Returns:
+            SelectOutput: A new SelectOutput with complete node-to-supernode assignments.
+            The returned object has :obj:`num_nodes` assignments (one per node) and
+            :obj:`num_clusters` supernodes (same as the original selection).
+
+        Raises:
+            AssertionError: If :obj:`adj` is :obj:`None` for :obj:`"closest_node"` strategy.
+            AssertionError: If :obj:`max_iter <= 0` for :obj:`"closest_node"` strategy.
+            ValueError: If :obj:`weight` size doesn't match the number of nodes.
+            ValueError: If :obj:`adj` has an invalid type.
+            ValueError: If :obj:`strategy` is not recognized.
+
+        Example:
+            >>> # Convert sparse top-k selection to full assignment
+            >>> # Assume we have a SelectOutput from top-k selection
+            >>> sparse_output = topk_selector(x, edge_index)  # Only k nodes selected
+            >>> print(sparse_output.node_index.size(0))  # k nodes
+            >>> # Extend to assign all nodes using graph connectivity
+            >>> full_output = sparse_output.assign_all_nodes(
+            ...     adj=edge_index, closest_node_assignment=True, max_iter=5
+            ... )
+            >>> print(full_output.node_index.size(0))  # N nodes (all nodes)
+            >>> print(full_output.num_clusters)  # Still k supernodes
+        """
+        # Get the kept nodes indices from the original SelectOutput
+        kept_nodes = self.node_index
+
+        # If all nodes are already kept, no assignment is needed
+        if len(kept_nodes) == self.num_nodes:
+            return self
+
+        if closest_node_assignment:
+            assert adj is not None, "adj must be provided for closest_node_assignment"
+            assert max_iter > 0, (
+                "max_iter must be greater than 0 for closest_node_assignment"
+            )
+
+            # Convert adjacency to edge_index format if needed
+            if isinstance(adj, SparseTensor):
+                edge_index, _ = connectivity_to_edge_index(adj)
+            elif isinstance(adj, Tensor):
+                edge_index = adj
+            else:
+                raise ValueError(f"Invalid adjacency type: {type(adj)}")
+
+            # Handle the weight parameter if provided
+            if weight is not None:
+                if weight.size(0) != self.num_nodes:
+                    raise ValueError(
+                        f"Weight tensor size ({weight.size(0)}) must match the number of nodes ({self.num_nodes})"
+                    )
+
+        # Use get_assignments with graph-aware assignment
+        assignments = get_assignments(
+            kept_nodes,
+            edge_index=edge_index if closest_node_assignment else None,
+            max_iter=max_iter if closest_node_assignment else 0,
+            batch=batch,
+        )
+
+        # Create new SelectOutput with updated cluster assignments
+        new_select_output = SelectOutput(
+            cluster_index=assignments[1],
+            s_inv_op=getattr(self, "s_inv_op", "transpose"),
+            weight=weight,
+        )
+
+        # Copy any additional attributes from the original SelectOutput
+        for attr_name in self._extra_args if hasattr(self, "_extra_args") else []:
+            if hasattr(self, attr_name):
+                setattr(new_select_output, attr_name, getattr(self, attr_name))
+
+        return new_select_output
+
 
 class Select(torch.nn.Module):
     r"""An abstract base class implementing a sparse :math:`\texttt{select}` operator
@@ -267,7 +375,7 @@ class Select(torch.nn.Module):
     def forward(
         self,
         x: Optional[Tensor] = None,
-        edge_index: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
         edge_weight: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
@@ -287,7 +395,7 @@ class Select(torch.nn.Module):
                 where :math:`E` is the number of edges in the batch.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional):
-                A vector of shape  :math:`[E]` containing the weights of the edges.
+                A vector of shape  :math:`[E]` or  :math:`[E, 1]` containing the weights of the edges.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates

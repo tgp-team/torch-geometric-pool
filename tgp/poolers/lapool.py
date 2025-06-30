@@ -1,9 +1,7 @@
 from typing import Optional
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_sparse import SparseTensor
 
 from tgp.connect import DenseConnectSPT
 from tgp.lift import BaseLift
@@ -116,8 +114,8 @@ class LaPooling(SRCPooling):
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
                 If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
-            edge_weight (~torch.Tensor, optional): A vector of shape
-                :math:`[E]` containing the weights of the edges.
+            edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
+                containing the weights of the edges.
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
@@ -137,14 +135,9 @@ class LaPooling(SRCPooling):
 
         else:
             # Select
-            if isinstance(adj, SparseTensor):
-                row, col, edge_weight = adj.coo()
-                edge_index = torch.stack([row, col])
-            else:
-                edge_index = adj
             so = self.select(
                 x=x,
-                edge_index=edge_index,
+                edge_index=adj,
                 edge_weight=edge_weight,
                 batch=batch,
                 num_nodes=x.size(0),

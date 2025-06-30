@@ -135,5 +135,146 @@ def test_set_weights_spt():
     assert so.num_nodes == 3
 
 
+def test_assign_all_nodes_weight_size_mismatch():
+    """Test that assign_all_nodes raises ValueError when weight size doesn't match num_nodes."""
+    # Create a SelectOutput with 4 nodes, but only 2 selected
+    cluster_index = torch.tensor([0, 1])  # 2 selected nodes
+    node_index = torch.tensor([0, 2])  # indices of selected nodes
+    so = SelectOutput(
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=4,  # total 4 nodes
+        num_clusters=2,
+    )
+
+    # Create edge connectivity for 4 nodes
+    edge_index = torch.tensor([[0, 1, 2, 3], [1, 0, 3, 2]])
+
+    # Create weight tensor with wrong size (3 instead of 4)
+    wrong_weight = torch.tensor([1.0, 2.0, 3.0])  # size 3, should be 4
+
+    # This should raise ValueError due to size mismatch
+    with pytest.raises(
+        ValueError,
+        match="Weight tensor size \\(3\\) must match the number of nodes \\(4\\)",
+    ):
+        so.assign_all_nodes(
+            adj=edge_index, weight=wrong_weight, closest_node_assignment=True
+        )
+
+
+def test_assign_all_nodes_with_extra_args():
+    """Test that assign_all_nodes copies extra attributes from the original SelectOutput."""
+    # Create a SelectOutput with some extra arguments
+    cluster_index = torch.tensor([0, 1])
+    node_index = torch.tensor([0, 2])
+    so = SelectOutput(
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=4,
+        num_clusters=2,
+        custom_attr="test_value",  # extra attribute
+        another_attr=42,  # another extra attribute
+    )
+
+    # Verify the extra args are stored
+    assert hasattr(so, "_extra_args")
+    assert "custom_attr" in so._extra_args
+    assert "another_attr" in so._extra_args
+    assert so.custom_attr == "test_value"
+    assert so.another_attr == 42
+
+    # Create edge connectivity
+    edge_index = torch.tensor([[0, 1, 2, 3], [1, 0, 3, 2]])
+
+    # Call assign_all_nodes which should copy extra attributes
+    new_so = so.assign_all_nodes(adj=edge_index, closest_node_assignment=True)
+
+    # Verify that the extra attributes were copied to the new SelectOutput
+    assert hasattr(new_so, "custom_attr")
+    assert hasattr(new_so, "another_attr")
+    assert new_so.custom_attr == "test_value"
+    assert new_so.another_attr == 42
+
+
+def test_assign_all_nodes_no_extra_args():
+    """Test that assign_all_nodes works correctly when there are no extra args."""
+    # Create a SelectOutput without extra arguments
+    cluster_index = torch.tensor([0, 1])
+    node_index = torch.tensor([0, 2])
+    so = SelectOutput(
+        cluster_index=cluster_index, node_index=node_index, num_nodes=4, num_clusters=2
+    )
+
+    # Ensure no extra args
+    assert not hasattr(so, "_extra_args") or len(so._extra_args) == 0
+
+    # Create edge connectivity
+    edge_index = torch.tensor([[0, 1, 2, 3], [1, 0, 3, 2]])
+
+    # This should work without errors even with no extra args
+    new_so = so.assign_all_nodes(adj=edge_index, closest_node_assignment=True)
+
+    # Verify the result is valid
+    assert isinstance(new_so, SelectOutput)
+    assert new_so.num_nodes == 4
+    assert new_so.num_clusters == 2
+
+
+def test_assign_all_nodes_with_sparse_tensor_adj():
+    """Test assign_all_nodes with SparseTensor adjacency to cover line 291."""
+    # Create a SelectOutput with some nodes not selected
+    cluster_index = torch.tensor([0, 1])  # 2 selected nodes
+    node_index = torch.tensor([0, 2])  # indices of selected nodes
+    so = SelectOutput(
+        cluster_index=cluster_index, node_index=node_index, num_nodes=4, num_clusters=2
+    )
+
+    # Create SparseTensor adjacency matrix to trigger line 291
+    row = torch.tensor([0, 1, 2, 3])
+    col = torch.tensor([1, 0, 3, 2])
+    sparse_adj = SparseTensor(row=row, col=col, sparse_sizes=(4, 4))
+
+    # This should trigger the SparseTensor branch at line 291
+    new_so = so.assign_all_nodes(adj=sparse_adj, closest_node_assignment=True)
+
+    # Verify the result is valid
+    assert isinstance(new_so, SelectOutput)
+    assert new_so.num_nodes == 4
+    assert new_so.num_clusters == 2
+
+
+def test_assign_all_nodes_extra_attr_exists():
+    """Test that assign_all_nodes properly handles case where extra attribute exists on original object."""
+    # Create a SelectOutput with extra arguments that will exist
+    cluster_index = torch.tensor([0, 1])
+    node_index = torch.tensor([0, 2])
+    so = SelectOutput(
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=4,
+        num_clusters=2,
+        existing_attr="test_value",  # This attribute exists
+    )
+
+    # Manually add an attribute name to _extra_args that doesn't actually exist on the object
+    # This will test the hasattr check on line 325
+    so._extra_args.add("non_existent_attr")
+
+    # Create edge connectivity
+    edge_index = torch.tensor([[0, 1, 2, 3], [1, 0, 3, 2]])
+
+    # Call assign_all_nodes - this should handle the case where attr_name is in _extra_args
+    # but the attribute doesn't actually exist (covering the hasattr check)
+    new_so = so.assign_all_nodes(adj=edge_index, closest_node_assignment=True)
+
+    # Verify that existing_attr was copied (line 326: setattr call)
+    assert hasattr(new_so, "existing_attr")
+    assert new_so.existing_attr == "test_value"
+
+    # Verify that non_existent_attr was not copied (due to hasattr check on line 325)
+    assert not hasattr(new_so, "non_existent_attr")
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

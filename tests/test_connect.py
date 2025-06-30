@@ -170,5 +170,76 @@ def test_kronconnect_handles_singular_L():
     assert isinstance(adj_pool, torch.Tensor)
 
 
+def test_kronconnect_single_node_selection():
+    """Test KronConnect when only 0 or 1 nodes are selected (line 88 coverage).
+    This tests the early return path: Lnew = sp.csc_matrix(-np.ones((1, 1)))
+    with both SparseTensor and regular tensor edge_index inputs.
+    """
+    # Create a simple 3-node graph
+    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
+    edge_weight = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=torch.float)
+    num_nodes = 3
+
+    # Create a Laplacian matrix for the 3-node graph to avoid the conversion path
+    L_data = [[2.0, -1.0, -1.0], [-1.0, 2.0, -1.0], [-1.0, -1.0, 2.0]]
+    L = csr_matrix(L_data)
+
+    # Test case 1: Select exactly 1 node with regular tensor edge_index and provided Laplacian
+    node_index = torch.tensor([0], dtype=torch.long)  # Select only node 0
+    cluster_index = torch.tensor([0], dtype=torch.long)
+    so_with_L = SelectOutput(
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=num_nodes,
+        num_clusters=1,
+        L=L,  # Provide Laplacian to avoid conversion
+    )
+
+    kc = KronConnect(sparse_threshold=0.0)
+    adj_pool, edge_weight_pool = kc(
+        edge_index=edge_index, so=so_with_L, edge_weight=edge_weight
+    )
+
+    # Should return a tensor (not SparseTensor) with 1x1 adjacency
+    assert isinstance(adj_pool, torch.Tensor)
+    assert isinstance(edge_weight_pool, torch.Tensor)
+
+    # Test case 2: Select exactly 1 node with SparseTensor edge_index and provided Laplacian
+    edge_index_spt = SparseTensor.from_edge_index(
+        edge_index, edge_attr=edge_weight, sparse_sizes=(num_nodes, num_nodes)
+    )
+
+    adj_pool_spt, edge_weight_pool_spt = kc(
+        edge_index=edge_index_spt, so=so_with_L, edge_weight=edge_weight
+    )
+
+    # Should return a SparseTensor with None edge weights
+    assert isinstance(adj_pool_spt, SparseTensor)
+    assert edge_weight_pool_spt is None
+
+    # Test case 3: Select exactly 1 node WITHOUT provided Laplacian (tests conversion path)
+    so_without_L = SelectOutput(
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=num_nodes,
+        num_clusters=1,
+    )
+
+    # With regular tensor edge_index (no conversion needed)
+    adj_pool_no_L, edge_weight_pool_no_L = kc(
+        edge_index=edge_index, so=so_without_L, edge_weight=edge_weight
+    )
+    assert isinstance(adj_pool_no_L, torch.Tensor)
+    assert isinstance(edge_weight_pool_no_L, torch.Tensor)
+
+    # With SparseTensor edge_index (should preserve SparseTensor output format)
+    adj_pool_spt_no_L, edge_weight_pool_spt_no_L = kc(
+        edge_index=edge_index_spt, so=so_without_L, edge_weight=edge_weight
+    )
+    # Should return a SparseTensor with None edge weights (preserving input format)
+    assert isinstance(adj_pool_spt_no_L, SparseTensor)
+    assert edge_weight_pool_spt_no_L is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

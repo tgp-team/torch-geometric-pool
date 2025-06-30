@@ -22,7 +22,7 @@ class HOSCPooling(DenseSRCPooling):
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
-    This layer provides two auxiliary losses:
+    This layer optimizes two auxiliary losses:
 
     + the mincut loss (:class:`~tgp.utils.losses.mincut_loss`),
     + the orthogonality loss (:class:`~tgp.utils.losses.orthogonality_loss`),
@@ -210,10 +210,10 @@ class HOSCPooling(DenseSRCPooling):
             ortho_loss = torch.tensor(0)
         elif self.hosc_ortho:
             # Hosc orthogonality regularization
-            ortho_loss = hosc_orthogonality_loss(S, mask)
+            ortho_loss = hosc_orthogonality_loss(S, mask, batch_reduction="mean")
         else:
             # Standard orthogonality regularization of MinCutPool
-            ortho_loss = orthogonality_loss(S)
+            ortho_loss = orthogonality_loss(S, batch_reduction="mean")
 
         return {"hosc_loss": hosc_loss, "ortho_loss": self.mu * ortho_loss}
 

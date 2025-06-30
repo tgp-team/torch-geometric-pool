@@ -1,12 +1,12 @@
 from typing import Optional, Tuple
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_sparse import SparseTensor
 
 from tgp.connect import Connect
 from tgp.select import SelectOutput
+from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
 
 
 class DenseConnectSPT(Connect):
@@ -50,11 +50,11 @@ class DenseConnectSPT(Connect):
                 It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
+            edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
+                containing the weights of the edges.
+                (default: :obj:`None`)
             so (~tgp.select.SelectOutput):
                 The output of the :math:`\texttt{select}` operator.
-            edge_weight (~torch.Tensor, optional): A vector of shape
-                :math:`[E]` containing the weights of the edges.
-                (default: :obj:`None`)
 
         Returns:
             (~torch_geometric.typing.Adj, ~torch.Tensor or None):
@@ -65,10 +65,11 @@ class DenseConnectSPT(Connect):
         if isinstance(edge_index, SparseTensor):
             adj_pooled = so.s.t() @ edge_index @ so.s
         elif isinstance(edge_index, Tensor):
-            adj = SparseTensor.from_edge_index(
+            edge_weight = check_and_filter_edge_weights(edge_weight)
+            adj_spt = SparseTensor.from_edge_index(
                 edge_index, edge_weight, sparse_sizes=(so.s.size(0), so.s.size(0))
             )
-            adj_pooled = so.s.t() @ adj @ so.s
+            adj_pooled = so.s.t() @ adj_spt @ so.s
         else:
             raise ValueError(
                 f"Edge index must be of type {Adj}, got {type(edge_index)}"
@@ -97,9 +98,11 @@ class DenseConnectSPT(Connect):
                 row=row, col=col, value=val, sparse_sizes=adj_pooled.sparse_sizes()
             ).coalesce()
 
+        # Convert back to edge index if needed
         if isinstance(edge_index, Tensor):
-            row, col, edge_weight = adj_pooled.coo()
-            adj_pooled = torch.stack([row, col], dim=0)
+            adj_pooled, edge_weight = connectivity_to_edge_index(
+                adj_pooled, edge_weight
+            )
 
         return adj_pooled, edge_weight
 

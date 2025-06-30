@@ -6,13 +6,13 @@ from sklearn.metrics import normalized_mutual_info_score as NMI
 from torch.nn import ModuleList
 from torch_geometric import seed_everything
 from torch_geometric.datasets import Planetoid
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import ARMAConv
 
 from tgp.poolers import get_pooler, pooler_map
 
 seed_everything(8)
 
-poolers = ["mincut", "diff", "jb", "acc", "dmon", "hosc"]
+poolers = ["acc", "bnpool", "diff", "dmon", "hosc", "jb", "mincut"]
 for POOLER in poolers:
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
@@ -53,13 +53,11 @@ for POOLER in poolers:
 
             # Message passing layers
             mp = [
-                GCNConv(in_channels, mp_units[0], normalize=False, cached=False),
+                ARMAConv(in_channels, mp_units[0], num_layers=2),
                 mp_act,
             ]
             for i in range(len(mp_units) - 1):
-                mp.append(
-                    GCNConv(mp_units[i], mp_units[i + 1], normalize=False, cached=False)
-                )
+                mp.append(ARMAConv(mp_units[i], mp_units[i + 1], num_layers=2))
                 mp.append(mp_act)
             self.mp = ModuleList(mp)
             out_chan = mp_units[-1]
@@ -89,13 +87,7 @@ for POOLER in poolers:
             return s, aux_loss
 
     ### Model setup
-    device = torch.device(
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
-    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     data = data.to(device)
     model = Net(mp_units=[64] * 2, mp_act="ReLU", in_channels=dataset.num_features).to(
         device

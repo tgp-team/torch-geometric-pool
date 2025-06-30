@@ -1,12 +1,13 @@
 <div align="center">
     <br><br>
-    <img alt="Torch Geometric Pool" src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/tgp-logo.svg" width="55%"/>
+    <img alt="Torch Geometric Pool" src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo-full.svg" width="65%"/>
     <h3>The library for pooling in Graph Neural Networks</h3>
     <hr>
     <p>
-    <a href='https://github.com/FilippoMB/torch-geometric-pool/actions/workflows/ci.yaml'><img alt="CI status" src="https://github.com/FilippoMB/torch-geometric-pool/actions/workflows/ci.yaml/badge.svg"></a>
     <a href='https://pypi.org/project/torch-geometric-pool/'><img alt="PyPI" src="https://img.shields.io/pypi/v/torch-geometric-pool"></a>
     <img alt="PyPI - Python Version" src="https://img.shields.io/badge/python-%3E%3D3.9-blue">
+    <a href='https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml'><img alt="CI status" src="https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml/badge.svg"></a>
+    <a href='https://torch-geometric-pool.readthedocs.io/en/latest/?badge=latest'><img src='https://readthedocs.org/projects/torch-geometric-pool/badge/?version=latest' alt='Documentation Status' /></a>
     </p>
     <p>
     📚 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/">Documentation</a> - 🚀 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/content/quickstart.html">Getting Started</a> - 💻 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/tutorials/index.html">Introductory notebooks</a>
@@ -40,7 +41,7 @@ Thanks to the modular SRC framework, the components of different pooling layers 
 
 ## Getting Started
 
-If you are unfamiliar with graph pooling, we recommend checking this [introduction](https://torch-geometric-pool.readthedocs.io/en/latest/content/src.html) to the SRC framework and this [blog](https://gnn-pooling.notion.site/) for a deeper dive into pooling in GNNs. 
+If you are unfamiliar with graph pooling, we recommend checking this [introduction](https://torch-geometric-pool.readthedocs.io/en/latest/content/src.html) to the SRC framework and this [blog](https://filippomb.github.io/blogs/gnn-pool-1/) for a deeper dive into pooling in GNNs. 
 Before you dive into using <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp, we recommend browsing the [Documentation](https://torch-geometric-pool.readthedocs.io/en/latest/) to familiarize yourself with the API.
 
 If you prefer a notebook-based introduction, check out the following tutorials:
