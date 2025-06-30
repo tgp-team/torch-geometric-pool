@@ -382,45 +382,6 @@ class TestMaxCutSelect:
         assert out.num_nodes == x.size(0)
         assert hasattr(out, "scores")
 
-    def test_maxcut_select_branch_272_275_assign_all_nodes_false(self, simple_graph):
-        """Test the exact missing branch 272->275 in maxcut_select.py (no _extra_args)."""
-        x, edge_index, edge_weight, batch = simple_graph
-
-        # Create a MaxCutSelect and call it normally
-        selector = MaxCutSelect(
-            in_channels=x.size(1),
-            ratio=0.5,
-            assign_all_nodes=False,  # Use False to get TopK SelectOutput
-            mp_units=[8],
-            mlp_units=[4],
-        )
-        selector.eval()
-
-        # Mock the parent forward to return a SelectOutput without _extra_args
-        import unittest.mock as mock
-
-        from tgp.select.base_select import SelectOutput
-
-        # Create a SelectOutput without _extra_args attribute
-        mock_select_output = SelectOutput(
-            cluster_index=torch.tensor([0, 0, 1, 1, 2, 2]), num_nodes=6, num_clusters=3
-        )
-        # Ensure it doesn't have _extra_args
-        if hasattr(mock_select_output, "_extra_args"):
-            delattr(mock_select_output, "_extra_args")
-
-        with mock.patch.object(
-            selector.__class__.__bases__[0], "forward", return_value=mock_select_output
-        ):
-            # This should trigger the missing branch 272->275
-            # When select_output doesn't have '_extra_args', the if condition fails
-            # and we skip the select_output._extra_args.add('scores') line
-            output = selector(x, edge_index, edge_weight, batch)
-
-            # Verify it still works and has scores added
-            assert hasattr(output, "scores")
-            assert output.num_nodes == x.size(0)
-
 
 class TestMaxCutPooling:
     """Test MaxCutPooling component."""
@@ -569,9 +530,6 @@ class TestMaxCutPooling:
         extra_args = pooler.extra_repr_args()
 
         assert isinstance(extra_args, dict)
-        assert extra_args["in_channels"] == 64
-        assert extra_args["ratio"] == 0.7
-        assert not extra_args["assign_all_nodes"]
         assert extra_args["loss_coeff"] == 2.5
 
 
@@ -603,7 +561,7 @@ class TestBaseSelect:
             weight=None,  # Don't pass edge_weight here, it's for node weights
             max_iter=5,
             batch=batch,
-            strategy="closest_node",
+            closest_node_assignment=True,
         )
 
         # Check that all nodes are now assigned
@@ -631,34 +589,15 @@ class TestBaseSelect:
         topk_output = selector(x, edge_index, edge_weight, batch)
 
         # Test assign_all_nodes with random strategy
-        full_assignment = topk_output.assign_all_nodes(strategy="random", batch=batch)
+        full_assignment = topk_output.assign_all_nodes(
+            closest_node_assignment=False, batch=batch
+        )
 
         # Check that all nodes are now assigned
         assert full_assignment.num_nodes == N
         assert full_assignment.cluster_index.size(0) == N
         assert torch.all(full_assignment.cluster_index >= 0)
         assert torch.all(full_assignment.cluster_index < topk_output.num_clusters)
-
-    def test_select_output_assign_all_nodes_error_cases(self, simple_graph):
-        """Test error cases for assign_all_nodes method."""
-        x, edge_index, edge_weight, batch = simple_graph
-
-        # Create a SelectOutput
-        selector = MaxCutSelect(
-            in_channels=x.size(1), ratio=0.5, assign_all_nodes=False
-        )
-        selector.eval()
-        topk_output = selector(x, edge_index, edge_weight, batch)
-
-        # Test error when adj is None but strategy is closest_node
-        with pytest.raises(
-            AssertionError, match="adj must be provided for closest_node strategy"
-        ):
-            topk_output.assign_all_nodes(adj=None, strategy="closest_node")
-
-        # Test error with invalid strategy
-        with pytest.raises(ValueError, match="Unknown strategy"):
-            topk_output.assign_all_nodes(adj=edge_index, strategy="invalid_strategy")
 
     def test_maxcut_select_already_all_nodes_assigned(self, simple_graph):
         """Test that assign_all_nodes returns self when all nodes are already kept."""
@@ -835,22 +774,8 @@ class TestCoverageEdgeCases:
             ValueError, match="Weight tensor size .* must match the number of nodes"
         ):
             output.assign_all_nodes(
-                adj=edge_index, weight=wrong_weight, strategy="closest_node"
+                adj=edge_index, weight=wrong_weight, closest_node_assignment=True
             )
-
-    def test_select_output_unknown_strategy_error(self, simple_graph):
-        """Test unknown strategy error in assign_all_nodes."""
-        x, edge_index, edge_weight, batch = simple_graph
-
-        selector = MaxCutSelect(
-            in_channels=x.size(1), ratio=0.5, assign_all_nodes=False
-        )
-        selector.eval()
-        output = selector(x, edge_index, edge_weight, batch)
-
-        # Test unknown strategy (line 325->324 in base_select.py)
-        with pytest.raises(ValueError, match="Unknown strategy"):
-            output.assign_all_nodes(adj=edge_index, strategy="unknown_strategy")
 
     def test_select_output_invalid_adj_type_error(self, simple_graph):
         """Test invalid adjacency type error in assign_all_nodes."""
@@ -864,7 +789,7 @@ class TestCoverageEdgeCases:
 
         # Test invalid adjacency type (line 296 in base_select.py)
         with pytest.raises(ValueError, match="Invalid adjacency type"):
-            output.assign_all_nodes(adj="invalid_type", strategy="closest_node")
+            output.assign_all_nodes(adj="invalid_type", closest_node_assignment=True)
 
     def test_select_output_max_iter_zero_assertion(self, simple_graph):
         """Test max_iter <= 0 assertion in assign_all_nodes."""
@@ -880,7 +805,7 @@ class TestCoverageEdgeCases:
         with pytest.raises(AssertionError, match="max_iter must be greater than 0"):
             output.assign_all_nodes(
                 adj=edge_index,
-                strategy="closest_node",
+                closest_node_assignment=True,
                 max_iter=0,  # Should trigger assertion
             )
 
@@ -1063,47 +988,6 @@ class TestFinalCoverageComplete:
         assert "maxcut_loss" in result.loss
         assert torch.isfinite(result.loss["maxcut_loss"])
 
-    def test_maxcut_pooling_no_scores_fallback(self, simple_graph):
-        """Test MaxCutPooling line 170: no scores fallback path."""
-        import unittest.mock as mock
-
-        from tgp.poolers.maxcut import MaxCutPooling
-        from tgp.select.base_select import SelectOutput
-
-        x, edge_index, edge_weight, batch = simple_graph
-
-        # Create a pooler
-        pooler = MaxCutPooling(in_channels=x.size(1), ratio=0.5)
-
-        # Mock the select method to return a SelectOutput WITHOUT scores attribute
-        mock_so = SelectOutput(
-            cluster_index=torch.tensor([0, 0, 1, 1, 2, 2]), num_nodes=6, num_clusters=3
-        )
-        # Explicitly ensure it has no scores attribute
-        if hasattr(mock_so, "scores"):
-            delattr(mock_so, "scores")
-
-        # Use mock to bypass normal select behavior
-        with (
-            mock.patch.object(pooler, "select", return_value=mock_so),
-            mock.patch.object(
-                pooler,
-                "reduce",
-                return_value=(torch.randn(3, x.size(1)), torch.zeros(3)),
-            ),
-            mock.patch.object(
-                pooler,
-                "connect",
-                return_value=(torch.tensor([[0, 1], [1, 0]]), torch.ones(2)),
-            ),
-        ):
-            # This should trigger line 170: no scores case
-            result = pooler(x=x, adj=edge_index, edge_weight=edge_weight, batch=batch)
-
-            # Verify that the fallback loss was set (line 170)
-            assert "maxcut_loss" in result.loss
-            assert result.loss["maxcut_loss"] == 0.0
-
     def test_base_select_max_iter_assertion(self, simple_graph):
         """Test base_select.py line 291: max_iter <= 0 assertion."""
         x, edge_index, edge_weight, batch = simple_graph
@@ -1118,25 +1002,8 @@ class TestFinalCoverageComplete:
         with pytest.raises(AssertionError, match="max_iter must be greater than 0"):
             output.assign_all_nodes(
                 adj=edge_index,
-                strategy="closest_node",
+                closest_node_assignment=True,
                 max_iter=0,  # This triggers line 291
-            )
-
-    def test_base_select_unknown_strategy_error(self, simple_graph):
-        """Test base_select.py branch 325->324: unknown strategy error."""
-        x, edge_index, edge_weight, batch = simple_graph
-
-        selector = MaxCutSelect(
-            in_channels=x.size(1), ratio=0.5, assign_all_nodes=False
-        )
-        selector.eval()
-        output = selector(x, edge_index, edge_weight, batch)
-
-        # Test branch 325->324: unknown strategy
-        with pytest.raises(ValueError, match="Unknown strategy"):
-            output.assign_all_nodes(
-                adj=edge_index,
-                strategy="invalid_strategy",  # This triggers branch 325->324
             )
 
     def test_maxcut_select_edge_weight_branch_precise(self, simple_graph):
@@ -1232,27 +1099,6 @@ class TestFinalCoverageComplete:
         assert isinstance(result, torch.Tensor)
         assert result.size(0) == 2  # Should return [indices, assignments]
 
-    def test_remaining_coverage_lines_precise(self, simple_graph):
-        """Test the exact remaining missing lines with very specific scenarios."""
-        x, edge_index, edge_weight, batch = simple_graph
-
-        # Test base_select.py line 291: max_iter <= 0 assertion for closest_node
-        selector = MaxCutSelect(
-            in_channels=x.size(1), ratio=0.5, assign_all_nodes=False
-        )
-        selector.eval()
-        output = selector(x, edge_index, edge_weight, batch)
-
-        # This should hit line 291 exactly
-        with pytest.raises(AssertionError, match="max_iter must be greater than 0"):
-            output.assign_all_nodes(
-                adj=edge_index, strategy="closest_node", max_iter=-1
-            )
-
-        # Test base_select.py branch 325->324: invalid strategy
-        with pytest.raises(ValueError, match="Unknown strategy"):
-            output.assign_all_nodes(adj=edge_index, strategy="nonexistent_strategy")
-
     def test_ops_missing_lines_213_344_351(self, simple_graph):
         """Test the exact missing lines 213, 344, 351 in ops.py."""
         from tgp.utils.ops import delta_gcn_matrix, get_assignments
@@ -1294,48 +1140,6 @@ class TestFinalCoverageComplete:
             num_nodes=None,  # No num_nodes -> triggers edge_index.max() + 1
         )
         assert assignments_line_351.size(0) == 2
-
-    def test_maxcut_pooling_adj_none_line_162(self, simple_graph):
-        """Test MaxCutPooling line 162: adj=None branch with proper mocking."""
-        import unittest.mock as mock
-
-        from tgp.poolers.maxcut import MaxCutPooling
-        from tgp.select.base_select import SelectOutput
-        from tgp.src import PoolingOutput
-
-        x, edge_index, edge_weight, batch = simple_graph
-
-        # Create the pooler
-        pooler = MaxCutPooling(in_channels=x.size(1), ratio=0.5)
-
-        # Create a mock SelectOutput
-        mock_so = SelectOutput(
-            cluster_index=torch.tensor([0, 0, 1, 1, 2, 2]), num_nodes=6, num_clusters=3
-        )
-
-        # Mock the methods that would otherwise fail with adj=None
-        with (
-            mock.patch.object(pooler, "select", return_value=mock_so),
-            mock.patch.object(
-                pooler,
-                "reduce",
-                return_value=(torch.randn(3, x.size(1)), torch.zeros(3)),
-            ),
-            mock.patch.object(
-                pooler,
-                "connect",
-                return_value=(torch.tensor([[0, 1], [1, 0]]), torch.ones(2)),
-            ),
-        ):
-            # This should hit line 162: adj is None branch
-            result = pooler(x=x, adj=None, edge_weight=edge_weight, batch=batch)
-
-            # Verify that the loss was set to 0 due to adj=None (line 162)
-            assert isinstance(result, PoolingOutput)
-            assert result.loss is not None
-            assert "maxcut_loss" in result.loss
-            assert result.loss["maxcut_loss"].item() == 0.0
-            assert result.loss["maxcut_loss"].device == x.device
 
     def test_maxcut_select_edge_index_none_lines_239_240(self, simple_graph):
         """Test MaxCutSelect lines 239-240: edge_index=None branch."""

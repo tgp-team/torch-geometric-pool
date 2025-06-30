@@ -159,7 +159,7 @@ def test_assign_all_nodes_weight_size_mismatch():
         match="Weight tensor size \\(3\\) must match the number of nodes \\(4\\)",
     ):
         so.assign_all_nodes(
-            adj=edge_index, weight=wrong_weight, strategy="closest_node"
+            adj=edge_index, weight=wrong_weight, closest_node_assignment=True
         )
 
 
@@ -188,7 +188,7 @@ def test_assign_all_nodes_with_extra_args():
     edge_index = torch.tensor([[0, 1, 2, 3], [1, 0, 3, 2]])
 
     # Call assign_all_nodes which should copy extra attributes
-    new_so = so.assign_all_nodes(adj=edge_index, strategy="closest_node")
+    new_so = so.assign_all_nodes(adj=edge_index, closest_node_assignment=True)
 
     # Verify that the extra attributes were copied to the new SelectOutput
     assert hasattr(new_so, "custom_attr")
@@ -213,7 +213,7 @@ def test_assign_all_nodes_no_extra_args():
     edge_index = torch.tensor([[0, 1, 2, 3], [1, 0, 3, 2]])
 
     # This should work without errors even with no extra args
-    new_so = so.assign_all_nodes(adj=edge_index, strategy="closest_node")
+    new_so = so.assign_all_nodes(adj=edge_index, closest_node_assignment=True)
 
     # Verify the result is valid
     assert isinstance(new_so, SelectOutput)
@@ -236,7 +236,7 @@ def test_assign_all_nodes_with_sparse_tensor_adj():
     sparse_adj = SparseTensor(row=row, col=col, sparse_sizes=(4, 4))
 
     # This should trigger the SparseTensor branch at line 291
-    new_so = so.assign_all_nodes(adj=sparse_adj, strategy="closest_node")
+    new_so = so.assign_all_nodes(adj=sparse_adj, closest_node_assignment=True)
 
     # Verify the result is valid
     assert isinstance(new_so, SelectOutput)
@@ -266,7 +266,7 @@ def test_assign_all_nodes_extra_attr_exists():
 
     # Call assign_all_nodes - this should handle the case where attr_name is in _extra_args
     # but the attribute doesn't actually exist (covering the hasattr check)
-    new_so = so.assign_all_nodes(adj=edge_index, strategy="closest_node")
+    new_so = so.assign_all_nodes(adj=edge_index, closest_node_assignment=True)
 
     # Verify that existing_attr was copied (line 326: setattr call)
     assert hasattr(new_so, "existing_attr")

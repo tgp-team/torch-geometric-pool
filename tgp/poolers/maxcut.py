@@ -1,6 +1,5 @@
 from typing import Optional, Union
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 
@@ -171,35 +170,23 @@ class MaxCutPooling(SRCPooling):
             if so is None:
                 raise ValueError("SelectOutput (so) cannot be None for lifting")
             x_lifted = self.lift(x_pool=x, so=so)
-            return x_lifted  # type: ignore
+            return x_lifted
 
-        # Select phase
+        # Select
         so = self.select(x=x, edge_index=adj, edge_weight=edge_weight, batch=batch)
+        loss = self.compute_loss(so.scores, adj, edge_weight, batch)
 
-        if adj is None:
-            # If no adjacency matrix is provided, we can't compute the MaxCut loss
-            # Set loss to 0 and continue with the pooling operation
-            loss = {"maxcut_loss": torch.tensor(0.0, device=x.device)}
-        else:
-            # Compute auxiliary loss - check if scores exist in SelectOutput
-            scores = getattr(so, "scores", None)
-            if scores is not None:
-                loss = self.compute_loss(scores, adj, edge_weight, batch)
-            else:
-                # Fallback: set loss to 0 if scores are not available
-                loss = {"maxcut_loss": torch.tensor(0.0, device=x.device)}
-
-        # Reduce phase
+        # Reduce
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
-        # Connect phase
+        # Connect
         edge_index_pooled, edge_weight_pooled = self.connect(
             edge_index=adj, so=so, edge_weight=edge_weight
         )
 
         return PoolingOutput(
             x=x_pooled,
-            edge_index=edge_index_pooled,  # type: ignore
+            edge_index=edge_index_pooled,
             edge_weight=edge_weight_pooled,
             batch=batch_pooled,
             so=so,
@@ -248,13 +235,5 @@ class MaxCutPooling(SRCPooling):
     def extra_repr_args(self) -> dict:
         """Additional representation arguments for debugging."""
         return {
-            "in_channels": self.in_channels,
-            "ratio": self.ratio,
-            "assign_all_nodes": self.assign_all_nodes,
             "loss_coeff": self.loss_coeff,
-            "mp_units": self.mp_units,
-            "mp_act": self.mp_act,
-            "mlp_units": self.mlp_units,
-            "mlp_act": self.mlp_act,
-            "delta": self.delta,
         }

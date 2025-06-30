@@ -257,20 +257,13 @@ class SelectOutput:
         weight: Optional[Tensor] = None,
         max_iter: int = 5,
         batch: Optional[Tensor] = None,
-        strategy: str = "closest_node",
+        closest_node_assignment: bool = True,
     ) -> "SelectOutput":
         r"""Extends a sparse selection to assign ALL nodes to the selected supernodes.
 
         This method converts a sparse selection (where only a subset of nodes
         are initially selected, e.g. top-k selection) into a complete assignment where every node in the
         graph is assigned to one of the selected supernodes.
-
-        **Assignment Strategies:**
-
-        - **"closest_node"**: Uses graph connectivity to assign nodes to the nearest
-          supernode through iterative message passing. Preserves graph topology.
-        - **"random"**: Randomly assigns unselected nodes to supernodes, respecting
-          batch boundaries if provided.
 
         Args:
             adj (~torch_geometric.typing.Adj, optional): Graph connectivity matrix.
@@ -287,12 +280,9 @@ class SelectOutput:
                 indicating which graph each node belongs to. When provided, ensures
                 nodes are only assigned to supernodes within the same graph.
                 (default: :obj:`None`)
-            strategy (str, optional): Assignment strategy to use. Options:
-
-                - :obj:`"closest_node"`: Graph-aware assignment using message passing
-                - :obj:`"random"`: Random assignment to supernodes
-
-                (default: :obj:`"closest_node"`)
+            closest_node_assignment (bool, optional): If True, assign unlabeled nodes to the
+                closest supernode. If False, use random assignment to supernodes.
+                (default: :obj:`True`)
 
         Returns:
             SelectOutput: A new SelectOutput with complete node-to-supernode assignments.
@@ -313,7 +303,7 @@ class SelectOutput:
             >>> print(sparse_output.node_index.size(0))  # k nodes
             >>> # Extend to assign all nodes using graph connectivity
             >>> full_output = sparse_output.assign_all_nodes(
-            ...     adj=edge_index, strategy="closest_node", max_iter=5
+            ...     adj=edge_index, closest_node_assignment=True, max_iter=5
             ... )
             >>> print(full_output.node_index.size(0))  # N nodes (all nodes)
             >>> print(full_output.num_clusters)  # Still k supernodes
@@ -325,10 +315,10 @@ class SelectOutput:
         if len(kept_nodes) == self.num_nodes:
             return self
 
-        if strategy == "closest_node":
-            assert adj is not None, "adj must be provided for closest_node strategy"
+        if closest_node_assignment:
+            assert adj is not None, "adj must be provided for closest_node_assignment"
             assert max_iter > 0, (
-                "max_iter must be greater than 0 for closest_node strategy"
+                "max_iter must be greater than 0 for closest_node_assignment"
             )
 
             # Convert adjacency to edge_index format if needed
@@ -341,35 +331,22 @@ class SelectOutput:
 
             # Handle the weight parameter if provided
             if weight is not None:
-                # Ensure weight has the same number of elements as nodes
                 if weight.size(0) != self.num_nodes:
                     raise ValueError(
                         f"Weight tensor size ({weight.size(0)}) must match the number of nodes ({self.num_nodes})"
                     )
 
-            # Use get_assignments with graph-aware assignment
-            assignments = get_assignments(
-                kept_nodes, edge_index=edge_index, max_iter=max_iter, batch=batch
-            )
-
-        elif strategy == "random":
-            # Use get_assignments with random assignment only (max_iter=0)
-            assignments = get_assignments(
-                kept_nodes,
-                edge_index=None,
-                max_iter=0,
-                batch=batch,
-                num_nodes=self.num_nodes,
-            )
-
-        else:
-            raise ValueError(
-                f"Unknown strategy: {strategy}. Supported strategies are 'closest_node' and 'random'."
-            )
+        # Use get_assignments with graph-aware assignment
+        assignments = get_assignments(
+            kept_nodes,
+            edge_index=edge_index if closest_node_assignment else None,
+            max_iter=max_iter if closest_node_assignment else 0,
+            batch=batch,
+        )
 
         # Create new SelectOutput with updated cluster assignments
         new_select_output = SelectOutput(
-            cluster_index=assignments[1],  # New cluster assignments
+            cluster_index=assignments[1],
             s_inv_op=getattr(self, "s_inv_op", "transpose"),
             weight=weight,
         )

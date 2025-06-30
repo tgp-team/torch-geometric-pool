@@ -260,7 +260,6 @@ class MaxCutSelect(TopkSelect):
         scores = self.score_net(x, edge_index, edge_weight)  # Shape: (N, 1)
 
         # Perform top-k selection using computed scores - call parent forward
-        # The parent TopkSelect.forward expects scores as x parameter
         topk_select_output = super().forward(x=scores, batch=batch)
 
         if self.assign_all_nodes:
@@ -269,18 +268,14 @@ class MaxCutSelect(TopkSelect):
                 weight=scores.squeeze(-1),
                 max_iter=5,
                 batch=batch,
-                strategy="closest_node",
+                closest_node_assignment=True,
             )
         else:
             select_output = topk_select_output
 
-        # Add scores to the select output for later use
-        # This allows downstream components to access the node scores
+        # Add scores to the select output to be used in the loss computation
         setattr(select_output, "scores", scores.squeeze(-1))
-
-        # Register 'scores' as an extra argument so it's properly tracked
-        if hasattr(select_output, "_extra_args"):
-            select_output._extra_args.add("scores")
+        select_output._extra_args.add("scores")
 
         return select_output
 
