@@ -9,14 +9,14 @@ Please, follow the steps below to create a pull request to add new features.
 You will need to install additional dependencies to compile the documentation, to run the tests and the pre-commits:
 
 ```bash
-pip install .[dev]
+pip install -e .[dev]
 ```
 
 ## 1.1 Set up pre-commit hooks
 
 We use pre-commit hooks to ensure code quality and consistency. Install the pre-commit hooks with:
 ```bash
-precommit install
+pre-commit install
 ```
 
 ## 2. Add new code
