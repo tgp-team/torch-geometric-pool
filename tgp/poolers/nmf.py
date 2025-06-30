@@ -3,7 +3,7 @@ from typing import Optional, Union
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.connect import DenseConnect
+from tgp.connect import DenseConnect, DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
@@ -95,6 +95,11 @@ class NMFPooling(DenseSRCPooling):
 
         self.cached = cached
 
+        self.preconnector = DenseConnectSPT(
+            remove_self_loops=remove_self_loops,
+            degree_norm=degree_norm,
+        )
+
     def forward(
         self,
         x: Tensor,
@@ -147,3 +152,35 @@ class NMFPooling(DenseSRCPooling):
         return {
             "cached": self.cached,
         }
+
+    def coarsen_graph(
+        self,
+        edge_index: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
+        *,
+        batch: Optional[Tensor] = None,
+        num_nodes: Optional[int] = None,
+        **select_kwargs,
+    ) -> PoolingOutput:
+        so = self.select(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=num_nodes,
+            **select_kwargs,
+        )
+
+        if self.reducer is not None:
+            batch_pooled = self.reducer.reduce_batch(so, batch)
+        else:
+            batch_pooled = None
+
+        edge_index_pooled, edge_weight_pooled = self.preconnector(
+            so=so, edge_index=edge_index, edge_weight=edge_weight
+        )
+        return PoolingOutput(
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+        )

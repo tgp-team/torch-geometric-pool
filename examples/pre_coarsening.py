@@ -4,33 +4,31 @@ from torch_geometric import seed_everything
 from torch_geometric.datasets import TUDataset
 from torch_geometric.nn import ARMAConv
 
-from tgp.connect import DenseConnectSPT, KronConnect, SparseConnect
 from tgp.data import PoolDataLoader, PreCoarsening
+from tgp.poolers import get_pooler
 from tgp.reduce import BaseReduce, global_reduce
-from tgp.select import GraclusSelect, KMISSelect, LaPoolSelect, NDPSelect, NMFSelect
 
 seed_everything(8)
 
 N_LEVELS = 2  # Number of coarsening levels
 poolers = {
-    "lapool": (LaPoolSelect(), DenseConnectSPT()),
-    "ndp": (NDPSelect(), KronConnect()),
-    "nmf": (NMFSelect(k=5), DenseConnectSPT()),
-    "graclus": (GraclusSelect(), SparseConnect()),
-    "kmis": (KMISSelect(scorer="degree"), SparseConnect()),
+    "lap": {},
+    "ndp": {},
+    "nmf": {"k": 5},
+    "graclus": {},
+    "kmis": {"scorer": "degree"},
 }
 
-for pooler in poolers:
-    selector, connector = poolers[pooler]
-    print(f"Using pooler: {pooler}")
-    print(f"Selector: {selector}, Connector: {connector}")
+for _pool, args in poolers.items():
+    pooler = get_pooler(_pool, **args)
 
     ### Get the data
     dataset = TUDataset(
         root="../data/TUDataset",
         name="MUTAG",
         pre_transform=PreCoarsening(
-            selector=selector, connector=connector, recursive_depth=N_LEVELS
+            pooler=pooler,
+            recursive_depth=N_LEVELS,
         ),
         force_reload=True,
     )
