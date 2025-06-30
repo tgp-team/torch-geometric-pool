@@ -12,6 +12,13 @@ You will need to install additional dependencies to compile the documentation, t
 pip install .[dev]
 ```
 
+## 1.1 Set up pre-commit hooks
+
+We use pre-commit hooks to ensure code quality and consistency. Install the pre-commit hooks with:
+```bash
+precommit install
+```
+
 ## 2. Add new code
 
 - Fork the repository and create a new branch.
