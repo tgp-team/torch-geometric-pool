@@ -15,33 +15,66 @@ class TopkSelect(Select):
     r"""The top-:math:`k` :math:`\texttt{select}` operator used by
     scoring-based pooling methods.
 
-    It learns a score vector :math:`\mathbf{s} \in \mathbb{R}^{N}`,
-    which assigns a score to each node :math:`i` in the graph.
+    **Behavior based on** :obj:`in_channels`:
+
+    - **When** :obj:`in_channels` **is** :obj:`None` **or** :obj:`<= 1`: The operator does not learn
+      a projection vector and directly uses the input as node scores (optionally applying
+      the activation function). This mode is useful when you want to provide pre-computed
+      scores directly.
+
+    - **When** :obj:`in_channels` **is** :obj:`> 1`: The operator learns a projection vector
+      :math:`\mathbf{p}` and computes scores by projecting the input features.
+
+    **Score computation:**
+
     If :obj:`min_score` is :obj:`None`, computes:
 
     .. math::
-        \mathbf{s} &= \sigma \left( \frac{\mathbf{X}\mathbf{p}}{\|
-        \mathbf{p} \|} \right)
+        \mathbf{s} &= \begin{cases}
+        \sigma(\mathbf{x}) & \text{if } \texttt{in_channels} \leq 1 \\
+        \sigma \left( \frac{\mathbf{X}\mathbf{p}}{\| \mathbf{p} \|} \right) & \text{if } \texttt{in_channels} > 1
+        \end{cases}
 
-        \mathbf{i} &= \mathrm{top}_k(\mathbf{s})
-
-    If :obj:`min_score` is a value :math:`\tilde{\alpha} \in [0,1]`,
-    computes:
+    Then select the top-k nodes:
 
     .. math::
-        \mathbf{s} &= \mathrm{softmax}(\mathbf{X}\mathbf{p})
+        \mathbf{i} = \mathrm{top}_k(\mathbf{s})
 
-        \mathbf{i} &= \mathbf{s}_i > \tilde{\alpha}
+    If :obj:`min_score` is a value :math:`\tilde{\alpha} \in [0,1]`, computes:
 
-    where :math:`\mathbf{p}` is the learnable projection vector.
+    .. math::
+        \mathbf{s} &= \begin{cases}
+        \mathrm{softmax}(\mathbf{x}, \text{batch}) & \text{if } \texttt{in_channels} \leq 1 \\
+        \mathrm{softmax}(\mathbf{X}\mathbf{p}, \text{batch}) & \text{if } \texttt{in_channels} > 1
+        \end{cases}
+
+    Then select all nodes above the threshold:
+
+    .. math::
+        \mathbf{i} = \{ j : \mathbf{s}_j > \tilde{\alpha} \}
+
+    where :math:`\mathbf{p}` is the learnable projection vector and :math:`\sigma` is the activation function.
+
+    **Input handling:**
+
+    - **2D input** :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`: Standard node feature matrix.
+    - **1D input** :math:`\mathbf{x} \in \mathbb{R}^{N}`: When :obj:`in_channels` :obj:`<= 1`, used directly
+      as scores. When :obj:`in_channels` :obj:`> 1`, reshaped to :math:`\mathbb{R}^{N \times 1}` and projected.
+
+    Warning:
+        When providing pre-computed scores, set :obj:`act` to :obj:`"identity"` or :obj:`"linear"`
+        to avoid applying an activation function.
 
     The :class:`~tgp.select.SelectOutput` contains a sparse assignment
     matrix :math:`\mathbf{S}` that can be thought as dropping all the columns
     :math:`j \notin \mathbf{i}` of the diagonal matrix :math:`\text{diag}(\mathbf{s})`.
 
     Args:
-        in_channels (int):
-            Size of each input sample.
+        in_channels (int, optional):
+            Size of each input sample. When :obj:`None` or :obj:`<= 1`, no learnable
+            projection is used and input is treated as scores. When :obj:`> 1`, a
+            learnable projection vector is used to compute scores from features.
+            (default: :obj:`None`)
         ratio (float or int):
             The graph pooling ratio, which is used to compute
             :math:`k = \lceil \mathrm{ratio} \cdot N \rceil`, or the value
@@ -57,6 +90,8 @@ class TopkSelect(Select):
             (default: :obj:`None`)
         act (str or callable, optional):
             The non-linearity :math:`\sigma` to use when computing the score.
+            Use :obj:`"identity"`, :obj:`"linear"`, or :obj:`"none"` to avoid applying
+            any activation when providing pre-computed scores.
             (default: :obj:`"tanh"`)
         s_inv_op (~tgp.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
@@ -67,6 +102,25 @@ class TopkSelect(Select):
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
+
+    Examples:
+        **Using with node features (learnable projection):**
+
+        >>> import torch
+        >>> from tgp.select.topk_select import TopkSelect
+        >>> # Node feature matrix: 5 nodes, 3 features each
+        >>> x = torch.randn(5, 3)
+        >>> selector = TopkSelect(in_channels=3, ratio=0.6)
+        >>> output = selector(x)
+        >>> print(f"Selected {output.num_clusters} out of {output.num_nodes} nodes")
+
+        **Using with pre-computed scores:**
+
+        >>> # Pre-computed node scores
+        >>> scores = torch.tensor([0.1, 0.8, 0.3, 0.9, 0.2])
+        >>> selector = TopkSelect(in_channels=None, ratio=0.4, act="identity")
+        >>> output = selector(scores)
+        >>> print(f"Top nodes: {output.node_index}")  # Should select nodes 1 and 3
     """
 
     def __init__(
@@ -112,9 +166,9 @@ class TopkSelect(Select):
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor): The node feature matrix of shape :math:`[N, F]`,
-                where :math:`N` is the number of nodes in the batch and
-                :math:`F` is the number of node features.
+            x (~torch.Tensor): The node feature matrix of shape :math:`[N, F]` or
+                node scores of shape :math:`[N]`, where :math:`N` is the number of
+                nodes in the batch and :math:`F` is the number of node features.
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
@@ -126,6 +180,8 @@ class TopkSelect(Select):
             batch = x.new_zeros(x.size(0), dtype=torch.long)
 
         if self.weight is None:
+            if x.dim() > 1:
+                assert x.size(1) == 1, "x must be 1D when in_channels is None"
             score = x if x.dim() == 1 else x.view(-1)
         else:
             x = x.view(-1, 1) if x.dim() == 1 else x
@@ -139,7 +195,7 @@ class TopkSelect(Select):
 
         return SelectOutput(
             node_index=node_index,
-            num_nodes=x.size(-2),
+            num_nodes=x.size(0),
             cluster_index=torch.arange(node_index.size(0), device=x.device),
             num_clusters=node_index.size(0),
             weight=score[node_index],

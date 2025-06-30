@@ -238,5 +238,20 @@ def test_topk_forward(make_chain_graph):
     assert isinstance(out, PoolingOutput)
 
 
+def test_topk_with_dim_bigger_than_1():
+    x = torch.randn(10, 2)
+    selector = TopkSelect(in_channels=1, ratio=0.5, act="linear")
+
+    with pytest.raises(AssertionError):
+        out = selector(x=x)
+
+    x = torch.randn(10)
+    out = selector(x=x)
+    assert out.node_index.size(0) == 5
+    assert out.num_clusters == 5
+    assert out.num_nodes == 10
+    assert out.s.size(0) == 10
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
