@@ -235,6 +235,9 @@ class SRCPooling(torch.nn.Module):
         num_nodes: Optional[int] = None,
         **select_kwargs,
     ) -> PoolingOutput:
+        """Precompute a coarsened graph from the original graph.
+        Must be implemented by the poolers that support precoarsening.
+        """
         raise NotImplementedError("Precoarsening is not supported by this pooler.")
 
     def preprocessing(
@@ -460,3 +463,36 @@ class DenseSRCPooling(SRCPooling):
         It is just a wrapper for :func:`~tgp.reduce.dense_global_reduce`.
         """
         return dense_global_reduce(x, reduce_op, self.node_dim)
+
+
+class BasePrecoarseningMixin:
+    r"""A mixin class for pooling layers that implements the
+    pre-coarsening strategy.
+    """
+
+    def precoarsening(
+        self,
+        edge_index: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
+        *,
+        batch: Optional[Tensor] = None,
+        num_nodes: Optional[int] = None,
+        **select_kwargs,
+    ) -> PoolingOutput:
+        so = self.select(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=num_nodes,
+            **select_kwargs,
+        )
+        batch_pooled = self.reducer.reduce_batch(so, batch)
+        edge_index_pooled, edge_weight_pooled = self.connector(
+            so=so, edge_index=edge_index, edge_weight=edge_weight
+        )
+        return PoolingOutput(
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+        )

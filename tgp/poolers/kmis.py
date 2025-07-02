@@ -8,11 +8,11 @@ from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select.kmis_select import KMISSelect, Scorer, SelectOutput
-from tgp.src import PoolingOutput, SRCPooling
+from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
 from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 
-class KMISPooling(SRCPooling):
+class KMISPooling(BasePrecoarseningMixin, SRCPooling):
     r"""The Maximal :math:`k`-Independent Set (:math:`k`-MIS) pooling operator from the
     paper `"Generalizing Downsampling from Regular Data to Graphs"
     <https://arxiv.org/abs/2208.03523>`_ (Bacciu et al., AAAI 2023).
@@ -233,33 +233,6 @@ class KMISPooling(SRCPooling):
                 so=so,
             )
             return out
-
-    def precoarsening(
-        self,
-        edge_index: Optional[Adj] = None,
-        edge_weight: Optional[Tensor] = None,
-        *,
-        batch: Optional[Tensor] = None,
-        num_nodes: Optional[int] = None,
-        **select_kwargs,
-    ) -> PoolingOutput:
-        so = self.select(
-            edge_index=edge_index,
-            edge_weight=edge_weight,
-            batch=batch,
-            num_nodes=num_nodes,
-            **select_kwargs,
-        )
-        batch_pooled = self.reducer.reduce_batch(so, batch)
-        edge_index_pooled, edge_weight_pooled = self.connector(
-            so=so, edge_index=edge_index, edge_weight=edge_weight
-        )
-        return PoolingOutput(
-            edge_index=edge_index_pooled,
-            edge_weight=edge_weight_pooled,
-            batch=batch_pooled,
-            so=so,
-        )
 
     def extra_repr_args(self) -> dict:
         return {"cached": self.cached}
