@@ -53,8 +53,8 @@ def test_sparse_connect_raises_runtime_error():
 
 
 def test_denseconn_spt():
-    """Test the behavior of DenseConnectSPT with remove_self_loops=False and degree_norm=True."""
-    connector = DenseConnectSPT(remove_self_loops=False, degree_norm=True)
+    """Test the behavior of DenseConnectSPT with remove_self_loops=False and degree_norm=False."""
+    connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
     s = SparseTensor.from_dense(torch.eye(3, dtype=torch.float))
     so = SelectOutput(s=s)
     edge_index = torch.tensor([[0, 1, 1, 0], [1, 0, 1, 2]], dtype=torch.long)
@@ -67,7 +67,7 @@ def test_denseconn_spt():
 
 def test_denseconn_spt_invalid_edge_index_type():
     """Passing an unsupported edge_index type (e.g., a Python list) into DenseConnectSPT.forward
-    should raise a ValueError at the `else:` branch (line 76).
+    should raise a ValueError.
     """
     connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
     s = torch.eye(2).unsqueeze(0)

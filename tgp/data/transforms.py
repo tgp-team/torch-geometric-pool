@@ -10,9 +10,6 @@ from torch_geometric.utils import (
     sort_edge_index,
 )
 
-from tgp.connect import Connect
-from tgp.reduce import Reduce
-from tgp.select import Select
 from tgp.src import SRCPooling
 
 
@@ -203,21 +200,23 @@ class PreCoarsening(BaseTransform):
     def __init__(
         self,
         pooler: Optional[SRCPooling] = None,
-        selector: Optional[Select] = None,
-        connector: Optional[Connect] = None,
+        # selector: Optional[Select] = None,
+        # connector: Optional[Connect] = None,
         input_key: str = None,
         output_key: str = "pooled_data",
         recursive_depth: int = 1,
     ) -> None:
         super().__init__()
-        if pooler is not None:
-            assert isinstance(pooler, SRCPooling)
-            self.pooler = pooler
-        else:
-            assert (selector is not None) and (connector is not None)
-            self.pooler = SRCPooling(
-                selector=selector, reducer=Reduce(), connector=connector
-            )
+        # if pooler is not None:
+        #     assert isinstance(pooler, SRCPooling)
+        #     self.pooler = pooler
+        # else:
+        #     assert (selector is not None) and (connector is not None)
+        #     self.pooler = SRCPooling(
+        #         selector=selector, reducer=Reduce(), connector=connector
+        #     )
+        assert isinstance(pooler, SRCPooling)
+        self.pooler = pooler
         self.input_key = input_key
         self.output_key = output_key
         assert recursive_depth > 0
@@ -230,7 +229,7 @@ class PreCoarsening(BaseTransform):
 
         pooled_out = []
         for d in range(self.recursive_depth):
-            data_pooled = self.pooler.coarsen_graph(
+            data_pooled = self.pooler.precoarsening(
                 edge_index=data_obj.edge_index,
                 edge_weight=data_obj.edge_weight,
                 batch=data_obj.batch,
