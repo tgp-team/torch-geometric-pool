@@ -181,8 +181,8 @@ class PreCoarsening(BaseTransform):
 
     Args:
         pooler (~tgp.src.SRCPooling):
-            A non-trainable pooling operator that implements :math:`\texttt{select}`
-            and :math:`\texttt{connect}`.
+            A non-trainable pooling operator that implements the
+            function :meth:`~tgp.src.SRCPooling.precoarsening`.
         input_key (str, optional):
             The key in the data object from which to read the graph data.
             If :obj:`None`, uses the default data object.

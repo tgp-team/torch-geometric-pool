@@ -164,7 +164,7 @@ class NMFPooling(DenseSRCPooling):
         assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
         adj = to_dense_adj(
             edge_index, edge_attr=edge_weight
-        )  # Note: we do not pass batch here. has shape [1, N, N]
+        )  # has shape [1, N, N] -- Note: we do not pass batch here.
 
         so = self.select(edge_index=adj)
 

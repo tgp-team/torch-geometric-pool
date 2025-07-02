@@ -64,7 +64,7 @@ class NMFSelect(Select):
         edge_index = edge_index.permute(1, 0, 2).reshape(edge_index.size(1), -1)
         A = edge_index.cpu().numpy()
         _, H, _ = non_negative_factorization(
-            A, n_components=self.k, init="random", max_iter=1000
+            A, n_components=self.k, init="random", max_iter=5000
         )
         H = torch.tensor(H, device=device)
 
