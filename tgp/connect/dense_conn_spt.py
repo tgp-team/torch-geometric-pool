@@ -49,7 +49,8 @@ class DenseConnectSPT(Connect):
                 The connectivity matrix.
                 It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
-                :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
+                :math:`[2, E]`, where :math:`E` is the number of edges in the batch, representing
+                the list of edges.
             edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
                 containing the weights of the edges.
                 (default: :obj:`None`)

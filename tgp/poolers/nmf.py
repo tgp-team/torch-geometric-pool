@@ -158,8 +158,7 @@ class NMFPooling(DenseSRCPooling):
         edge_weight: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
-        num_nodes: Optional[int] = None,
-        **select_kwargs,
+        **kwargs,
     ) -> PoolingOutput:
         assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
         adj = to_dense_adj(

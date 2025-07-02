@@ -19,16 +19,6 @@ def make_chain_graph(N=4, F_dim=5):
     return x, edge_index, edge_weight, batch
 
 
-# def test_reducer_none(make_chain_graph):
-#     x, edge_index, edge_weight, batch = make_chain_graph
-
-#     pooler = SRCPooling(selector=GraclusSelect(), connector=SparseConnect())
-#     out = pooler.coarsen_graph(
-#         edge_index=edge_index, edge_weight=edge_weight, x=x, batch=batch
-#     )
-#     assert out.batch is None
-
-
 def test_compute_loss_none():
     pooler = SRCPooling()
     assert pooler.compute_loss() is None
