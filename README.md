@@ -14,12 +14,10 @@
     </p>
 </div>
 
-
 <p>
 <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> <b>tgp</b> <em>(Torch Geometric Pool)</em> is a library that provides a broad suite of graph pooling layers to be inserted into Graph Neural Network architectures built with <a href="https://pyg.org"><img src="https://raw.githubusercontent.com/TorchSpatiotemporal/tsl/main/docs/source/_static/img/logos/pyg.svg" width="20px" align="center"/> PyTorch Geometric <a href="https://pyg.org"></a>.
 With <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> <b>tgp</b>, you can effortlessly construct hierarchical GNNs by interleaving message-passing layers with any pooling operations.
 </p>
-
 
 ## Features
 
@@ -38,16 +36,18 @@ Quickly create any pooler by name (e.g., `"topk"`, `"ndp"`, `"diffpool"`, `"minc
 * **Tweak and create new pooling layers.**
 Thanks to the modular SRC framework, the components of different pooling layers <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp can be easily combined with each other, replaced with existing modules or with completely new ones.
 
-
 ## Getting Started
 
-If you are unfamiliar with graph pooling, we recommend checking this [introduction](https://torch-geometric-pool.readthedocs.io/en/latest/content/src.html) to the SRC framework and this [blog](https://filippomb.github.io/blogs/gnn-pool-1/) for a deeper dive into pooling in GNNs. 
+If you are unfamiliar with graph pooling, we recommend checking this [introduction](https://torch-geometric-pool.readthedocs.io/en/latest/content/src.html) to the SRC framework and this [blog](https://filippomb.github.io/blogs/gnn-pool-1/) for a deeper dive into pooling in GNNs.
 Before you dive into using <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp, we recommend browsing the [Documentation](https://torch-geometric-pool.readthedocs.io/en/latest/) to familiarize yourself with the API.
 
 If you prefer a notebook-based introduction, check out the following tutorials:
-- [![nbviewer](https://img.shields.io/badge/-Introduction-blue?logo=jupyter&style=flat&labelColor=gray)](https://nbviewer.jupyter.org/github/tgp-team/torch-geometric-pool/blob/main/docs/source/tutorials/intro.ipynb) Basic usage of common pooling operators, including how to pass arguments via aliases and inspect intermediate outputs.
-- [![nbviewer](https://img.shields.io/badge/-Preprocessing-blue?logo=jupyter&style=flat&labelColor=gray)](https://nbviewer.jupyter.org/github/tgp-team/torch-geometric-pool/blob/main/docs/source/tutorials/preprocessing_and_transforms.ipynb) Demonstrates how to apply precomputed pooling methods and associated data transforms for faster training.
-- [![nbviewer](https://img.shields.io/badge/-Advanced-blue?logo=jupyter&style=flat&labelColor=gray)](https://nbviewer.jupyter.org/github/tgp-team/torch-geometric-pool/blob/main/docs/source/tutorials/advanced.ipynb) Deep dive into the SRC framework, showing how each component interacts and how to use the select, reduce, connect and lift operations to modify the graph topology and the graph features.
+
+* [![nbviewer](https://img.shields.io/badge/-Introduction-blue?logo=jupyter&style=flat&labelColor=gray)](https://nbviewer.jupyter.org/github/tgp-team/torch-geometric-pool/blob/main/docs/source/tutorials/intro.ipynb) Basic usage of common pooling operators, including how to pass arguments via aliases and inspect intermediate outputs.
+
+* [![nbviewer](https://img.shields.io/badge/-Preprocessing-blue?logo=jupyter&style=flat&labelColor=gray)](https://nbviewer.jupyter.org/github/tgp-team/torch-geometric-pool/blob/main/docs/source/tutorials/preprocessing_and_transforms.ipynb) Demonstrates how to apply precomputed pooling methods and associated data transforms for faster training.
+
+* [![nbviewer](https://img.shields.io/badge/-Advanced-blue?logo=jupyter&style=flat&labelColor=gray)](https://nbviewer.jupyter.org/github/tgp-team/torch-geometric-pool/blob/main/docs/source/tutorials/advanced.ipynb) Deep dive into the SRC framework, showing how each component interacts and how to use the select, reduce, connect and lift operations to modify the graph topology and the graph features.
 
 In addition, check the [example folder](https://github.com/tgp-team/torch-geometric-pool/tree/main/examples) for a collection of minimalistic python script showcasing the usage of the pooling operators of <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp in all the most common downstream tasks, such as graph classification/regression, node classification/regression, and node clustering.
 
@@ -71,7 +71,6 @@ pip install git+https://github.com/tgp-team/torch-geometric-pool.git
 
 > [!CAUTION]
 > <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp is built upon [PyTorch>=1.8](https://pytorch.org/) and [PyG>=2.0](https://github.com/pyg-team/pytorch_geometric/). Make sure you have both installed in your environment before installation. Check the [installation guide](https://torch-geometric-pool.readthedocs.io/en/latest/content/quickstart.html) for more details.
-
 
 ## Quick Example
 
