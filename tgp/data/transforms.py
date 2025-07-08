@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 from torch_geometric.data import Data
 from torch_geometric.transforms import BaseTransform
@@ -10,9 +8,6 @@ from torch_geometric.utils import (
     sort_edge_index,
 )
 
-from tgp.connect import Connect
-from tgp.reduce import Reduce
-from tgp.select import Select
 from tgp.src import SRCPooling
 
 
@@ -174,22 +169,20 @@ class PreCoarsening(BaseTransform):
     r"""A PyG transform that precomputes a hierarchy of pooled (coarsened) graphs
     and attaches them to the input :class:`~torch_geometric.data.Data` object.
 
-    It takes a graph select operator (:class:`~tgp.select.Select`) and a connect operator
-    (:class:`~tgp.connect.Connect`) to build a multi-level pooling hierarchy.
+    Takes a pooling operator from :class:`~tgp.src.SRCPooling` to build
+    a multi-level pooling hierarchy. The pooling operator should implement the
+    function :meth:`~tgp.src.SRCPooling.precoarsening`, which computes the pooled graph
+    from the original graph. The pooling operator must not be trainable,
+    i.e., it should not have learnable parameters.
     The graph is recursively coarsened for :obj:`recursive_depth` levels.
     At each level, a coarsened adjacency matrix and, optionally, a pooled batch
     is computed. The result is stored as a list of intermediate pooled subgraphs
     in :class:`~torch_geometric.data.Data`, which downstream GNN models can consume.
 
     Args:
-        pooler (Optional[~tgp.src.SRCPooling]):
-            A pooling operator that combines selection, reduction, and connectivity.
-            If not provided, a :class:`~tgp.select.Select` and a :class:`~tgp.connect.Connect`
-            must be provided instead.
-        selector (Optional[~tgp.select.Select]):
-            A selection operator to select supernodes.
-        connector (Optional[~tgp.connect.Connect]):
-            A connectivity operator to connect supernodes.
+        pooler (~tgp.src.SRCPooling):
+            A non-trainable pooling operator that implements the
+            function :meth:`~tgp.src.SRCPooling.precoarsening`.
         input_key (str, optional):
             The key in the data object from which to read the graph data.
             If :obj:`None`, uses the default data object.
@@ -202,22 +195,15 @@ class PreCoarsening(BaseTransform):
 
     def __init__(
         self,
-        pooler: Optional[SRCPooling] = None,
-        selector: Optional[Select] = None,
-        connector: Optional[Connect] = None,
+        pooler: SRCPooling,
         input_key: str = None,
         output_key: str = "pooled_data",
         recursive_depth: int = 1,
     ) -> None:
         super().__init__()
-        if pooler is not None:
-            assert isinstance(pooler, SRCPooling)
-            self.pooler = pooler
-        else:
-            assert (selector is not None) and (connector is not None)
-            self.pooler = SRCPooling(
-                selector=selector, reducer=Reduce(), connector=connector
-            )
+        assert isinstance(pooler, SRCPooling)
+        assert not pooler.is_trainable, "The pooler must not be trainable."
+        self.pooler = pooler
         self.input_key = input_key
         self.output_key = output_key
         assert recursive_depth > 0
@@ -230,7 +216,7 @@ class PreCoarsening(BaseTransform):
 
         pooled_out = []
         for d in range(self.recursive_depth):
-            data_pooled = self.pooler.coarsen_graph(
+            data_pooled = self.pooler.precoarsening(
                 edge_index=data_obj.edge_index,
                 edge_weight=data_obj.edge_weight,
                 batch=data_obj.batch,

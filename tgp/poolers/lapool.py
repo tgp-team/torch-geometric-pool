@@ -7,11 +7,11 @@ from tgp.connect import DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import LaPoolSelect, SelectOutput
-from tgp.src import PoolingOutput, SRCPooling
+from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
-class LaPooling(SRCPooling):
+class LaPooling(BasePrecoarseningMixin, SRCPooling):
     r"""The LaPool pooling operator from the paper `Towards Interpretable Sparse Graph Representation Learning
     with Laplacian Pooling <https://arxiv.org/abs/1905.11577>`_ (Noutahi et al., 2019).
 

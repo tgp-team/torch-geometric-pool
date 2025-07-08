@@ -7,11 +7,11 @@ from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import GraclusSelect, SelectOutput
-from tgp.src import PoolingOutput, SRCPooling
+from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
 from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 
-class GraclusPooling(SRCPooling):
+class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
     r"""The Graclus pooling operator inspired by the paper `"Weighted Graph Cuts without
     Eigenvectors: A Multilevel Approach" <https://ieeexplore.ieee.org/document/4302760>`_
     (Dhillon et al., TPAMI 2007).
@@ -142,6 +142,4 @@ class GraclusPooling(SRCPooling):
             return out
 
     def extra_repr_args(self) -> dict:
-        return {
-            "cached": self.cached,
-        }
+        return {"cached": self.cached}
