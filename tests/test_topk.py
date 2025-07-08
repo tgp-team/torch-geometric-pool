@@ -58,7 +58,7 @@ def test_topk_select_with_weight_and_act_default():
     assert isinstance(out, SelectOutput)
 
     # Ratio=0.5 → k = ceil(0.5 * 6) = 3
-    assert out.num_clusters == 3
+    assert out.num_supernodes == 3
     assert out.num_nodes == N
     assert out.node_index.size(0) == 3
 
@@ -208,7 +208,7 @@ def test_topk_pooling_with_min_score_parameter():
         lifting=False,
     )
     # Since softmax scores all equal 0.25 and 0.25 > 0.1, all N=4 nodes selected
-    assert out1.so.num_clusters == N
+    assert out1.so.num_supernodes == N
     assert out1.x.shape == (N, F)
 
 
@@ -248,7 +248,7 @@ def test_topk_with_dim_bigger_than_1():
     x = torch.randn(10)
     out = selector(x=x)
     assert out.node_index.size(0) == 5
-    assert out.num_clusters == 5
+    assert out.num_supernodes == 5
     assert out.num_nodes == 10
     assert out.s.size(0) == 10
 

@@ -40,7 +40,7 @@ def test_loss_nan():
     pooler = JustBalancePooling(in_channels=3, k=3, loss_coeff=0.5)
     S_nan = torch.full((10, 3), float("nan"), dtype=torch.float).unsqueeze(0)
     with pytest.raises(ValueError):
-        _ = pooler.compute_loss(S=S_nan, mask=None, num_nodes=10, num_clusters=3)
+        _ = pooler.compute_loss(S=S_nan, mask=None, num_nodes=10, num_supernodes=3)
 
 
 def test_data_transforms_returns_normalizeadj():

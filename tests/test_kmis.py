@@ -91,7 +91,7 @@ def test_pooler_parametrized_configs(
     out = pooler(x=x_pre, adj=adj_pre, batch=batch, mask=mask)
     assert hasattr(out, "x")
     assert isinstance(out.x, torch.Tensor)
-    # Output.x should have shape [num_clusters, F] where 1 <= num_clusters <= N
+    # Output.x should have shape [num_supernodes, F] where 1 <= num_supernodes <= N
     assert 1 <= out.x.size(0) <= N
     assert out.x.size(1) == F
 

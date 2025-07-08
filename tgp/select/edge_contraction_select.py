@@ -237,7 +237,7 @@ class EdgeContractionSelect(Select):
             node_index=torch.arange(x.size(0), device=x.device),
             num_nodes=x.size(0),
             cluster_index=cluster,
-            num_clusters=c,
+            num_supernodes=c,
             weight=new_edge_score[cluster],
             s_inv_op=self.s_inv_op,
         )

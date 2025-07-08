@@ -402,7 +402,7 @@ class KMISSelect(Select):
         so = SelectOutput(
             cluster_index=cluster,
             num_nodes=num_nodes,
-            num_clusters=mis.size(0),
+            num_supernodes=mis.size(0),
             weight=score.view(-1),
             s_inv_op=self.s_inv_op,
             mis=mis,

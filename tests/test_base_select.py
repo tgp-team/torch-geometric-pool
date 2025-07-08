@@ -23,7 +23,7 @@ def test_cluster_to_s_as_edge_index():
 
 def test_selectoutput_from_cluster_index_and_default_s_inv():
     num_nodes = 3
-    num_clusters = 2
+    num_supernodes = 2
     cluster_index = torch.tensor([0, 1, 0])
     weight = torch.tensor([1.0, 1.0, 1.0])
 
@@ -32,7 +32,7 @@ def test_selectoutput_from_cluster_index_and_default_s_inv():
         node_index=None,
         num_nodes=num_nodes,
         cluster_index=cluster_index,
-        num_clusters=num_clusters,
+        num_supernodes=num_supernodes,
         weight=weight,
     )
     # s should be a SparseTensor, and s_inv should default to transpose
@@ -47,7 +47,7 @@ def test_selectoutput_from_cluster_index_and_default_s_inv():
 
     # Check basic attributes
     assert out.num_nodes == num_nodes
-    assert out.num_clusters == num_clusters
+    assert out.num_supernodes == num_supernodes
     assert torch.equal(out.node_index, torch.arange(num_nodes))
     assert torch.equal(out.cluster_index, cluster_index)
     assert torch.equal(out.weight, weight)
@@ -76,7 +76,7 @@ def test_selectoutput_repr_clone_apply_and_device_ops():
 
     rep = repr(out)
     assert "SelectOutput(" in rep
-    assert "num_nodes=2" in rep and "num_clusters=2" in rep
+    assert "num_nodes=2" in rep and "num_supernodes=2" in rep
 
     # clone() should be a deep copy
     out_clone = out.clone()
@@ -130,7 +130,7 @@ def test_set_weights_spt():
         row=torch.tensor([0, 1, 2]), col=torch.tensor([1, 2, 0]), sparse_sizes=(3, 3)
     )
     weight = torch.tensor([0.5, 1.5, 2.5])
-    so = SelectOutput(s=s, weight=weight, num_clusters=3)
+    so = SelectOutput(s=s, weight=weight, num_supernodes=3)
 
     assert so.num_nodes == 3
 
@@ -144,7 +144,7 @@ def test_assign_all_nodes_weight_size_mismatch():
         cluster_index=cluster_index,
         node_index=node_index,
         num_nodes=4,  # total 4 nodes
-        num_clusters=2,
+        num_supernodes=2,
     )
 
     # Create edge connectivity for 4 nodes
@@ -172,7 +172,7 @@ def test_assign_all_nodes_with_extra_args():
         cluster_index=cluster_index,
         node_index=node_index,
         num_nodes=4,
-        num_clusters=2,
+        num_supernodes=2,
         custom_attr="test_value",  # extra attribute
         another_attr=42,  # another extra attribute
     )
@@ -203,7 +203,10 @@ def test_assign_all_nodes_no_extra_args():
     cluster_index = torch.tensor([0, 1])
     node_index = torch.tensor([0, 2])
     so = SelectOutput(
-        cluster_index=cluster_index, node_index=node_index, num_nodes=4, num_clusters=2
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=4,
+        num_supernodes=2,
     )
 
     # Ensure no extra args
@@ -218,7 +221,7 @@ def test_assign_all_nodes_no_extra_args():
     # Verify the result is valid
     assert isinstance(new_so, SelectOutput)
     assert new_so.num_nodes == 4
-    assert new_so.num_clusters == 2
+    assert new_so.num_supernodes == 2
 
 
 def test_assign_all_nodes_with_sparse_tensor_adj():
@@ -227,7 +230,10 @@ def test_assign_all_nodes_with_sparse_tensor_adj():
     cluster_index = torch.tensor([0, 1])  # 2 selected nodes
     node_index = torch.tensor([0, 2])  # indices of selected nodes
     so = SelectOutput(
-        cluster_index=cluster_index, node_index=node_index, num_nodes=4, num_clusters=2
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=4,
+        num_supernodes=2,
     )
 
     # Create SparseTensor adjacency matrix to trigger line 291
@@ -241,7 +247,7 @@ def test_assign_all_nodes_with_sparse_tensor_adj():
     # Verify the result is valid
     assert isinstance(new_so, SelectOutput)
     assert new_so.num_nodes == 4
-    assert new_so.num_clusters == 2
+    assert new_so.num_supernodes == 2
 
 
 def test_assign_all_nodes_extra_attr_exists():
@@ -253,7 +259,7 @@ def test_assign_all_nodes_extra_attr_exists():
         cluster_index=cluster_index,
         node_index=node_index,
         num_nodes=4,
-        num_clusters=2,
+        num_supernodes=2,
         existing_attr="test_value",  # This attribute exists
     )
 

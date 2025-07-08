@@ -45,8 +45,8 @@ def test_dmon_base(small_graph_dense):
     )
 
     mask = torch.ones((B, N), dtype=torch.bool)  # No mask, all nodes valid
-    exp_spec = spectral_loss(adj, S, adj_pooled, mask=mask, num_clusters=k) * 2.0
-    exp_cluster = cluster_loss(S, mask=mask, num_clusters=k) * 1.5
+    exp_spec = spectral_loss(adj, S, adj_pooled, mask=mask, num_supernodes=k) * 2.0
+    exp_cluster = cluster_loss(S, mask=mask, num_supernodes=k) * 1.5
     exp_ortho = orthogonality_loss(S) * 0.5
 
     assert torch.allclose(loss_dict["spectral_loss"], exp_spec, atol=1e-6)

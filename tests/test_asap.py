@@ -53,7 +53,7 @@ def test_forward_with_1d_x_and_dense_adj():
     )
     assert isinstance(out, PoolingOutput)
     # out.x should have shape [k, 1]
-    k = out.so.num_clusters
+    k = out.so.num_supernodes
     assert out.x.shape == (k, 1)
 
 

@@ -191,7 +191,7 @@ def test_kronconnect_single_node_selection():
         cluster_index=cluster_index,
         node_index=node_index,
         num_nodes=num_nodes,
-        num_clusters=1,
+        num_supernodes=1,
         L=L,  # Provide Laplacian to avoid conversion
     )
 
@@ -222,7 +222,7 @@ def test_kronconnect_single_node_selection():
         cluster_index=cluster_index,
         node_index=node_index,
         num_nodes=num_nodes,
-        num_clusters=1,
+        num_supernodes=1,
     )
 
     # With regular tensor edge_index (no conversion needed)

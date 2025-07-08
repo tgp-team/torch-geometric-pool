@@ -49,7 +49,7 @@ def test_forward():
     )
     assert isinstance(out, PoolingOutput)
     # out.x should have shape [k, 1]
-    k = out.so.num_clusters
+    k = out.so.num_supernodes
     assert out.x.shape == (k, 1)
 
 
@@ -198,7 +198,7 @@ def test_edge_contraction_select_forward_sigmoid_and_no_dropout():
     )
     so = selector(x=x, edge_index=edge_index)
     # All nodes are unmatched; each forms its own cluster
-    assert so.num_clusters == N
+    assert so.num_supernodes == N
     assert torch.equal(so.cluster_index, torch.arange(N))
     # Weight should be ones of length N
     assert torch.equal(so.weight, torch.ones(N))
@@ -290,8 +290,8 @@ def test_edgecontractionselect_weight_assignment_and_clusters():
     assert torch.equal(so.node_index, torch.arange(N))
     # cluster_index should have length N
     assert so.cluster_index.numel() == N
-    # weight length equals number of clusters = so.num_clusters
-    # assert so.weight.numel() == so.num_clusters
+    # weight length equals number of clusters = so.num_supernodes
+    # assert so.weight.numel() == so.num_supernodes
 
 
 if __name__ == "__main__":

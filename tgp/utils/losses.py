@@ -144,9 +144,9 @@ def hosc_orthogonality_loss(
     Returns:
         ~torch.Tensor: The orthogonality loss.
     """
-    _, num_nodes, num_clusters = S.size()
+    _, num_nodes, num_supernodes = S.size()
     norm = torch.norm(S, p="fro", dim=-2).sum(dim=-1)
-    sqrt_k = math.sqrt(num_clusters)
+    sqrt_k = math.sqrt(num_supernodes)
     sqrt_nodes = mask.sum(1).sqrt() if mask is not None else math.sqrt(num_nodes)
     ortho_num = -norm / sqrt_nodes + sqrt_k
     ortho_loss = ortho_num / (sqrt_k - 1)
@@ -335,7 +335,7 @@ def just_balance_loss(
     mask: Optional[Tensor] = None,
     normalize_loss: bool = True,
     num_nodes: Optional[int] = None,
-    num_clusters: Optional[int] = None,
+    num_supernodes: Optional[int] = None,
     batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary balance regularization loss used by
@@ -365,7 +365,7 @@ def just_balance_loss(
             (default: :obj:`True`)
         num_nodes (Optional[int]): The number of nodes in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
-        num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
+        num_supernodes (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
@@ -376,17 +376,17 @@ def just_balance_loss(
     """
     if num_nodes is None:
         num_nodes = S.size(-2)
-    if num_clusters is None:
-        num_clusters = S.size(-1)
+    if num_supernodes is None:
+        num_supernodes = S.size(-1)
 
     ss = torch.matmul(S.transpose(1, 2), S)
     ss_sqrt = torch.sqrt(ss + eps)
     loss = -rank3_trace(ss_sqrt)
     if normalize_loss:
         if mask is None:
-            loss = loss / torch.sqrt(torch.tensor(num_nodes * num_clusters))
+            loss = loss / torch.sqrt(torch.tensor(num_nodes * num_supernodes))
         else:
-            loss = loss / torch.sqrt(mask.sum() / mask.size(0) * num_clusters)
+            loss = loss / torch.sqrt(mask.sum() / mask.size(0) * num_supernodes)
 
     return _batch_reduce_loss(loss, batch_reduction)
 
@@ -396,7 +396,7 @@ def spectral_loss(
     S: Tensor,
     adj_pooled: Tensor,
     mask: Optional[Tensor] = None,
-    num_clusters: Optional[int] = None,
+    num_supernodes: Optional[int] = None,
     batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary spectral regularization loss used by
@@ -427,7 +427,7 @@ def spectral_loss(
         mask (Optional[~torch.Tensor]): A mask matrix
             :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
             the valid nodes for each graph. (default: :obj:`None`)
-        num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
+        num_supernodes (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
@@ -436,8 +436,8 @@ def spectral_loss(
     Returns:
         ~torch.Tensor: The spectral regularization loss.
     """
-    if num_clusters is None:
-        num_clusters = S.size(-1)
+    if num_supernodes is None:
+        num_supernodes = S.size(-1)
 
     if mask is None:
         mask = torch.ones(S.size(0), S.size(1), dtype=torch.bool, device=S.device)
@@ -445,7 +445,7 @@ def spectral_loss(
     degrees = torch.einsum("bnm->bn", adj)
     degrees = degrees * mask
     m = degrees.sum(-1) / 2
-    m_expand = m.view(-1, 1, 1).expand(-1, num_clusters, num_clusters)
+    m_expand = m.view(-1, 1, 1).expand(-1, num_supernodes, num_supernodes)
     ca = torch.einsum("bnk, bn -> bk", S, degrees)
     cb = torch.einsum("bn, bnk -> bk", degrees, S)
     normalizer = torch.einsum("bk, bm -> bkm", ca, cb) / 2 / m_expand
@@ -457,7 +457,7 @@ def spectral_loss(
 def cluster_loss(
     S: Tensor,
     mask: Optional[Tensor] = None,
-    num_clusters: Optional[int] = None,
+    num_supernodes: Optional[int] = None,
     batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary cluster regularization loss used by
@@ -484,7 +484,7 @@ def cluster_loss(
         mask (Optional[~torch.Tensor]): A mask matrix
             :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
             the valid nodes for each graph. (default: :obj:`None`)
-        num_clusters (Optional[int]): The number of clusters in the graph. If not provided,
+        num_supernodes (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
@@ -493,13 +493,13 @@ def cluster_loss(
     Returns:
         ~torch.Tensor: The cluster regularization loss.
     """
-    if num_clusters is None:
-        num_clusters = S.size(-1)
+    if num_supernodes is None:
+        num_supernodes = S.size(-1)
 
     if mask is None:
         mask = torch.ones(S.size(0), S.size(1), dtype=torch.bool, device=S.device)
 
-    i_s = torch.eye(num_clusters).type_as(S)
+    i_s = torch.eye(num_supernodes).type_as(S)
     cluster_size = torch.einsum("ijk->ik", S)  # B x K
     cluster_loss = torch.norm(input=cluster_size, dim=1)
     cluster_loss = cluster_loss / mask.sum(dim=1) * torch.norm(i_s) - 1

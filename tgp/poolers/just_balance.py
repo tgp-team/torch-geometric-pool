@@ -151,7 +151,7 @@ class JustBalancePooling(DenseSRCPooling):
             # Connect
             adj_pooled, _ = self.connect(edge_index=adj, so=so)
 
-            loss = self.compute_loss(so.s, mask, so.num_nodes, so.num_clusters)
+            loss = self.compute_loss(so.s, mask, so.num_nodes, so.num_supernodes)
 
             out = PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so, loss=loss)
 
@@ -162,7 +162,7 @@ class JustBalancePooling(DenseSRCPooling):
         S: Tensor,
         mask: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
-        num_clusters: Optional[int] = None,
+        num_supernodes: Optional[int] = None,
     ) -> dict:
         r"""Computes the auxiliary loss term.
 
@@ -173,7 +173,7 @@ class JustBalancePooling(DenseSRCPooling):
                 the valid nodes for each graph. (default: :obj:`None`)
             num_nodes (int, optional): The number of nodes.
             (default: :obj:`None`)
-            num_clusters (int, optional): The number of clusters.
+            num_supernodes (int, optional): The number of clusters.
             (default: :obj:`None`)
 
         Returns:
@@ -183,7 +183,7 @@ class JustBalancePooling(DenseSRCPooling):
             S,
             mask,
             num_nodes=num_nodes,
-            num_clusters=num_clusters,
+            num_supernodes=num_supernodes,
             normalize_loss=self.normalize_loss,
             batch_reduction="mean",
         )

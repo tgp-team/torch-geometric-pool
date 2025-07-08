@@ -112,7 +112,7 @@ class TopkSelect(Select):
         >>> x = torch.randn(5, 3)
         >>> selector = TopkSelect(in_channels=3, ratio=0.6)
         >>> output = selector(x)
-        >>> print(f"Selected {output.num_clusters} out of {output.num_nodes} nodes")
+        >>> print(f"Selected {output.num_supernodes} out of {output.num_nodes} nodes")
 
         **Using with pre-computed scores:**
 
@@ -197,7 +197,7 @@ class TopkSelect(Select):
             node_index=node_index,
             num_nodes=x.size(0),
             cluster_index=torch.arange(node_index.size(0), device=x.device),
-            num_clusters=node_index.size(0),
+            num_supernodes=node_index.size(0),
             weight=score[node_index],
             s_inv_op=self.s_inv_op,
         )

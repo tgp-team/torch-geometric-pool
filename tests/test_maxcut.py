@@ -290,7 +290,7 @@ class TestMaxCutSelect:
 
         # Check assignment matrix properties
         assert out.num_nodes == N  # All original nodes
-        assert out.num_clusters == expected_k  # Number of supernodes
+        assert out.num_supernodes == expected_k  # Number of supernodes
         assert out.node_index.size(0) == N  # ALL nodes in assignment
         assert out.cluster_index.size(0) == N  # Each node has cluster assignment
         assert out.weight.size(0) == N  # Weight for each node
@@ -324,7 +324,7 @@ class TestMaxCutSelect:
 
         # Check standard TopK properties
         assert out.num_nodes == N  # Total nodes in graph
-        assert out.num_clusters == expected_k  # Number of selected nodes
+        assert out.num_supernodes == expected_k  # Number of selected nodes
         assert out.node_index.size(0) == expected_k  # Only selected nodes
         assert out.cluster_index.size(0) == expected_k  # Each selected node -> cluster
         assert out.weight.size(0) == expected_k  # Weight for selected nodes only
@@ -356,7 +356,7 @@ class TestMaxCutSelect:
             expected_k = min(ratio, N)
 
         # In assignment mode: all nodes assigned to expected_k supernodes
-        assert out.num_clusters == expected_k
+        assert out.num_supernodes == expected_k
         assert out.node_index.size(0) == N  # All nodes in assignment
         assert torch.all(out.cluster_index < expected_k)
 
@@ -429,7 +429,7 @@ class TestMaxCutPooling:
 
         # Check SelectOutput
         assert out.so.num_nodes == N
-        assert out.so.num_clusters == expected_k
+        assert out.so.num_supernodes == expected_k
 
         # Check loss computation
         assert out.has_loss
@@ -460,7 +460,7 @@ class TestMaxCutPooling:
 
         # Check SelectOutput (different from assignment mode)
         assert out.so.num_nodes == N
-        assert out.so.num_clusters == expected_k
+        assert out.so.num_supernodes == expected_k
 
         # Check loss computation
         assert out.has_loss
@@ -568,7 +568,7 @@ class TestBaseSelect:
         assert full_assignment.num_nodes == N
         assert full_assignment.cluster_index.size(0) == N
         assert torch.all(full_assignment.cluster_index >= 0)
-        assert torch.all(full_assignment.cluster_index < topk_output.num_clusters)
+        assert torch.all(full_assignment.cluster_index < topk_output.num_supernodes)
 
     def test_select_output_assign_all_nodes_random_strategy(self, simple_graph):
         """Test assign_all_nodes with random strategy."""
@@ -597,7 +597,7 @@ class TestBaseSelect:
         assert full_assignment.num_nodes == N
         assert full_assignment.cluster_index.size(0) == N
         assert torch.all(full_assignment.cluster_index >= 0)
-        assert torch.all(full_assignment.cluster_index < topk_output.num_clusters)
+        assert torch.all(full_assignment.cluster_index < topk_output.num_supernodes)
 
     def test_maxcut_select_already_all_nodes_assigned(self, simple_graph):
         """Test that assign_all_nodes returns self when all nodes are already kept."""
@@ -740,7 +740,9 @@ class TestCoverageEdgeCases:
         from tgp.select.base_select import SelectOutput
 
         mock_so = SelectOutput(
-            cluster_index=torch.tensor([0, 0, 1, 1, 2, 2]), num_nodes=6, num_clusters=3
+            cluster_index=torch.tensor([0, 0, 1, 1, 2, 2]),
+            num_nodes=6,
+            num_supernodes=3,
         )
         # Ensure it doesn't have scores attribute
         assert not hasattr(mock_so, "scores")

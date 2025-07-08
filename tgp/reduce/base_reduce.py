@@ -36,7 +36,7 @@ class Reduce(nn.Module):
 
         assert isinstance(select_output.s, SparseTensor)
 
-        out = torch.arange(select_output.num_clusters, device=batch.device)
+        out = torch.arange(select_output.num_supernodes, device=batch.device)
         return out.scatter_(
             0, select_output.cluster_index, batch[select_output.node_index]
         )
