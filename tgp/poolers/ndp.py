@@ -7,11 +7,11 @@ from tgp.connect import KronConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NDPSelect, SelectOutput
-from tgp.src import PoolingOutput, SRCPooling
+from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
-class NDPPooling(SRCPooling):
+class NDPPooling(BasePrecoarseningMixin, SRCPooling):
     r"""The pooling operator from the paper `"Hierarchical Representation Learning
     in Graph Neural Networks with Node Decimation Pooling" <https://arxiv.org/abs/1910.11436>`_
     (Bianchi et al., TNNLS 2020).

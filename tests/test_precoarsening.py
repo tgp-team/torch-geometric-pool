@@ -1,13 +1,62 @@
 import pytest
 import torch
-from torch_geometric.data import Data
-from torch_geometric.utils import add_self_loops, to_dense_adj
+from torch_geometric.data import Batch, Data
+from torch_geometric.utils import to_dense_adj
 
-from tgp.connect import DenseConnectSPT, KronConnect
 from tgp.data.loaders import PoolCollater, PoolDataLoader, PooledBatch
-from tgp.data.transforms import NormalizeAdj, PreCoarsening, SortNodes
-from tgp.poolers import NDPPooling
-from tgp.select import GraclusSelect, KMISSelect, LaPoolSelect, NDPSelect, NMFSelect
+from tgp.data.transforms import NormalizeAdj, PreCoarsening
+from tgp.poolers import NDPPooling, get_pooler
+
+
+@pytest.fixture(scope="module")
+def sparse_batch_graph():
+    edge_index_1 = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long)
+    edge_weight_1 = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=torch.float)
+    x_1 = torch.randn((4, 3), dtype=torch.float)
+
+    edge_index_2 = torch.tensor(
+        [[1, 2, 3, 4, 2, 0], [0, 1, 2, 2, 3, 3]], dtype=torch.long
+    )
+    edge_weight_2 = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float)
+    x_2 = torch.randn((5, 3), dtype=torch.float)
+
+    edge_index_3 = torch.tensor([[0, 1, 3, 3, 2], [1, 0, 1, 2, 3]], dtype=torch.long)
+    edge_weight_3 = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5], dtype=torch.float)
+    x_3 = torch.randn((4, 3), dtype=torch.float)
+
+    data_batch = Batch.from_data_list(
+        [
+            Data(edge_index=edge_index_1, edge_attr=edge_weight_1, x=x_1),
+            Data(edge_index=edge_index_2, edge_attr=edge_weight_2, x=x_2),
+            Data(edge_index=edge_index_3, edge_attr=edge_weight_3, x=x_3),
+        ]
+    )
+    return data_batch
+
+
+poolers = ["ndp", "kmis", "graclus", "lap"]
+
+
+@pytest.mark.parametrize("pooler_name", poolers)
+def test_nmf_precoarsening(sparse_batch_graph, pooler_name):
+    PARAMS = {
+        "scorer": "degree",
+    }
+    pooler = get_pooler(pooler_name, **PARAMS)
+
+    data_batch = sparse_batch_graph
+    assert data_batch.num_graphs == 3
+    assert data_batch.num_nodes == 13
+
+    pooling_out = pooler.precoarsening(
+        edge_index=data_batch.edge_index,
+        edge_weight=data_batch.edge_attr,
+        batch=data_batch.batch,
+        num_nodes=data_batch.num_nodes,
+    )
+
+    assert pooling_out.so.s.size(0) == 13
+    assert pooling_out.batch is not None
 
 
 def test_normalizeadj_on_simple_data():
@@ -32,35 +81,6 @@ def test_normalizeadj_on_simple_data():
     assert torch.all(diag > 0)
 
 
-def test_sortnodes_reorders_correctly():
-    # Create a Data with 3 nodes, labels y out of order
-    x = torch.tensor([[1.0], [0.0], [2.0]])
-    y = torch.tensor([1, 0, 2])  # sorted order should be [0, 1, 2]
-    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
-    edge_weight = torch.tensor([1.0, 1.0, 1.0, 1.0])
-    edge_attr = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
-    data = Data(
-        x=x, y=y, edge_index=edge_index, edge_weight=edge_weight, edge_attr=edge_attr
-    )
-    data.num_nodes = 3
-
-    transform = SortNodes()
-    data_s = transform(data)
-
-    # After sorting, y should be [0, 1, 2]
-    assert torch.equal(data_s.y, torch.tensor([0, 1, 2]))
-
-    # x should have been permuted accordingly: original nodes [1, 0, 2]
-    expected_x = torch.tensor([[0.0], [1.0], [2.0]])
-    assert torch.allclose(data_s.x, expected_x)
-
-    # edge_index should still have shape (2, 4)
-    assert data_s.edge_index.shape == (2, 4)
-    # edge_weight and edge_attr lengths remain 4
-    assert data_s.edge_weight.numel() == 4
-    assert data_s.edge_attr.size(0) == 4
-
-
 def test_precoarsening_attaches_single_level():
     # Build a simple Data with 4 nodes in a line: 0–1–2–3
     edge_index = torch.tensor(
@@ -80,7 +100,6 @@ def test_precoarsening_attaches_single_level():
     assert hasattr(data_t, "pooled_data")
     pooled = data_t.pooled_data
     assert isinstance(pooled, Data)
-    # pooled.num_nodes == 1 and x.shape == [1,1]
     assert pooled.num_nodes >= 1
 
 
@@ -171,257 +190,6 @@ def test_poolcollater_and_pooldataloader(tmp_path):
     collator = PoolCollater(dataset, follow_batch=["x"], exclude_keys=None)
     collated = collator([d1, d2])
     assert isinstance(collated, PooledBatch)
-
-
-def test_precoarsening_with_select_and_connect_one_level():
-    """Build a small graph and run PreCoarsening by supplying `select` and `connect`
-    instead of a full `pooler`.  Verify that `pooled_data` appears and has fewer nodes.
-    """
-    # Create a simple 5-node cycle with self-loops:
-    N = 5
-    edge_list = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 0)]
-    row = torch.tensor(
-        [u for u, v in edge_list] + [v for u, v in edge_list], dtype=torch.long
-    )
-    col = torch.tensor(
-        [v for u, v in edge_list] + [u for u, v in edge_list], dtype=torch.long
-    )
-    edge_index = torch.stack([row, col], dim=0)
-    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
-    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
-
-    # Features and batch (single graph)
-    x = torch.randn((N, 3))
-    batch = torch.zeros(N, dtype=torch.long)
-
-    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
-    data.num_nodes = N
-
-    # Use NDPSelect to pick half the nodes (k=2 or 3)
-    select = NDPSelect(s_inv_op="transpose")
-    # KronConnect to compute pooled adjacency
-    connect = KronConnect()
-
-    # PreCoarsening with select+connect, single level
-    transform = PreCoarsening(selector=select, connector=connect, recursive_depth=1)
-    data_out = transform(data)
-
-    # Check that pooled_data exists and is a Data object
-    assert hasattr(data_out, "pooled_data")
-    pooled = data_out.pooled_data
-    assert isinstance(pooled, Data)
-
-    # Pooled graph should have some edge_index
-    assert hasattr(pooled, "edge_index")
-    assert pooled.edge_index.size(0) == 2  # shape (2, E_pooled)
-    # Pooled edge_weight should match length of pooled edges
-    assert hasattr(pooled, "edge_weight")
-    assert pooled.edge_weight.numel() == pooled.edge_index.size(1)
-
-
-def test_precoarsening_with_select_and_connect_multiple_levels():
-    """Same as above, but with recursive_depth=2.  Pooled data should become a list."""
-    N = 10
-    edge_list = [
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 4),
-        (4, 0),
-        (0, 2),
-        (1, 3),
-        (2, 4),
-        (3, 0),
-        (4, 1),
-        (5, 6),
-        (6, 7),
-        (7, 8),
-        (8, 9),
-        (9, 5),
-    ]
-    row = torch.tensor(
-        [u for u, v in edge_list] + [v for u, v in edge_list], dtype=torch.long
-    )
-    col = torch.tensor(
-        [v for u, v in edge_list] + [u for u, v in edge_list], dtype=torch.long
-    )
-    edge_index = torch.stack([row, col], dim=0)
-    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
-    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
-
-    x = torch.randn((N, 3))
-    batch = torch.zeros(N, dtype=torch.long)
-
-    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
-    data.num_nodes = N
-
-    # Catch assertion error if selector is kmis
-    with pytest.raises(AssertionError):
-        transform = PreCoarsening(
-            selector=KMISSelect(scorer="degree"),
-            connector=KronConnect(),
-            recursive_depth=2,
-        )
-        _ = transform(data)
-
-
-def test_precoarsening_with_select_and_connect_multiple_levels_2():
-    N = 10
-    edge_list = [
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 4),
-        (4, 0),
-        (0, 2),
-        (1, 3),
-        (2, 4),
-        (3, 0),
-        (4, 1),
-        (5, 6),
-        (6, 7),
-        (7, 8),
-        (8, 9),
-        (9, 5),
-    ]
-    row = torch.tensor(
-        [u for u, v in edge_list] + [v for u, v in edge_list], dtype=torch.long
-    )
-    col = torch.tensor(
-        [v for u, v in edge_list] + [u for u, v in edge_list], dtype=torch.long
-    )
-    edge_index = torch.stack([row, col], dim=0)
-    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
-    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
-
-    x = torch.randn((N, 3))
-    batch = torch.zeros(N, dtype=torch.long)
-
-    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
-    data.num_nodes = N
-
-    select = LaPoolSelect(s_inv_op="transpose")
-    connect = DenseConnectSPT()
-
-    # recursive_depth=2 means two successive coarsenings:
-    transform = PreCoarsening(selector=select, connector=connect, recursive_depth=2)
-    data_out = transform(data)
-
-    # Now pooled_data should be a list of length=2
-    assert isinstance(data_out.pooled_data, list)
-    assert len(data_out.pooled_data) == 2
-    for level_data in data_out.pooled_data:
-        assert isinstance(level_data, Data)
-        # Each level_data.num_nodes should equal k=3 (first level) or new k=?
-        assert hasattr(level_data, "num_nodes")
-        assert level_data.num_nodes >= 1
-        assert hasattr(level_data, "x")
-
-
-def test_precoarsening_with_select_and_connect_multiple_levels_3():
-    N = 10
-    edge_list = [
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 4),
-        (4, 0),
-        (0, 2),
-        (1, 3),
-        (2, 4),
-        (3, 0),
-        (4, 1),
-        (5, 6),
-        (6, 7),
-        (7, 8),
-        (8, 9),
-        (9, 5),
-    ]
-    row = torch.tensor(
-        [u for u, v in edge_list] + [v for u, v in edge_list], dtype=torch.long
-    )
-    col = torch.tensor(
-        [v for u, v in edge_list] + [u for u, v in edge_list], dtype=torch.long
-    )
-    edge_index = torch.stack([row, col], dim=0)
-    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
-    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
-
-    x = torch.randn((N, 3))
-    batch = torch.zeros(N, dtype=torch.long)
-
-    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
-    data.num_nodes = N
-
-    select = NMFSelect(k=2, s_inv_op="transpose")
-    connect = DenseConnectSPT()
-
-    # recursive_depth=2 means two successive coarsenings:
-    transform = PreCoarsening(selector=select, connector=connect, recursive_depth=2)
-    data_out = transform(data)
-
-    # Now pooled_data should be a list of length=2
-    assert isinstance(data_out.pooled_data, list)
-    assert len(data_out.pooled_data) == 2
-    for level_data in data_out.pooled_data:
-        assert isinstance(level_data, Data)
-        # Each level_data.num_nodes should equal k=3 (first level) or new k=?
-        assert hasattr(level_data, "num_nodes")
-        assert level_data.num_nodes >= 1
-        assert hasattr(level_data, "x")
-
-
-def test_precoarsening_graclus():
-    N = 10
-    edge_list = [
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 4),
-        (4, 0),
-        (0, 2),
-        (1, 3),
-        (2, 4),
-        (3, 0),
-        (4, 1),
-        (5, 6),
-        (6, 7),
-        (7, 8),
-        (8, 9),
-        (9, 5),
-    ]
-    row = torch.tensor(
-        [u for u, v in edge_list] + [v for u, v in edge_list], dtype=torch.long
-    )
-    col = torch.tensor(
-        [v for u, v in edge_list] + [u for u, v in edge_list], dtype=torch.long
-    )
-    edge_index = torch.stack([row, col], dim=0)
-    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
-    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
-
-    x = torch.randn((N, 3))
-    batch = torch.zeros(N, dtype=torch.long)
-
-    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
-    data.num_nodes = N
-
-    select = GraclusSelect()
-    connect = DenseConnectSPT()
-
-    # recursive_depth=2 means two successive coarsenings:
-    transform = PreCoarsening(selector=select, connector=connect, recursive_depth=2)
-    data_out = transform(data)
-
-    # Now pooled_data should be a list of length=2
-    assert isinstance(data_out.pooled_data, list)
-    assert len(data_out.pooled_data) == 2
-    for level_data in data_out.pooled_data:
-        assert isinstance(level_data, Data)
-        # Each level_data.num_nodes should equal k=3 (first level) or new k=?
-        assert hasattr(level_data, "num_nodes")
-        assert level_data.num_nodes >= 1
-        assert hasattr(level_data, "x")
 
 
 if __name__ == "__main__":

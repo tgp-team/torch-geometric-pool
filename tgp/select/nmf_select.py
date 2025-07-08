@@ -3,8 +3,6 @@ from typing import Optional
 import torch
 from sklearn.decomposition import non_negative_factorization
 from torch import Tensor
-from torch_geometric.utils import to_dense_adj
-from torch_sparse import SparseTensor
 
 from tgp.select import Select, SelectOutput
 from tgp.utils.typing import SinvType
@@ -62,17 +60,11 @@ class NMFSelect(Select):
         """
         device = edge_index.device
 
-        # Convert edge_index to dense if it is not already (used in the precoarsening)
-        is_sparse = False
-        if edge_index.dim() == 2:
-            edge_index = to_dense_adj(edge_index, edge_attr=None, max_num_nodes=None)
-            is_sparse = True
-
         B, N, M = edge_index.size()
         edge_index = edge_index.permute(1, 0, 2).reshape(edge_index.size(1), -1)
         A = edge_index.cpu().numpy()
         _, H, _ = non_negative_factorization(
-            A, n_components=self.k, init="random", max_iter=1000
+            A, n_components=self.k, init="random", max_iter=5000
         )
         H = torch.tensor(H, device=device)
 
@@ -81,10 +73,6 @@ class NMFSelect(Select):
 
         if mask is not None:
             H = H * mask.unsqueeze(-1)
-
-        # Convert to sparse tensor
-        if is_sparse:
-            H = SparseTensor.from_dense(H[0])
 
         so = SelectOutput(s=H, s_inv_op=self.s_inv_op, mask=mask)
 

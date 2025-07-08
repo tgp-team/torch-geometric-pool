@@ -8,11 +8,11 @@ from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select.kmis_select import KMISSelect, Scorer, SelectOutput
-from tgp.src import PoolingOutput, SRCPooling
+from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
 from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 
-class KMISPooling(SRCPooling):
+class KMISPooling(BasePrecoarseningMixin, SRCPooling):
     r"""The Maximal :math:`k`-Independent Set (:math:`k`-MIS) pooling operator from the
     paper `"Generalizing Downsampling from Regular Data to Graphs"
     <https://arxiv.org/abs/2208.03523>`_ (Bacciu et al., AAAI 2023).
@@ -235,6 +235,4 @@ class KMISPooling(SRCPooling):
             return out
 
     def extra_repr_args(self) -> dict:
-        return {
-            "cached": self.cached,
-        }
+        return {"cached": self.cached}

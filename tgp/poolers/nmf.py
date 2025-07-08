@@ -1,9 +1,12 @@
 from typing import Optional, Union
 
+import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
+from torch_geometric.utils import to_dense_adj
+from torch_sparse import SparseTensor
 
-from tgp.connect import DenseConnect
+from tgp.connect import DenseConnect, DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
@@ -95,6 +98,12 @@ class NMFPooling(DenseSRCPooling):
 
         self.cached = cached
 
+        # Connector used in the precoarsening step
+        self.preconnector = DenseConnectSPT(
+            remove_self_loops=remove_self_loops,
+            degree_norm=degree_norm,
+        )
+
     def forward(
         self,
         x: Tensor,
@@ -143,7 +152,45 @@ class NMFPooling(DenseSRCPooling):
 
             return out
 
+    def precoarsening(
+        self,
+        edge_index: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
+        *,
+        batch: Optional[Tensor] = None,
+        **kwargs,
+    ) -> PoolingOutput:
+        assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
+        adj = to_dense_adj(
+            edge_index, edge_attr=edge_weight
+        )  # has shape [1, N, N] -- Note: we do not pass batch here.
+
+        so = self.select(edge_index=adj)
+
+        if batch is None:  # single graph -> give all nodes the same ID
+            batch = adj.new_zeros(adj.size(-1), dtype=torch.long)
+
+        # Transform the select output to a sparse tensor
+        s = so.s  # has shape [1, N, K]
+        k = s.size(-1)
+        # Compute indices for the sparse tensor
+        row = torch.arange(s.size(1), device=s.device).repeat_interleave(k)
+        col = torch.arange(k, device=s.device)
+        col = (batch.unsqueeze(-1) * k + col).view(-1)
+        # Create the sparse tensor and the SelectOutput
+        s = SparseTensor(row=row, col=col, value=s.view(-1))  # has shape (N, BK)
+        so = SelectOutput(s=s, s_inv_op=self.selector.s_inv_op)
+
+        batch_pooled = self.reducer.reduce_batch(so, batch)
+        edge_index_pooled, edge_weight_pooled = self.preconnector(
+            so=so, edge_index=edge_index, edge_weight=edge_weight
+        )
+        return PoolingOutput(
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+        )
+
     def extra_repr_args(self) -> dict:
-        return {
-            "cached": self.cached,
-        }
+        return {"cached": self.cached}
