@@ -48,7 +48,7 @@ def degree_scorer(
 
 
 def maximal_independent_set(
-    edge_index: Adj, k: int = 1, perm: OptTensor = None
+    edge_index: Adj, order_k: int = 1, perm: OptTensor = None
 ) -> Tensor:
     r"""Returns a Maximal :math:`k`-Independent Set of a graph, i.e., a set of
     nodes (as a :class:`ByteTensor`) such that none of them are :math:`k`-hop
@@ -65,7 +65,7 @@ def maximal_independent_set(
 
     Args:
         edge_index (Tensor or SparseTensor): The graph connectivity.
-        k (int): The :math:`k` value (defaults to 1).
+        order_k (int): The :math:`k`-th order (defaults to 1).
         perm (LongTensor, optional): Permutation vector. Must be of size
             :obj:`(n,)` (defaults to :obj:`None`).
     :rtype: :class:`ByteTensor`
@@ -85,7 +85,7 @@ def maximal_independent_set(
     min_rank = rank.clone()
 
     while not mask.all():
-        for _ in range(k):
+        for _ in range(order_k):
             if HAS_TORCH_SCATTER:
                 min_neigh = torch.full_like(min_rank, fill_value=n)
                 scatter_min(min_rank[row], col, out=min_neigh)
@@ -109,7 +109,7 @@ def maximal_independent_set(
         mis = mis | torch.eq(rank, min_rank)
         mask = mis.clone().byte()
 
-        for _ in range(k):
+        for _ in range(order_k):
             if HAS_TORCH_SCATTER:
                 max_neigh = torch.full_like(mask, fill_value=0)
                 scatter_max(mask[row], col, out=max_neigh)
@@ -130,7 +130,7 @@ def maximal_independent_set(
 
 
 def maximal_independent_set_cluster(
-    edge_index: Adj, k: int = 1, perm: OptTensor = None
+    edge_index: Adj, order_k: int = 1, perm: OptTensor = None
 ) -> PairTensor:
     r"""Computes the Maximal :math:`k`-Independent Set (:math:`k`-MIS)
     clustering of a graph, as defined in `"Generalizing Downsampling from
@@ -145,12 +145,12 @@ def maximal_independent_set_cluster(
 
     Args:
         edge_index (Tensor or SparseTensor): The graph connectivity.
-        k (int): The :math:`k` value (defaults to 1).
+        order_k (int): The :math:`k`-th order (defaults to 1).
         perm (LongTensor, optional): Permutation vector. Must be of size
             :obj:`(n,)` (defaults to :obj:`None`).
     :rtype: (:class:`ByteTensor`, :class:`LongTensor`)
     """
-    mis = maximal_independent_set(edge_index=edge_index, k=k, perm=perm)
+    mis = maximal_independent_set(edge_index=edge_index, order_k=order_k, perm=perm)
     n, device = mis.size(0), mis.device
 
     row, col = connectivity_to_row_col(edge_index)
@@ -165,7 +165,7 @@ def maximal_independent_set_cluster(
     rank_mis = rank[mis]
     min_rank[mis] = rank_mis
 
-    for _ in range(k):
+    for _ in range(order_k):
         min_neigh = torch.full_like(min_rank, fill_value=n)
         scatter_min(min_rank[row], col, out=min_neigh)
         torch.minimum(min_neigh, min_rank, out=min_rank)
@@ -188,8 +188,8 @@ class KMISSelect(Select):
         in_channels (int, optional):
             Size of each input sample. Ignored if :obj:`scorer` is not
             :obj:`"linear"`. (default: :obj:`None`)
-        k (int):
-            The :math:`k` value for the independent set. (default: :obj:`1`)
+        order_k (int):
+            The :math:`k`-th order for the independent set. (default: :obj:`1`)
         scorer (str or Callable):
             A function that computes a score for each node. Nodes with higher score
             have a higher chance of being selected for pooling. It can be one of:
@@ -255,7 +255,7 @@ class KMISSelect(Select):
     def __init__(
         self,
         in_channels: Optional[int] = None,
-        k: int = 1,
+        order_k: int = 1,
         scorer: Union[Scorer, str] = "linear",
         score_heuristic: Optional[str] = "greedy",
         force_undirected: bool = False,
@@ -271,7 +271,7 @@ class KMISSelect(Select):
         if not callable(scorer):
             assert scorer in self._scorers, "Unrecognized `scorer` value."
 
-        self.k = k
+        self.order_k = order_k
         self.scorer = scorer
         self.score_heuristic = score_heuristic
         self.node_dim = node_dim
@@ -295,10 +295,10 @@ class KMISSelect(Select):
         k_sums = torch.ones_like(x) if self.score_heuristic == "greedy" else x.clone()
 
         if HAS_TORCH_SCATTER:
-            for _ in range(self.k):
+            for _ in range(self.order_k):
                 scatter_add(k_sums[row], col, out=k_sums)
         else:
-            for _ in range(self.k):
+            for _ in range(self.order_k):
                 k_sums += scatter(
                     k_sums[row], col, dim=0, dim_size=k_sums.size(0), reduce="add"
                 )
@@ -396,7 +396,7 @@ class KMISSelect(Select):
         updated_score = self._apply_heuristic(score, adj)
         perm = torch.argsort(updated_score.view(-1), 0, descending=True)
 
-        mis, cluster = maximal_independent_set_cluster(adj, self.k, perm)
+        mis, cluster = maximal_independent_set_cluster(adj, self.order_k, perm)
         mis = mis.nonzero().view(-1)
 
         so = SelectOutput(
@@ -413,7 +413,7 @@ class KMISSelect(Select):
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
-            f"k={self.k}, "
+            f"order_k={self.order_k}, "
             f"scorer={self.scorer}, "
             f"score_heuristic={self.score_heuristic}, "
             f"force_undirected={self.force_undirected}, "

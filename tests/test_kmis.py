@@ -63,7 +63,7 @@ def test_pooler_parametrized_configs(
     PARAMS = {
         "in_channels": F,
         "ratio": 0.5,
-        "k": max(1, N // 2),
+        "order_k": max(1, N // 2),
         "cached": True,
         "lift": lift,
         "s_inv_op": s_inv_op,
@@ -135,15 +135,15 @@ def test_maximal_independent_set_basic():
         [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]],
         dtype=torch.long,
     )
-    # k=1: greedy MIS picks nodes 0 and 2
-    mis = maximal_independent_set(edge_index=edge_index, k=1)
+    # order_k=1: greedy MIS picks nodes 0 and 2
+    mis = maximal_independent_set(edge_index=edge_index, order_k=1)
     assert mis.dtype == torch.bool
     assert mis.sum().item() == 2
     assert mis[0] and mis[2]
 
     # With a custom permutation (reverse), it should pick nodes [3,1]
     perm = torch.tensor([3, 2, 1, 0], dtype=torch.long)
-    mis2 = maximal_independent_set(edge_index=edge_index, k=1, perm=perm)
+    mis2 = maximal_independent_set(edge_index=edge_index, order_k=1, perm=perm)
     # Now highest-ranked (3) and then its neighbor's picks
     assert mis2[3] and mis2[1]
     assert mis2.sum().item() == 2
@@ -155,7 +155,7 @@ def test_maximal_independent_set_cluster():
         [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]],
         dtype=torch.long,
     )
-    mis, clusters = maximal_independent_set_cluster(edge_index=edge_index, k=1)
+    mis, clusters = maximal_independent_set_cluster(edge_index=edge_index, order_k=1)
     # mis is boolean mask, clusters assigns each node to a cluster index
     assert mis.dtype == torch.bool
     assert clusters.dtype == torch.long
@@ -175,7 +175,7 @@ def test_kmis_select_scorers_and_s_inv(simple_edge_index):
     for scorer in ["random", "constant", "canonical", "first", "last", "degree"]:
         selector = KMISSelect(
             in_channels=None,
-            k=2,
+            order_k=2,
             scorer=scorer,
             score_heuristic=None,
             force_undirected=False,
@@ -198,7 +198,7 @@ def test_kmis_select_scorers_and_s_inv(simple_edge_index):
     x2 = torch.randn((N2, 2), dtype=torch.float)
     selector2 = KMISSelect(
         in_channels=None,
-        k=1,
+        order_k=1,
         scorer="degree",
         score_heuristic=None,
         force_undirected=True,
@@ -224,7 +224,7 @@ def test_kmis_select_linear_score_list(simple_edge_index):
 
     selector = KMISSelect(
         in_channels=[3, 3],
-        k=2,
+        order_k=2,
         scorer="linear",
         score_heuristic=None,
         force_undirected=False,
@@ -255,7 +255,7 @@ def test_kmis_select_heuristic_inverse_s_inv(simple_edge_index):
     # Greedy heuristic with s_inv_op="inverse"
     selector = KMISSelect(
         in_channels=None,
-        k=2,
+        order_k=2,
         scorer="constant",
         score_heuristic="greedy",
         force_undirected=False,
@@ -272,7 +272,7 @@ def test_kmis_select_heuristic_inverse_s_inv(simple_edge_index):
     # w-greedy heuristic
     selector2 = KMISSelect(
         in_channels=None,
-        k=1,
+        order_k=1,
         scorer="constant",
         score_heuristic="w-greedy",
         force_undirected=True,
@@ -287,23 +287,27 @@ def test_kmis_select_repr_and_invalid_args():
     # Valid repr
     selector = KMISSelect(
         in_channels=None,
-        k=1,
+        order_k=1,
         scorer="degree",
         score_heuristic="greedy",
         force_undirected=True,
         s_inv_op="transpose",
     )
     rep = repr(selector)
-    assert "k=1" in rep and "scorer=degree" in rep and "force_undirected=True" in rep
+    assert (
+        "order_k=1" in rep and "scorer=degree" in rep and "force_undirected=True" in rep
+    )
 
     # Invalid scorer
     with pytest.raises(AssertionError):
-        _ = KMISSelect(in_channels=None, k=1, scorer="invalid", score_heuristic=None)
+        _ = KMISSelect(
+            in_channels=None, order_k=1, scorer="invalid", score_heuristic=None
+        )
 
     # Invalid heuristic
     with pytest.raises(AssertionError):
         _ = KMISSelect(
-            in_channels=None, k=1, scorer="degree", score_heuristic="invalid"
+            in_channels=None, order_k=1, scorer="degree", score_heuristic="invalid"
         )
 
 
@@ -326,17 +330,17 @@ def test_mis_without_torch_scatter(monkeypatch, simple_undirected_edge_index):
     monkeypatch.setattr(kmis_mod, "HAS_TORCH_SCATTER", False)
 
     edge_index = simple_undirected_edge_index
-    k = 1
+    order_k = 1
 
     # Now this call runs the “else” block (using PyG’s scatter())
-    mis = maximal_independent_set(edge_index=edge_index, k=k)
+    mis = maximal_independent_set(edge_index=edge_index, order_k=order_k)
     assert mis.dtype == torch.bool
     assert mis.numel() == edge_index.max().item() + 1  # = 5
 
     # Test the whole KMISSelect
     selector = KMISSelect(
         in_channels=None,
-        k=k,
+        order_k=order_k,
         scorer="degree",
         score_heuristic="greedy",
         force_undirected=False,
@@ -366,7 +370,7 @@ def test_kmis_select_custom_scorer(simple_edge_index):
 
     selector = KMISSelect(
         in_channels=None,
-        k=1,
+        order_k=1,
         scorer=custom_scorer,
         score_heuristic=None,
         force_undirected=False,

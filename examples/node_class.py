@@ -27,6 +27,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "lift_red_op": "mean",
             "loss_coeff": 10.0,
             "k": data.num_nodes // 20,
+            "order_k": 2,
             "ratio": 0.25,
             "remove_self_loops": True,
             "scorer": "degree",

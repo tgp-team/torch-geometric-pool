@@ -33,8 +33,8 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         in_channels (int, optional):
             Size of each input sample. Ignored if :obj:`scorer` is not
             :obj:`"linear"`. (default: :obj:`None`)
-        k (int):
-            The :math:`k` value for the independent set. (default: :obj:`1`)
+        order_k (int):
+            The :math:`k`-th order for the independent set. (default: :obj:`1`)
         scorer (str or Callable):
             A function that computes a score for each node. Nodes with higher score
             have a higher chance of being selected for pooling. It can be one of:
@@ -125,7 +125,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
     def __init__(
         self,
         in_channels: Optional[int] = None,
-        k: int = 1,
+        order_k: int = 1,
         scorer: Union[Scorer, str] = "linear",
         score_heuristic: Optional[str] = "greedy",
         force_undirected: bool = False,
@@ -141,7 +141,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         super().__init__(
             selector=KMISSelect(
                 in_channels=in_channels,
-                k=k,
+                order_k=order_k,
                 scorer=scorer,
                 score_heuristic=score_heuristic,
                 force_undirected=force_undirected,
