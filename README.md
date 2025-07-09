@@ -8,6 +8,7 @@
     <img alt="PyPI - Python Version" src="https://img.shields.io/badge/python-%3E%3D3.9-blue">
     <a href='https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml'><img alt="CI status" src="https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml/badge.svg"></a>
     <a href='https://torch-geometric-pool.readthedocs.io/en/latest/?badge=latest'><img src='https://readthedocs.org/projects/torch-geometric-pool/badge/?version=latest' alt='Documentation Status' /></a>
+    <a href='https://pepy.tech/projects/torch-geometric-pool'><img src='https://static.pepy.tech/badge/torch-geometric-pool' alt='Total Downloads' /></a>
     </p>
     <p>
     📚 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/">Documentation</a> - 🚀 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/content/quickstart.html">Getting Started</a> - 💻 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/tutorials/index.html">Introductory notebooks</a>
