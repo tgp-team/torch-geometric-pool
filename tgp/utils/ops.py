@@ -478,3 +478,32 @@ def get_assignments(
     assignments[1] = unique_one
 
     return assignments
+
+
+def get_bce_pos_weights(adj: Tensor, mask: Optional[Tensor]) -> Tensor:
+    r"""Calculates positive weights to balance the positive and negative samples in
+    the binary cross-entropy loss based on the non-zero edges in the adjacency matrix
+
+    Args:
+        adj (~torch.Tensor): The adjacency matrix of shape :math:`(B, N, N)`.
+        mask (Optional[~torch.Tensor]): A mask matrix
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
+            the valid nodes for each graph. (default: :obj:`None`)
+
+    Returns:
+        ~torch.Tensor: Positive weights tensor of shape :math:`(B, N, N)`.
+    """
+    if mask is not None:
+        N = mask.sum(-1).view(-1, 1, 1)  # has shape B x 1 x 1
+    else:
+        N = adj.shape[-1]  # Number of nodes
+    n_edges = torch.clamp(adj.sum([-1, -2]), min=1).view(
+        -1, 1, 1
+    )  # has shape B x 1 x 1
+    n_not_edges = torch.clamp(N**2 - n_edges, min=1).view(
+        -1, 1, 1
+    )  # has shape B x 1 x 1
+    # clamp avoids zero division when we have all edges/ no edges
+    pos_weight = (N**2 / n_edges) * adj + (N**2 / n_not_edges) * (1 - adj)
+
+    return pos_weight
