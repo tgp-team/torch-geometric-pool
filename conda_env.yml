@@ -9,7 +9,7 @@ dependencies:
   - python>=3.9
   - pytorch>=1.8
   - pytorch-cuda==12.1         # remove for cpu installation
-  - pyg>=2.0
+  - pyg>=2.6
   - pytorch-cluster
   - pytorch-scatter
   - pytorch-sparse

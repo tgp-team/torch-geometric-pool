@@ -30,7 +30,7 @@ For the latest version, consider installing from source:
    :class: caution
 
    :tgp:`Torch Geometric Pool` is built upon `PyTorch>=1.8 <https://pytorch.org/>`_ and
-   `PyG>=2.0 <https://github.com/pyg-team/pytorch_geometric/>`_. Make sure you have
+   `PyG>=2.6 <https://github.com/pyg-team/pytorch_geometric/>`_. Make sure you have
    both installed in your environment before installation. In the following,
    we provide instructions on how to install them for the chosen installation
    procedure.
