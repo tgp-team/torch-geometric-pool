@@ -112,25 +112,13 @@ class DPSelect(DenseSelect):
         Returns:
             torch.Tensor: A tensor containing the cluster assignment probabilities [batch, n_nodes, n_clusters].
         """
+        out_size = stick_fractions.size()
         device = stick_fractions.device
-        log_v = torch.concat(
-            [
-                torch.log(stick_fractions),
-                torch.zeros(*stick_fractions.shape[:-1], 1, device=device),
-            ],
-            dim=-1,
-        )
-        log_one_minus_v = torch.concat(
-            [
-                torch.zeros(*stick_fractions.shape[:-1], 1, device=device),
-                torch.log(1 - stick_fractions),
-            ],
-            dim=-1,
-        )
-        pi = torch.exp(
-            log_v + torch.cumsum(log_one_minus_v, dim=-1)
-        )  # has shape [n_particles, batch, n_nodes, n_clusters]
-        return pi
+
+        pi = torch.zeros(out_size[:-1] + (out_size[-1] + 1,), device=device)
+        pi[..., :-1] = torch.log(stick_fractions)
+        pi[..., 1:] += torch.cumsum(torch.log(1 - stick_fractions), dim=-1)
+        return torch.exp(pi)
 
     def forward(
         self, x: Tensor, mask: Optional[Tensor] = None, **kwargs
