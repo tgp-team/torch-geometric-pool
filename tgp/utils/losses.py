@@ -573,7 +573,7 @@ def weighted_bce_reconstruction_loss(
             adj.sum([-1, -2]), min=1
         ).int()  # this is a vector of size B
         n_not_edges = torch.clamp(N2 - n_edges, min=1)  # this is a vector of size B
-        balance_const = (N2 - n_not_edges) / n_edges  # this is a vector of size B
+        balance_const = n_not_edges / n_edges  # this is a vector of size B
         v = torch.repeat_interleave(
             balance_const.view(-1), repeats=n_edges.view(-1), dim=0
         )
@@ -649,7 +649,7 @@ def kl_loss(
         ...     [[True, True, True, False], [True, True, True, True]], dtype=torch.bool
         ... )
         >>> # Compute KL loss: sum over K-1 components, then over nodes
-        >>> loss = kl_loss(q_sb, p_sb, mask=mask, node_axis=1, sum_axes=[2, 1])
+        >>> loss = kl_loss(q_sb, p_sb, mask=mask)
     """
     loss = kl_divergence(q, p).sum(-1)
 

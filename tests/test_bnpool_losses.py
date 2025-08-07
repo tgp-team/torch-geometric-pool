@@ -21,7 +21,7 @@ def small_batch_data(set_random_seed):
     batch_size, n_nodes, n_features = 2, 4, 3
     x = torch.randn(batch_size, n_nodes, n_features)
     adj = torch.randint(0, 2, (batch_size, n_nodes, n_nodes)).float()
-    adj = (adj + adj.transpose(-1, -2)) / 2  # Make symmetric
+    adj = (((adj + adj.transpose(-1, -2)) / 2) > 0).float()  # Make symmetric
     mask = torch.ones(batch_size, n_nodes, dtype=torch.bool)
     return x, adj, mask
 
@@ -32,7 +32,7 @@ def variable_size_batch_data(set_random_seed):
     batch_size, max_nodes = 3, 5
     x = torch.randn(batch_size, max_nodes, 2)
     adj = torch.randint(0, 2, (batch_size, max_nodes, max_nodes)).float()
-    adj = (adj + adj.transpose(-1, -2)) / 2  # Make symmetric
+    adj = (((adj + adj.transpose(-1, -2)) / 2) > 0).float()  # Make symmetric
 
     # Create variable masks
     mask = torch.zeros(batch_size, max_nodes, dtype=torch.bool)
@@ -88,10 +88,10 @@ class TestWeightedBCEReconstructionLoss:
 
         # Test with and without normalization
         loss_normalized = weighted_bce_reconstruction_loss(
-            rec_adj, adj, mask, normalize_loss=True
+            rec_adj, adj, mask, normalizing_const=torch.tensor(2)
         )
         loss_unnormalized = weighted_bce_reconstruction_loss(
-            rec_adj, adj, mask, normalize_loss=False
+            rec_adj, adj, mask, normalizing_const=None
         )
 
         assert isinstance(loss_normalized, torch.Tensor)
@@ -146,13 +146,10 @@ class TestWeightedBCEReconstructionLoss:
         x, adj, mask = small_batch_data
         batch_size, n_nodes = adj.shape[:2]
 
-        # Create a truly binary adjacency matrix for perfect reconstruction test
-        binary_adj = (adj > 0.5).float()  # Convert to strictly binary {0, 1}
-
         # Create perfect reconstruction by using high logits
-        rec_adj = binary_adj * 10 + (1 - binary_adj) * (-10)
+        rec_adj = adj * 10.0 + (1 - adj) * (-10.0)
 
-        loss = weighted_bce_reconstruction_loss(rec_adj, binary_adj, mask)
+        loss = weighted_bce_reconstruction_loss(rec_adj, adj, mask)
 
         # Perfect reconstruction should yield very low loss
         assert loss.item() < 0.1
@@ -200,7 +197,7 @@ class TestKLLoss:
         mask[1, :4] = True
 
         # Compute KL loss with mask
-        loss = kl_loss(q, p, mask=mask, node_axis=1)
+        loss = kl_loss(q, p, mask=mask)
 
         assert isinstance(loss, torch.Tensor)
         assert loss.dim() == 0
@@ -235,14 +232,14 @@ class TestKLLoss:
         assert not torch.all(mask), "Mask should have some False values"
 
         # This should trigger the multi-dimensional mask handling (lines 637-639)
-        loss = kl_loss(q, p, mask=mask, node_axis=1)
+        loss = kl_loss(q, p, mask=mask)
 
         assert isinstance(loss, torch.Tensor)
         assert loss.dim() == 0
         assert loss.item() >= 0
 
         # Test that masking actually affects the result
-        loss_no_mask = kl_loss(q, p, node_axis=1)
+        loss_no_mask = kl_loss(q, p)
         # Results should be different when masking is applied
         assert not torch.allclose(loss, loss_no_mask, atol=1e-6)
 
@@ -274,38 +271,16 @@ class TestKLLoss:
         assert not torch.all(mask), "Mask should have some False values"
 
         # This should trigger the 1D mask handling (False branch of mask.dim() > 1)
-        loss = kl_loss(q, p, mask=mask, node_axis=0)
+        loss = kl_loss(q, p, mask=mask)
 
         assert isinstance(loss, torch.Tensor)
         assert loss.dim() == 0
         assert loss.item() >= 0
 
         # Test that masking actually affects the result
-        loss_no_mask = kl_loss(q, p, node_axis=0)
+        loss_no_mask = kl_loss(q, p)
         # Results should be different when masking is applied
         assert not torch.allclose(loss, loss_no_mask, atol=1e-6)
-
-    def test_sum_axes_parameter(self, set_random_seed):
-        """Test the sum_axes parameter for flexible axis control."""
-        batch_size, n_nodes, n_components = 2, 4, 3
-
-        # Create distributions
-        alpha = torch.ones(batch_size, n_nodes, n_components) + 0.5
-        beta = torch.ones(batch_size, n_nodes, n_components) + 0.5
-        q = Beta(alpha, beta)
-
-        alpha_prior = torch.ones(n_components)
-        beta_prior = torch.ones(n_components) * 2.0
-        p = Beta(alpha_prior, beta_prior)
-
-        # Test different sum_axes configurations
-        loss_default = kl_loss(q, p)
-        loss_custom = kl_loss(q, p, sum_axes=[2, 1])  # Sum components first, then nodes
-
-        assert isinstance(loss_default, torch.Tensor)
-        assert isinstance(loss_custom, torch.Tensor)
-        # Results should be the same for this case
-        assert torch.allclose(loss_default, loss_custom, atol=1e-6)
 
     def test_normalize_loss(self, set_random_seed):
         """Test loss normalization."""
@@ -321,8 +296,8 @@ class TestKLLoss:
         p = Beta(alpha_prior, beta_prior)
 
         # Test with and without normalization
-        loss_normalized = kl_loss(q, p, node_axis=1, normalize_loss=True)
-        loss_unnormalized = kl_loss(q, p, node_axis=1, normalize_loss=False)
+        loss_normalized = kl_loss(q, p, normalizing_const=torch.tensor(2))
+        loss_unnormalized = kl_loss(q, p, normalizing_const=None)
 
         assert isinstance(loss_normalized, torch.Tensor)
         assert isinstance(loss_unnormalized, torch.Tensor)
@@ -417,15 +392,15 @@ class TestClusterConnectivityPriorLoss:
         K_mu = torch.zeros(k, k)
         K_var = torch.tensor(1.0)
 
-        # Create a mask for normalization
-        mask = torch.ones(2, 4, dtype=torch.bool)  # Batch size 2, 4 nodes each
-
         # Test with and without normalization
         loss_normalized = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask
+            K, K_mu, K_var, normalizing_const=torch.tensor(2)
         )
         loss_unnormalized = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=False, mask=mask
+            K,
+            K_mu,
+            K_var,
+            normalizing_const=None,
         )
 
         assert isinstance(loss_normalized, torch.Tensor)
@@ -440,15 +415,12 @@ class TestClusterConnectivityPriorLoss:
         K_mu = torch.zeros(k, k)
         K_var = torch.tensor(1.0)
 
-        # Create a mask for normalization (this creates a tensor loss)
-        mask = torch.ones(2, 4, dtype=torch.bool)
-
         # Test different batch reduction methods
         loss_mean = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="mean"
+            K, K_mu, K_var, normalizing_const=torch.tensor(2), batch_reduction="mean"
         )
         loss_sum = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="sum"
+            K, K_mu, K_var, normalizing_const=torch.tensor(2), batch_reduction="sum"
         )
 
         assert isinstance(loss_mean, torch.Tensor)
@@ -501,7 +473,7 @@ class TestIntegrationWithBNPool:
 
         # Compute all three losses
         recon_loss = weighted_bce_reconstruction_loss(rec_adj, adj, mask)
-        kl_loss_val = kl_loss(q, p, mask=mask, node_axis=1)
+        kl_loss_val = kl_loss(q, p, mask=mask)
         prior_loss = cluster_connectivity_prior_loss(K, K_mu, K_var)
 
         # All losses should be valid
