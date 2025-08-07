@@ -9,7 +9,7 @@ from torch_geometric.utils import scatter
 from torch_sparse import SparseTensor
 
 from tgp import eps
-from tgp.utils import get_bce_pos_weights, rank3_diag, rank3_trace
+from tgp.utils import rank3_diag, rank3_trace
 
 BatchReductionType = Literal["mean", "sum"]
 
@@ -511,7 +511,6 @@ def weighted_bce_reconstruction_loss(
     adj: Tensor,
     mask: Optional[Tensor] = None,
     balance_links: bool = True,
-    pos_weight: Optional[Tensor] = None,
     normalize_loss: bool = False,
     batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
@@ -550,9 +549,6 @@ def weighted_bce_reconstruction_loss(
         balance_links (bool, optional): Whether to apply class-balancing weights to handle
             edge/non-edge imbalance.
             (default: :obj:`True`)
-        pos_weight (Optional[~torch.Tensor]): Weights for the BCE loss used when :obj:`balance_links` is :obj:`True`.
-            If :obj:`None`, weights are computed based on the number of edges and non-edges.
-            (default: :obj:`None`)
         normalize_loss (bool, optional): Whether to normalize the loss by the square of the
             number of nodes per graph :math:`N^2`. This ensures consistent scaling across
             graphs of different sizes.
@@ -564,9 +560,21 @@ def weighted_bce_reconstruction_loss(
     Returns:
         ~torch.Tensor: The weighted BCE reconstruction loss.
     """
-    if balance_links and pos_weight is None:
+    pos_weight = None
+    if balance_links:
         # Calculate BCE weights to balance positive and negative samples
-        pos_weight = get_bce_pos_weights(adj, mask=mask)
+        if mask is not None:
+            N = mask.sum(-1).view(-1, 1, 1)  # has shape B x 1 x 1
+        else:
+            N = adj.shape[-1]  # Number of nodes
+        n_edges = torch.clamp(adj.sum([-1, -2]), min=1).view(
+            -1, 1, 1
+        )  # this is a vector of size B x 1 x 1
+        n_not_edges = torch.clamp(N**2 - n_edges, min=1).view(
+            -1, 1, 1
+        )  # this is a vector of size B x 1 x 1
+        # the clamp is needed to avoid zero division when we have all edges
+        pos_weight = (N**2 / n_edges) * adj + (N**2 / n_not_edges) * (1 - adj)
 
     loss = F.binary_cross_entropy_with_logits(
         rec_adj, adj, weight=pos_weight, reduction="none"

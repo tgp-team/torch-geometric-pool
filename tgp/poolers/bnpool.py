@@ -14,7 +14,6 @@ from tgp.utils.losses import (
     kl_loss,
     weighted_bce_reconstruction_loss,
 )
-from tgp.utils.ops import get_bce_pos_weights
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -163,7 +162,6 @@ class BNPool(DenseSRCPooling):
         self.balance_links = balance_links
         self.train_K = train_K
         self.eta = eta  # coefficient for the kl_loss
-        self.pos_weight = None
 
         # prior of the Stick Breaking Process
         self.register_buffer("alpha_prior", torch.ones(self.k - 1))
@@ -291,15 +289,11 @@ class BNPool(DenseSRCPooling):
         rec_adj = self.get_rec_adj(s)
 
         # Reconstruction loss
-        if self.preprocessing_cache is not None and self.pos_weight is None:
-            self.pos_weight = get_bce_pos_weights(adj, mask)
-
         rec_loss = weighted_bce_reconstruction_loss(
             rec_adj,
             adj,
             mask,
             balance_links=self.balance_links,
-            pos_weight=self.pos_weight,
             normalize_loss=self.rescale_loss,
             batch_reduction="mean",
         )
