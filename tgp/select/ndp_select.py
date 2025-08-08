@@ -159,7 +159,12 @@ class NDPSelect(Select):
     @staticmethod
     def sign_partition(vec_or_size: Union[Tensor, int]) -> Tuple[Tensor, Tensor]:
         if isinstance(vec_or_size, int):
-            vec = torch.randint(0, 2, size=(vec_or_size,)) * 2 - 1
+            n = vec_or_size  # it is always >= 2
+            vec = torch.empty(n, dtype=torch.long)
+            vec[0] = 1
+            vec[1] = -1
+            if n > 2:
+                vec[2:] = torch.randint(0, 2, (n - 2,), dtype=torch.long) * 2 - 1
         else:  # assume it's a vector
             vec = vec_or_size
         return torch.where(vec >= 0)[0], torch.where(vec < 0)[0]

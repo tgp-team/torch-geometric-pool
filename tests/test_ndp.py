@@ -43,15 +43,22 @@ def test_forward_with_sparse_tensor_edge_index_and_skip_empty_subgraph():
 
 
 def test_random_cut():
-    adj = SparseTensor.from_dense(torch.ones(5, 5))
+    n = 5
+    adj = SparseTensor.from_dense(torch.ones(n, n))
     selector = NDPSelect(s_inv_op="transpose")
-    batch = torch.ones(5, dtype=torch.long)
-    out = selector(edge_index=adj, batch=batch, num_nodes=5)
+    batch = torch.ones(n, dtype=torch.long)
+    out = selector(edge_index=adj, batch=batch, num_nodes=n)
 
-    # The number of clusters should be reasonable for a 5-node fully connected graph
-    # Allow for some variance due to randomness in the algorithm
-    assert out.num_supernodes <= 5  # At most as many clusters as nodes
-    assert out.num_supernodes >= 1  # At least one cluster
+    assert out.num_supernodes < n  # Not all nodes should be selected
+    assert out.num_supernodes >= 1  # At least one node must be selected
+
+    n = 1
+    adj = SparseTensor.from_dense(torch.ones(n, n))
+    selector = NDPSelect(s_inv_op="transpose")
+    batch = torch.ones(n, dtype=torch.long)
+    out = selector(edge_index=adj, batch=batch, num_nodes=n)
+
+    assert out.num_supernodes == 1
 
 
 if __name__ == "__main__":

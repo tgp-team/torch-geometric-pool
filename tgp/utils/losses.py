@@ -537,6 +537,7 @@ def weighted_bce_reconstruction_loss(
 
     .. math::
         \mathcal{L}_{\text{normalized}} = \frac{\mathcal{L}_{\text{BCE}}}{\gamma}
+
     Note that :math:`\gamma` can be a vector to specify a different constant for each graph in the batch.
 
     Args:
@@ -588,7 +589,7 @@ def weighted_bce_reconstruction_loss(
     # Sum over both spatial dimensions (always the same for adjacency matrices)
     loss = loss.sum((-1, -2))  # Sum over both spatial dimensions -> (B,)
 
-    # Normalize by N^2 if requested
+    # Normalize by the given constant
     if normalizing_const is not None:
         loss = loss / normalizing_const
 
@@ -612,6 +613,7 @@ def kl_loss(
         D_{KL}(q \parallel p) = \mathbb{E}_{x \sim q}[\log q(x) - \log p(x)]
 
     When :obj:`normalizing_const` :math:`\gamma` is not :obj:`None`, the loss is normalized by :math:`\gamma`:
+
     .. math::
         D_{KL,\text{normalized}} = \frac{D_{KL}(q \parallel p)}{\gamma}
 
@@ -659,7 +661,7 @@ def kl_loss(
             loss = loss * mask
     loss = loss.sum(-1)
 
-    # Normalize by N^2 if requested
+    # Normalize by the given constant
     if normalizing_const is not None:
         loss = loss / normalizing_const
 
@@ -729,7 +731,7 @@ def cluster_connectivity_prior_loss(
     """
     prior_loss = (0.5 * (K - K_mu) ** 2 / K_var).sum()
 
-    # Normalize by N^2 if requested
+    # Normalize by the given constant
     if normalizing_const is not None:
         prior_loss = prior_loss / normalizing_const  # scalar / vector = vector
 
