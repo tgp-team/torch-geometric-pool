@@ -811,34 +811,6 @@ class TestCoverageEdgeCases:
                 max_iter=0,  # Should trigger assertion
             )
 
-    def test_losses_normalize_by_n_squared(self, simple_graph):
-        """Test normalization paths in losses."""
-        from tgp.utils.losses import cluster_connectivity_prior_loss
-
-        # Test the normalize_loss branch (lines 844, 846, 851 in losses.py)
-        K = torch.randn(3, 3)
-        K_mu = torch.zeros(3, 3)
-        K_var = torch.tensor(1.0)
-
-        # Test with mask (line 844)
-        mask = torch.ones(2, 6, dtype=torch.bool)  # 2 graphs, 6 nodes each
-        loss_with_mask = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="mean"
-        )
-        assert torch.isfinite(loss_with_mask)
-
-        # Test without mask (line 846)
-        loss_without_mask = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=None, batch_reduction="mean"
-        )
-        assert torch.isfinite(loss_without_mask)
-
-        # Test sum reduction (line 851)
-        loss_sum = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="sum"
-        )
-        assert torch.isfinite(loss_sum)
-
     def test_ops_reset_node_numbers(self):
         """Test reset_node_numbers function."""
         from tgp.utils.ops import reset_node_numbers
@@ -1033,49 +1005,6 @@ class TestFinalCoverageComplete:
         )
         assert output_with_weight.num_nodes == x.size(0)
         assert hasattr(output_with_weight, "scores")
-
-    def test_losses_exact_missing_lines(self):
-        """Test the exact missing lines 844, 846, 851 in losses.py."""
-        from tgp.utils.losses import cluster_connectivity_prior_loss
-
-        # Create test data that will trigger normalization paths
-        K = torch.randn(4, 4) + torch.eye(4)  # Make it positive definite
-        K_mu = torch.zeros(4, 4)
-        K_var = torch.tensor(2.0)
-
-        # Test exact line 844: mask provided, mean reduction, normalize=True
-        mask = torch.ones(3, 8, dtype=torch.bool)  # 3 graphs, 8 nodes each
-        loss_844 = cluster_connectivity_prior_loss(
-            K,
-            K_mu,
-            K_var,
-            normalize_loss=True,  # This triggers normalize branch
-            mask=mask,  # This hits line 844
-            batch_reduction="mean",
-        )
-        assert torch.isfinite(loss_844)
-
-        # Test exact line 846: no mask, mean reduction, normalize=True
-        loss_846 = cluster_connectivity_prior_loss(
-            K,
-            K_mu,
-            K_var,
-            normalize_loss=True,  # This triggers normalize branch
-            mask=None,  # This hits line 846
-            batch_reduction="mean",
-        )
-        assert torch.isfinite(loss_846)
-
-        # Test exact line 851: mask provided, sum reduction, normalize=True
-        loss_851 = cluster_connectivity_prior_loss(
-            K,
-            K_mu,
-            K_var,
-            normalize_loss=True,  # This triggers normalize branch
-            mask=mask,  # Mask needed for sum
-            batch_reduction="sum",  # This hits line 851
-        )
-        assert torch.isfinite(loss_851)
 
     def test_ops_exact_missing_lines(self):
         """Test the exact missing lines 213, 344, 351 in ops.py."""

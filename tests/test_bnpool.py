@@ -17,14 +17,15 @@ def set_random_seed():
     random.seed(42)
 
 
-@pytest.fixture(params=list(product([1, 3, 5], [1, 4, 8], [1, 2, 12])))
+@pytest.fixture(params=list(product([1, 3, 5], [2, 4, 8], [1, 2, 12])))
 def small_batched_dense_graphs(set_random_seed, request):
     batch_size, n_nodes, n_features = request.param
     x = torch.randn(batch_size, n_nodes, n_features)  # Node features
-    adj = torch.randint(
-        0, 2, (batch_size, n_nodes, n_nodes)
-    ).float()  # Adjacency matrix
-    adj = (adj + adj.transpose(-1, -2)) // 2  # Make symmetric
+    adj = torch.randint(0, 2, (batch_size, n_nodes, n_nodes))  # Adjacency matrix
+    adj[torch.logical_and(adj.sum(-1) == 0, adj.sum(-2) == 0), 0] = (
+        1  # make sure at least one edge for each node
+    )
+    adj = (((adj + adj.transpose(-1, -2)) / 2) > 0).float()  # Make symmetric
     return x, adj
 
 

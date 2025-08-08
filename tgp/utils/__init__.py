@@ -4,7 +4,6 @@ from .ops import (
     connectivity_to_edge_index,
     connectivity_to_row_col,
     connectivity_to_sparse_tensor,
-    get_bce_pos_weights,
     pseudo_inverse,
     rank3_diag,
     rank3_trace,

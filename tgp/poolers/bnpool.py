@@ -14,7 +14,6 @@ from tgp.utils.losses import (
     kl_loss,
     weighted_bce_reconstruction_loss,
 )
-from tgp.utils.ops import get_bce_pos_weights
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -163,7 +162,6 @@ class BNPool(DenseSRCPooling):
         self.balance_links = balance_links
         self.train_K = train_K
         self.eta = eta  # coefficient for the kl_loss
-        self.pos_weight = None
 
         # prior of the Stick Breaking Process
         self.register_buffer("alpha_prior", torch.ones(self.k - 1))
@@ -290,17 +288,19 @@ class BNPool(DenseSRCPooling):
         s, q_z = so.s, so.q_z
         rec_adj = self.get_rec_adj(s)
 
-        # Reconstruction loss
-        if self.preprocessing_cache is not None and self.pos_weight is None:
-            self.pos_weight = get_bce_pos_weights(adj, mask)
+        if mask is not None:
+            N = mask.sum(-1)  # has shape B x 1
+        else:
+            N = adj.shape[-1]  # N
 
+        N_squared = N**2
+        # Reconstruction loss
         rec_loss = weighted_bce_reconstruction_loss(
             rec_adj,
             adj,
             mask,
             balance_links=self.balance_links,
-            pos_weight=self.pos_weight,
-            normalize_loss=self.rescale_loss,
+            normalizing_const=N_squared,
             batch_reduction="mean",
         )
 
@@ -312,9 +312,7 @@ class BNPool(DenseSRCPooling):
             q_z,
             prior_dist,
             mask=mask,
-            node_axis=1,  # Nodes are on axis 1: (B, N, K-1)
-            sum_axes=[2, 1],  # Sum over K-1 components (axis 2), then nodes (axis 1)
-            normalize_loss=self.rescale_loss,
+            normalizing_const=N_squared,
             batch_reduction="mean",
         )
 
@@ -324,8 +322,7 @@ class BNPool(DenseSRCPooling):
                 self.K,
                 self.get_buffer("K_mu"),
                 self.get_buffer("K_var"),
-                normalize_loss=self.rescale_loss,
-                mask=mask,
+                normalizing_const=N_squared,
                 batch_reduction="mean",
             )
         else:
