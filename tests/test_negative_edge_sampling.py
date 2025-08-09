@@ -1,3 +1,7 @@
+import random
+
+import numpy as np
+import pytest
 import torch
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import (
@@ -14,6 +18,13 @@ from tgp.utils.negative_edge_sampling import (
 )
 
 
+@pytest.fixture
+def set_random_seed():
+    torch.manual_seed(42)
+    np.random.seed(42)
+    random.seed(42)
+
+
 def is_negative(edge_index, neg_edge_index, size, bipartite):
     adj = torch.zeros(size, dtype=torch.bool)
     neg_adj = torch.zeros(size, dtype=torch.bool)
@@ -28,7 +39,7 @@ def is_negative(edge_index, neg_edge_index, size, bipartite):
     return (adj & neg_adj).sum() == 0
 
 
-def test_edge_index_to_vector_and_vice_versa():
+def test_edge_index_to_vector_and_vice_versa(set_random_seed):
     # Create a fully-connected graph:
     N1, N2 = 13, 17
     row = torch.arange(N1).view(-1, 1).repeat(1, N2).view(-1)
@@ -45,7 +56,7 @@ def test_edge_index_to_vector_and_vice_versa():
     assert edge_index.tolist() == edge_index3.tolist()
 
 
-def test_negative_edge_sampling():
+def test_negative_edge_sampling(set_random_seed):
     edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
 
     neg_edge_index = negative_edge_sampling(edge_index)
@@ -63,7 +74,7 @@ def test_negative_edge_sampling():
     assert is_negative(edge_index, neg_edge_index, (4, 4), bipartite=False)
 
 
-def test_bipartite_negative_edge_sampling():
+def test_bipartite_negative_edge_sampling(set_random_seed):
     edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
 
     neg_edge_index = negative_edge_sampling(edge_index, num_nodes=(3, 4))
@@ -77,7 +88,7 @@ def test_bipartite_negative_edge_sampling():
     assert is_negative(edge_index, neg_edge_index, (3, 4), bipartite=True)
 
 
-def test_negative_edge_sampling_with_different_edge_density():
+def test_negative_edge_sampling_with_different_edge_density(set_random_seed):
     for num_nodes in [10, 100, 1000]:
         for p in [0.1, 0.3, 0.5, 0.8]:
             for is_directed in [False, True]:
@@ -104,7 +115,7 @@ def test_bipartite_negative_edge_sampling_with_different_edge_density():
             assert is_negative(edge_index, neg_edge_index, size, bipartite=True)
 
 
-def test_dense_batched_negative_edge_sampling():
+def test_dense_batched_negative_edge_sampling(set_random_seed):
     edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
     edge_index = torch.cat([edge_index, edge_index + 4], dim=1)
     batch = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
@@ -123,7 +134,7 @@ def test_dense_batched_negative_edge_sampling():
     assert neg_adj[4:, :4].sum() == 0
 
 
-def test_sparse_batched_negative_edge_sampling():
+def test_sparse_batched_negative_edge_sampling(set_random_seed):
     num_nodes_per_graph = [100, 75, 220]
     graph_list = [
         Data(edge_index=erdos_renyi_graph(n, edge_prob=0.2))
@@ -150,7 +161,7 @@ def test_sparse_batched_negative_edge_sampling():
     assert (adj | neg_adj).sum() == edge_index.size(1) + neg_edge_index.size(1)
 
 
-def test_bipartite_batched_negative_edge_sampling():
+def test_bipartite_batched_negative_edge_sampling(set_random_seed):
     edge_index1 = torch.as_tensor([[0, 0, 1, 1], [0, 1, 2, 3]])
     edge_index2 = edge_index1 + torch.tensor([[2], [4]])
     edge_index3 = edge_index2 + torch.tensor([[2], [4]])
