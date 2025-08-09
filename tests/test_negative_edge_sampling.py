@@ -1,7 +1,9 @@
 import torch
+from torch_geometric.data import Batch, Data
 from torch_geometric.utils import (
     erdos_renyi_graph,
     is_undirected,
+    to_dense_adj,
     to_undirected,
 )
 
@@ -102,13 +104,13 @@ def test_bipartite_negative_edge_sampling_with_different_edge_density():
             assert is_negative(edge_index, neg_edge_index, size, bipartite=True)
 
 
-def test_batched_negative_edge_sampling():
+def test_dense_batched_negative_edge_sampling():
     edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
     edge_index = torch.cat([edge_index, edge_index + 4], dim=1)
     batch = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
 
-    neg_edge_index = batched_negative_edge_sampling(edge_index, batch)
-    assert neg_edge_index.size(1) <= edge_index.size(1)
+    neg_edge_index = batched_negative_edge_sampling(edge_index, batch, method="dense")
+    assert neg_edge_index.size(1) == edge_index.size(1)
 
     adj = torch.zeros(8, 8, dtype=torch.bool)
     adj[edge_index[0], edge_index[1]] = True
@@ -119,6 +121,33 @@ def test_batched_negative_edge_sampling():
     assert (adj | neg_adj).sum() == edge_index.size(1) + neg_edge_index.size(1)
     assert neg_adj[:4, 4:].sum() == 0
     assert neg_adj[4:, :4].sum() == 0
+
+
+def test_sparse_batched_negative_edge_sampling():
+    num_nodes_per_graph = [100, 75, 220]
+    graph_list = [
+        Data(edge_index=erdos_renyi_graph(n, edge_prob=0.2))
+        for n in num_nodes_per_graph
+    ]
+    batched_data = Batch.from_data_list(graph_list)
+    batch_size = batched_data.batch_size
+    edge_index, batch = batched_data.edge_index, batched_data.batch
+
+    neg_edge_index = batched_negative_edge_sampling(edge_index, batch)
+    assert neg_edge_index.size(1) <= edge_index.size(1)
+
+    adj = to_dense_adj(
+        edge_index, batch, batch_size=batch_size, max_num_nodes=max(num_nodes_per_graph)
+    ).bool()
+    neg_adj = to_dense_adj(
+        neg_edge_index,
+        batch,
+        batch_size=batch_size,
+        max_num_nodes=max(num_nodes_per_graph),
+    ).bool()
+
+    assert (adj & neg_adj).sum() == 0
+    assert (adj | neg_adj).sum() == edge_index.size(1) + neg_edge_index.size(1)
 
 
 def test_bipartite_batched_negative_edge_sampling():
