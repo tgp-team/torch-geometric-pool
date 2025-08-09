@@ -1,5 +1,5 @@
 import math
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -21,6 +21,13 @@ def _batch_reduce_loss(loss: Tensor, batch_reduction: BatchReductionType) -> Ten
         return torch.sum(loss)
     raise ValueError(
         f"Batch reduction {batch_reduction} not allowed, must be one of ['mean', 'sum']."
+    )
+
+
+def _scatter_reduce_loss(loss, batch, batch_size):
+    dev = loss.device
+    return torch.zeros(batch_size, device=dev).scatter_add_(
+        dim=0, index=batch, src=loss
     )
 
 
@@ -640,6 +647,8 @@ def kl_loss(
     q: Distribution,
     p: Distribution,
     mask: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    batch_size: int = None,
     normalizing_const: Optional[Tensor] = None,
     batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
@@ -693,13 +702,22 @@ def kl_loss(
         >>> # Compute KL loss: sum over K-1 components, then over nodes
         >>> loss = kl_loss(q_sb, p_sb, mask=mask)
     """
+    # Apply mask if provided
+    if mask is not None and batch is not None:
+        raise ValueError("Cannot specify both mask and batch")
+    if batch is not None and batch_size is None:
+        raise ValueError("Batch size must be specified if batch is specified")
+
     loss = kl_divergence(q, p).sum(-1)
 
-    # Apply mask if provided
     if mask is not None:
         if not torch.all(mask):
             loss = loss * mask
-    loss = loss.sum(-1)
+        loss = loss.sum(-1)
+    elif batch is not None:
+        loss = _scatter_reduce_loss(loss, batch, batch_size)
+    else:
+        loss.sum(-1)
 
     # Normalize by the given constant
     if normalizing_const is not None:
@@ -776,6 +794,29 @@ def cluster_connectivity_prior_loss(
         prior_loss = prior_loss / normalizing_const  # scalar / vector = vector
 
     return _batch_reduce_loss(prior_loss, batch_reduction)
+
+
+def sparse_bce_reconstruction_loss(
+    link_prob_loigit,
+    true_y,
+    all_batch: Optional[Tensor] = None,
+    batch_size=None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tuple[Tensor, Tensor | int]:
+    rec_loss = F.binary_cross_entropy_with_logits(
+        link_prob_loigit, true_y, weight=None, reduction="none"
+    )  # has size (E+NegE)
+
+    if all_batch is None:
+        return rec_loss.mean(), rec_loss.size(0)
+    else:
+        summed_loss = _scatter_reduce_loss(rec_loss, all_batch, batch_size)
+        summed_count = _scatter_reduce_loss(
+            torch.ones_like(rec_loss), all_batch, batch_size
+        )
+
+        loss = _batch_reduce_loss(summed_loss / summed_count, batch_reduction)
+        return loss, summed_count
 
 
 def maxcut_loss(
