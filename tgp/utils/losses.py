@@ -799,7 +799,7 @@ def cluster_connectivity_prior_loss(
 def sparse_bce_reconstruction_loss(
     link_prob_loigit,
     true_y,
-    all_batch: Optional[Tensor] = None,
+    edges_batch_id: Optional[Tensor] = None,
     batch_size=None,
     batch_reduction: BatchReductionType = "mean",
 ) -> Tuple[Tensor, Tensor | int]:
@@ -807,12 +807,12 @@ def sparse_bce_reconstruction_loss(
         link_prob_loigit, true_y, weight=None, reduction="none"
     )  # has size (E+NegE)
 
-    if all_batch is None:
+    if edges_batch_id is None:
         return rec_loss.mean(), rec_loss.size(0)
     else:
-        summed_loss = _scatter_reduce_loss(rec_loss, all_batch, batch_size)
+        summed_loss = _scatter_reduce_loss(rec_loss, edges_batch_id, batch_size)
         summed_count = _scatter_reduce_loss(
-            torch.ones_like(rec_loss), all_batch, batch_size
+            torch.ones_like(rec_loss), edges_batch_id, batch_size
         )
 
         loss = _batch_reduce_loss(summed_loss / summed_count, batch_reduction)
