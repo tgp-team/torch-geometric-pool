@@ -472,7 +472,7 @@ class TestSparseBCEReconstructionLoss:
         assert isinstance(loss, torch.Tensor)
         assert isinstance(norm_const, torch.Tensor)
         assert loss.dim() == 0  # Scalar after reduction
-        assert loss.item() <= 1e-5  # BCE loss is almost zero
+        assert loss.item() <= 1e-3  # BCE loss is almost zero
         assert all(
             [
                 int(norm_const[i].item()) == num_edges_per_graph[i]

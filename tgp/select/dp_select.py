@@ -140,8 +140,6 @@ class DPSelect(DenseSelect):
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
         """
-        x = x.unsqueeze(0) if x.dim() == 2 else x
-
         out = torch.clamp(F.softplus(self.mlp(x)), min=1e-3, max=1e3)
         q_v_alpha, q_v_beta = torch.split(out, self.k - 1, dim=-1)
         q_z = Beta(q_v_alpha, q_v_beta)

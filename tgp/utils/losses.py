@@ -26,8 +26,8 @@ def _batch_reduce_loss(loss: Tensor, batch_reduction: BatchReductionType) -> Ten
 
 def _scatter_reduce_loss(loss, batch, batch_size):
     dev = loss.device
-    return torch.zeros(batch_size, device=dev).scatter_add_(
-        dim=0, index=batch, src=loss
+    return torch.zeros(batch_size, device=dev).index_add_(
+        dim=0, index=batch, source=loss
     )
 
 
@@ -655,8 +655,8 @@ def kl_loss(
     r"""Compute KL divergence between two distributions with flexible axis control.
 
     This function computes the KL divergence :math:`D_{KL}(q \parallel p)` between
-    two distributions, with explicit control over which axes to sum and how to
-    apply masking.
+    two distributions. It is possible to speicfy either a mask or a batch vector to allow
+    correct computations on batched graphs.
 
     .. math::
         D_{KL}(q \parallel p) = \mathbb{E}_{x \sim q}[\log q(x) - \log p(x)]
@@ -672,6 +672,10 @@ def kl_loss(
         mask (Optional[~torch.Tensor]): A mask matrix
             :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
             the valid nodes for each graph. (default: :obj:`None`)
+        batch (~torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
+                to which graph in the batch each node belongs. (default: :obj:`None`)
+        batch_size (~int, optional): The batch size
         normalizing_const (Optional[~torch.Tensor]): The normalizing constant used to scale the loss.
             It allows batch computation to ensure consistent scaling across graphs of different sizes.
             (default: :obj:`None`)
