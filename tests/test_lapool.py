@@ -41,7 +41,7 @@ def test_forward():
     )
     assert isinstance(out, PoolingOutput)
     # out.x should have shape [k, 1]
-    k = out.so.num_clusters
+    k = out.so.num_supernodes
     assert out.x.shape == (k, 1)
 
 
@@ -65,7 +65,7 @@ def test_shortest_path():
     )
     assert isinstance(out, PoolingOutput)
     # out.x should have shape [k, 1]
-    k = out.so.num_clusters
+    k = out.so.num_supernodes
     assert out.x.shape == (k, 1)
 
 

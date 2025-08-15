@@ -243,7 +243,7 @@ class ASAPooling(SRCPooling):
             )
             if self.add_self_loops:
                 edge_index_pooled, pooled_edge_weight = add_remaining_self_loops(
-                    edge_index_pooled, pooled_edge_weight, num_nodes=so.num_clusters
+                    edge_index_pooled, pooled_edge_weight, num_nodes=so.num_supernodes
                 )
 
             out = PoolingOutput(

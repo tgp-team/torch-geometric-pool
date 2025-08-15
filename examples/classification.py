@@ -37,6 +37,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "connect_red_op": "mean",
             "loss_coeff": 1.0,
             "k": dataset._data.num_nodes // len(dataset) // 2,
+            "order_k": 2,
             "cache_sel": False,
             "cache_conn": False,
             "ratio": 0.25,

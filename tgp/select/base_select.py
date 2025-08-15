@@ -16,7 +16,7 @@ def cluster_to_s(
     weight: Optional[Tensor] = None,
     as_edge_index: bool = False,
     num_nodes: Optional[int] = None,
-    num_clusters: Optional[int] = None,
+    num_supernodes: Optional[int] = None,
 ):
     r"""Converts a cluster assignment vector to a sparse assignment matrix.
 
@@ -33,7 +33,7 @@ def cluster_to_s(
             (default: :obj:`False`)
         num_nodes (int, optional):
             The number of nodes. (default: :obj:`None`)
-        num_clusters (int, optional):
+        num_supernodes (int, optional):
             The number of clusters. (default: :obj:`None`)
     """
     if num_nodes is None:
@@ -49,7 +49,7 @@ def cluster_to_s(
             row=node_index,
             col=cluster_index,
             value=weight,
-            sparse_sizes=(num_nodes, num_clusters),
+            sparse_sizes=(num_nodes, num_supernodes),
         )
 
 
@@ -66,7 +66,7 @@ class SelectOutput:
             The number of nodes.
         cluster_index (~torch.Tensor):
             The indices of the clusters each node in :obj:`node_index` is assigned to.
-        num_clusters (int):
+        num_supernodes (int):
             The number of clusters.
         weight (~torch.Tensor, optional):
             A weight vector, denoting the membership of a node to
@@ -83,7 +83,7 @@ class SelectOutput:
         node_index: Tensor = None,
         num_nodes: int = None,
         cluster_index: Tensor = None,
-        num_clusters: int = None,
+        num_supernodes: int = None,
         weight: Optional[Tensor] = None,
         s_inv_op: Optional[str] = "transpose",
         **extra_args,
@@ -96,9 +96,9 @@ class SelectOutput:
             assert node_index is None, "'node_index' cannot be set if 's' is not None"
             if weight is not None:
                 s = s.set_value(weight)
-            if num_nodes is not None or num_clusters is not None:
+            if num_nodes is not None or num_supernodes is not None:
                 _N, _C = s.sparse_sizes()
-                size = (num_nodes or _N, num_clusters or _C)
+                size = (num_nodes or _N, num_supernodes or _C)
                 s = s.sparse_resize(size)
         elif isinstance(s, Tensor):  # Dense assignment
             assert cluster_index is None, (
@@ -110,8 +110,8 @@ class SelectOutput:
             assert num_nodes is None, (
                 "'num_nodes' cannot be set if 's' is a dense Tensor"
             )
-            assert num_clusters is None, (
-                "'num_clusters' cannot be set if 's' is a dense Tensor"
+            assert num_supernodes is None, (
+                "'num_supernodes' cannot be set if 's' is a dense Tensor"
             )
             assert weight is None, "'weight' cannot be set if 's' is a dense Tensor"
         elif s is None:  # Make sparse assignment from other data
@@ -122,7 +122,7 @@ class SelectOutput:
             s = cluster_to_s(
                 cluster_index,
                 node_index=node_index,
-                num_clusters=num_clusters,
+                num_supernodes=num_supernodes,
                 num_nodes=num_nodes,
                 weight=weight,
             )
@@ -171,7 +171,7 @@ class SelectOutput:
         return self.s.size(-2)
 
     @property
-    def num_clusters(self) -> int:
+    def num_supernodes(self) -> int:
         return self.s.size(-1)
 
     @property
@@ -201,7 +201,7 @@ class SelectOutput:
         out = (
             f"{self.__class__.__name__}("
             f"num_nodes={self.num_nodes}, "
-            f"num_clusters={self.num_clusters}"
+            f"num_supernodes={self.num_supernodes}"
         )
         if len(self._extra_args):
             out += f", extra={self._extra_args}"
@@ -287,7 +287,7 @@ class SelectOutput:
         Returns:
             SelectOutput: A new SelectOutput with complete node-to-supernode assignments.
             The returned object has :obj:`num_nodes` assignments (one per node) and
-            :obj:`num_clusters` supernodes (same as the original selection).
+            :obj:`num_supernodes` supernodes (same as the original selection).
 
         Raises:
             AssertionError: If :obj:`adj` is :obj:`None` for :obj:`"closest_node"` strategy.
@@ -306,7 +306,7 @@ class SelectOutput:
             ...     adj=edge_index, closest_node_assignment=True, max_iter=5
             ... )
             >>> print(full_output.node_index.size(0))  # N nodes (all nodes)
-            >>> print(full_output.num_clusters)  # Still k supernodes
+            >>> print(full_output.num_supernodes)  # Still k supernodes
         """
         # Get the kept nodes indices from the original SelectOutput
         kept_nodes = self.node_index

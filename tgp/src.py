@@ -40,7 +40,7 @@ class PoolingOutput:
 
     def __repr__(self) -> str:
         return (
-            f"PoolingOutput(so={[self.so.num_nodes, self.so.num_clusters] if self.so is not None else None}, "
+            f"PoolingOutput(so={[self.so.num_nodes, self.so.num_supernodes] if self.so is not None else None}, "
             f"x={[*self.x.shape] if self.x is not None else None}, "
             f"edge_index={[*self.edge_index.shape] if self.edge_index is not None else None}, "
             f"edge_weight={[*self.edge_weight.shape] if self.edge_weight is not None else None}, "
@@ -85,7 +85,7 @@ class PoolingOutput:
             edge_weight=self.edge_weight,
             batch=self.batch,
             so=self.so,
-            num_nodes=self.so.num_clusters if self.so is not None else None,
+            num_nodes=self.so.num_supernodes if self.so is not None else None,
         )
 
 

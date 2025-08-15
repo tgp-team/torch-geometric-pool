@@ -290,7 +290,7 @@ class TestMaxCutSelect:
 
         # Check assignment matrix properties
         assert out.num_nodes == N  # All original nodes
-        assert out.num_clusters == expected_k  # Number of supernodes
+        assert out.num_supernodes == expected_k  # Number of supernodes
         assert out.node_index.size(0) == N  # ALL nodes in assignment
         assert out.cluster_index.size(0) == N  # Each node has cluster assignment
         assert out.weight.size(0) == N  # Weight for each node
@@ -324,7 +324,7 @@ class TestMaxCutSelect:
 
         # Check standard TopK properties
         assert out.num_nodes == N  # Total nodes in graph
-        assert out.num_clusters == expected_k  # Number of selected nodes
+        assert out.num_supernodes == expected_k  # Number of selected nodes
         assert out.node_index.size(0) == expected_k  # Only selected nodes
         assert out.cluster_index.size(0) == expected_k  # Each selected node -> cluster
         assert out.weight.size(0) == expected_k  # Weight for selected nodes only
@@ -356,7 +356,7 @@ class TestMaxCutSelect:
             expected_k = min(ratio, N)
 
         # In assignment mode: all nodes assigned to expected_k supernodes
-        assert out.num_clusters == expected_k
+        assert out.num_supernodes == expected_k
         assert out.node_index.size(0) == N  # All nodes in assignment
         assert torch.all(out.cluster_index < expected_k)
 
@@ -429,7 +429,7 @@ class TestMaxCutPooling:
 
         # Check SelectOutput
         assert out.so.num_nodes == N
-        assert out.so.num_clusters == expected_k
+        assert out.so.num_supernodes == expected_k
 
         # Check loss computation
         assert out.has_loss
@@ -460,7 +460,7 @@ class TestMaxCutPooling:
 
         # Check SelectOutput (different from assignment mode)
         assert out.so.num_nodes == N
-        assert out.so.num_clusters == expected_k
+        assert out.so.num_supernodes == expected_k
 
         # Check loss computation
         assert out.has_loss
@@ -568,7 +568,7 @@ class TestBaseSelect:
         assert full_assignment.num_nodes == N
         assert full_assignment.cluster_index.size(0) == N
         assert torch.all(full_assignment.cluster_index >= 0)
-        assert torch.all(full_assignment.cluster_index < topk_output.num_clusters)
+        assert torch.all(full_assignment.cluster_index < topk_output.num_supernodes)
 
     def test_select_output_assign_all_nodes_random_strategy(self, simple_graph):
         """Test assign_all_nodes with random strategy."""
@@ -597,7 +597,7 @@ class TestBaseSelect:
         assert full_assignment.num_nodes == N
         assert full_assignment.cluster_index.size(0) == N
         assert torch.all(full_assignment.cluster_index >= 0)
-        assert torch.all(full_assignment.cluster_index < topk_output.num_clusters)
+        assert torch.all(full_assignment.cluster_index < topk_output.num_supernodes)
 
     def test_maxcut_select_already_all_nodes_assigned(self, simple_graph):
         """Test that assign_all_nodes returns self when all nodes are already kept."""
@@ -740,7 +740,9 @@ class TestCoverageEdgeCases:
         from tgp.select.base_select import SelectOutput
 
         mock_so = SelectOutput(
-            cluster_index=torch.tensor([0, 0, 1, 1, 2, 2]), num_nodes=6, num_clusters=3
+            cluster_index=torch.tensor([0, 0, 1, 1, 2, 2]),
+            num_nodes=6,
+            num_supernodes=3,
         )
         # Ensure it doesn't have scores attribute
         assert not hasattr(mock_so, "scores")
@@ -808,34 +810,6 @@ class TestCoverageEdgeCases:
                 closest_node_assignment=True,
                 max_iter=0,  # Should trigger assertion
             )
-
-    def test_losses_normalize_by_n_squared(self, simple_graph):
-        """Test normalization paths in losses."""
-        from tgp.utils.losses import cluster_connectivity_prior_loss
-
-        # Test the normalize_loss branch (lines 844, 846, 851 in losses.py)
-        K = torch.randn(3, 3)
-        K_mu = torch.zeros(3, 3)
-        K_var = torch.tensor(1.0)
-
-        # Test with mask (line 844)
-        mask = torch.ones(2, 6, dtype=torch.bool)  # 2 graphs, 6 nodes each
-        loss_with_mask = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="mean"
-        )
-        assert torch.isfinite(loss_with_mask)
-
-        # Test without mask (line 846)
-        loss_without_mask = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=None, batch_reduction="mean"
-        )
-        assert torch.isfinite(loss_without_mask)
-
-        # Test sum reduction (line 851)
-        loss_sum = cluster_connectivity_prior_loss(
-            K, K_mu, K_var, normalize_loss=True, mask=mask, batch_reduction="sum"
-        )
-        assert torch.isfinite(loss_sum)
 
     def test_ops_reset_node_numbers(self):
         """Test reset_node_numbers function."""
@@ -1031,49 +1005,6 @@ class TestFinalCoverageComplete:
         )
         assert output_with_weight.num_nodes == x.size(0)
         assert hasattr(output_with_weight, "scores")
-
-    def test_losses_exact_missing_lines(self):
-        """Test the exact missing lines 844, 846, 851 in losses.py."""
-        from tgp.utils.losses import cluster_connectivity_prior_loss
-
-        # Create test data that will trigger normalization paths
-        K = torch.randn(4, 4) + torch.eye(4)  # Make it positive definite
-        K_mu = torch.zeros(4, 4)
-        K_var = torch.tensor(2.0)
-
-        # Test exact line 844: mask provided, mean reduction, normalize=True
-        mask = torch.ones(3, 8, dtype=torch.bool)  # 3 graphs, 8 nodes each
-        loss_844 = cluster_connectivity_prior_loss(
-            K,
-            K_mu,
-            K_var,
-            normalize_loss=True,  # This triggers normalize branch
-            mask=mask,  # This hits line 844
-            batch_reduction="mean",
-        )
-        assert torch.isfinite(loss_844)
-
-        # Test exact line 846: no mask, mean reduction, normalize=True
-        loss_846 = cluster_connectivity_prior_loss(
-            K,
-            K_mu,
-            K_var,
-            normalize_loss=True,  # This triggers normalize branch
-            mask=None,  # This hits line 846
-            batch_reduction="mean",
-        )
-        assert torch.isfinite(loss_846)
-
-        # Test exact line 851: mask provided, sum reduction, normalize=True
-        loss_851 = cluster_connectivity_prior_loss(
-            K,
-            K_mu,
-            K_var,
-            normalize_loss=True,  # This triggers normalize branch
-            mask=mask,  # Mask needed for sum
-            batch_reduction="sum",  # This hits line 851
-        )
-        assert torch.isfinite(loss_851)
 
     def test_ops_exact_missing_lines(self):
         """Test the exact missing lines 213, 344, 351 in ops.py."""

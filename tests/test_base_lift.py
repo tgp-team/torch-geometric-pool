@@ -88,8 +88,8 @@ def test_poolers_forward_and_lifting(simple_graph):
     assert hasattr(out, "x")
     assert hasattr(out, "so") and isinstance(out.so, SelectOutput)
     assert isinstance(out.x, torch.Tensor)
-    num_clusters = out.so.num_clusters
-    assert 1 <= num_clusters <= N
+    num_supernodes = out.so.num_supernodes
+    assert 1 <= num_supernodes <= N
     assert 1 <= out.x.size(0) <= N
 
     # edge_index in out may be a SparseTensor or a Tensor
@@ -170,8 +170,8 @@ def test_with_tensor(simple_graph):
     assert hasattr(out, "x")
     assert hasattr(out, "so") and isinstance(out.so, SelectOutput)
     assert isinstance(out.x, torch.Tensor)
-    num_clusters = out.so.num_clusters
-    assert 1 <= num_clusters <= N
+    num_supernodes = out.so.num_supernodes
+    assert 1 <= num_supernodes <= N
     assert 1 <= out.x.size(0) <= N
 
     # edge_index in out may be a SparseTensor or a Tensor

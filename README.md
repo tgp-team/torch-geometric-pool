@@ -8,6 +8,7 @@
     <img alt="PyPI - Python Version" src="https://img.shields.io/badge/python-%3E%3D3.9-blue">
     <a href='https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml'><img alt="CI status" src="https://github.com/tgp-team/torch-geometric-pool/actions/workflows/ci.yaml/badge.svg"></a>
     <a href='https://torch-geometric-pool.readthedocs.io/en/latest/?badge=latest'><img src='https://readthedocs.org/projects/torch-geometric-pool/badge/?version=latest' alt='Documentation Status' /></a>
+    <a href='https://pepy.tech/projects/torch-geometric-pool'><img src='https://static.pepy.tech/badge/torch-geometric-pool' alt='Total Downloads' /></a>
     </p>
     <p>
     📚 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/">Documentation</a> - 🚀 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/content/quickstart.html">Getting Started</a> - 💻 <a href="https://torch-geometric-pool.readthedocs.io/en/latest/tutorials/index.html">Introductory notebooks</a>
@@ -70,7 +71,7 @@ pip install git+https://github.com/tgp-team/torch-geometric-pool.git
 ```
 
 > [!CAUTION]
-> <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp is built upon [PyTorch>=1.8](https://pytorch.org/) and [PyG>=2.0](https://github.com/pyg-team/pytorch_geometric/). Make sure you have both installed in your environment before installation. Check the [installation guide](https://torch-geometric-pool.readthedocs.io/en/latest/content/quickstart.html) for more details.
+> <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp is built upon [PyTorch>=1.8](https://pytorch.org/) and [PyG>=2.6](https://github.com/pyg-team/pytorch_geometric/). Make sure you have both installed in your environment before installation. Check the [installation guide](https://torch-geometric-pool.readthedocs.io/en/latest/content/quickstart.html) for more details.
 
 ## Quick Example
 

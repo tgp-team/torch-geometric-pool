@@ -288,13 +288,19 @@ class BNPool(DenseSRCPooling):
         s, q_z = so.s, so.q_z
         rec_adj = self.get_rec_adj(s)
 
+        if mask is not None:
+            N = mask.sum(-1)  # has shape B x 1
+        else:
+            N = adj.shape[-1]  # N
+
+        N_squared = N**2
         # Reconstruction loss
         rec_loss = weighted_bce_reconstruction_loss(
             rec_adj,
             adj,
             mask,
             balance_links=self.balance_links,
-            normalize_loss=self.rescale_loss,
+            normalizing_const=N_squared,
             batch_reduction="mean",
         )
 
@@ -306,9 +312,7 @@ class BNPool(DenseSRCPooling):
             q_z,
             prior_dist,
             mask=mask,
-            node_axis=1,  # Nodes are on axis 1: (B, N, K-1)
-            sum_axes=[2, 1],  # Sum over K-1 components (axis 2), then nodes (axis 1)
-            normalize_loss=self.rescale_loss,
+            normalizing_const=N_squared,
             batch_reduction="mean",
         )
 
@@ -318,8 +322,7 @@ class BNPool(DenseSRCPooling):
                 self.K,
                 self.get_buffer("K_mu"),
                 self.get_buffer("K_var"),
-                normalize_loss=self.rescale_loss,
-                mask=mask,
+                normalizing_const=N_squared,
                 batch_reduction="mean",
             )
         else:

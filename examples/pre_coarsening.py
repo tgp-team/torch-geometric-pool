@@ -16,7 +16,7 @@ poolers = {
     "ndp": {},
     "nmf": {"k": 5},
     "graclus": {},
-    "kmis": {"scorer": "degree"},
+    "kmis": {"scorer": "degree", "order_k": 2},
 }
 
 for _pool, args in poolers.items():
@@ -38,6 +38,7 @@ for _pool, args in poolers.items():
     print(dataset[0])
     next_batch = next(iter(train_loader))
     print(next_batch)
+    print(next_batch.pooled_data[0])
 
     ### Model definition
     class Net(torch.nn.Module):

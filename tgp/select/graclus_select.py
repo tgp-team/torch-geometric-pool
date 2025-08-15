@@ -79,7 +79,7 @@ class GraclusSelect(Select):
             node_index=torch.arange(num_nodes, device=assignment.device),
             num_nodes=num_nodes,
             cluster_index=assignment,
-            num_clusters=num_supernodes,
+            num_supernodes=num_supernodes,
             s_inv_op=self.s_inv_op,
         )
 

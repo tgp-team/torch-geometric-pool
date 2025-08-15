@@ -74,7 +74,7 @@ class KronConnect(Connect):
             warnings.warn(
                 "Laplacian not provided. The SelectOutput is not computed with NDPSelect."
             )
-            assert len(so.node_index) == so.num_clusters, (
+            assert len(so.node_index) == so.num_supernodes, (
                 "Inconsistent number of clusters and node indices."
             )
 

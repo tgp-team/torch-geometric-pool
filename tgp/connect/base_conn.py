@@ -56,7 +56,7 @@ def sparse_connect(
     node_index: Tensor = None,
     cluster_index: Optional[Tensor] = None,
     num_nodes: int = None,
-    num_clusters: int = None,
+    num_supernodes: int = None,
     remove_self_loops: bool = True,
     reduce_op: ConnectionType = "sum",
 ) -> Tuple[Adj, OptTensor]:
@@ -75,7 +75,7 @@ def sparse_connect(
     elif cluster_index is not None and len(cluster_index) == num_nodes:
         edge_index = cluster_index[edge_index]
         edge_index, edge_weight = coalesce(
-            edge_index, edge_weight, num_nodes=num_clusters, reduce=reduce_op
+            edge_index, edge_weight, num_nodes=num_supernodes, reduce=reduce_op
         )
     else:
         raise RuntimeError
@@ -85,7 +85,7 @@ def sparse_connect(
 
     if to_sparse:
         edge_index = connectivity_to_sparse_tensor(
-            edge_index, edge_weight, num_clusters
+            edge_index, edge_weight, num_supernodes
         )
         edge_weight = None
 
@@ -159,7 +159,7 @@ class SparseConnect(Connect):
             node_index=so.node_index,
             cluster_index=so.cluster_index,
             num_nodes=so.num_nodes,
-            num_clusters=so.num_clusters,
+            num_supernodes=so.num_supernodes,
             remove_self_loops=self.remove_self_loops,
             reduce_op=self.reduce_op,
         )

@@ -105,7 +105,7 @@ For the latest version, consider installing from source:
    :class: caution
 
    :tgp:`tgp` requires `PyTorch>=1.8 <https://pytorch.org/>`_ and
-   `PyG>=2.0 <https://github.com/pyg-team/pytorch_geometric/>`_ to be present in your
+   `PyG>=2.6 <https://github.com/pyg-team/pytorch_geometric/>`_ to be present in your
    environment.
 
 
