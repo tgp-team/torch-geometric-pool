@@ -51,7 +51,7 @@ class DenseConnectSPT(Connect):
         edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
         so: SelectOutput = None,
-        batch_pool: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Adj, Optional[Tensor]]:
         r"""Forward pass.
@@ -68,7 +68,7 @@ class DenseConnectSPT(Connect):
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput):
                 The output of the :math:`\texttt{select}` operator.
-            batch_pool (~torch.Tensor, optional):
+            batch_pooled (~torch.Tensor, optional):
                 Batch vector which assigns each supernode to a specific graph.
                 Required when normalize_edge_weight=True for per-graph normalization.
                 (default: :obj:`None`)
@@ -79,10 +79,10 @@ class DenseConnectSPT(Connect):
             If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
             returns :obj:`None` as the edge weights.
         """
-        if self.normalize_edge_weight and batch_pool is None:
+        if self.normalize_edge_weight and batch_pooled is None:
             raise AssertionError(
-                "normalize_edge_weight=True but batch_pool=None. "
-                "batch_pool parameter is required for per-graph normalization in DenseConnectSPT."
+                "normalize_edge_weight=True but batch_pooled=None. "
+                "batch_pooled parameter is required for per-graph normalization in DenseConnectSPT."
             )
         if isinstance(edge_index, SparseTensor):
             adj_pooled = so.s.t() @ edge_index @ so.s
@@ -121,8 +121,8 @@ class DenseConnectSPT(Connect):
             ).coalesce()
 
         if self.normalize_edge_weight:
-            # Use batch_pool to map edges to graphs
-            edge_batch = batch_pool[row]
+            # Use batch_pooled to map edges to graphs
+            edge_batch = batch_pooled[row]
 
             # Find maximum absolute value per graph
             max_per_graph = scatter(val.abs(), edge_batch, dim=0, reduce="max")

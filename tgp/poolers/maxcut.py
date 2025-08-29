@@ -122,7 +122,9 @@ class MaxCutPooling(SRCPooling):
                 s_inv_op=s_inv_op,
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
-            connector=SparseConnect(reduce_op=connect_red_op),
+            connector=SparseConnect(
+                reduce_op=connect_red_op, normalize_edge_weight=True
+            ),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
         )
 
@@ -181,7 +183,7 @@ class MaxCutPooling(SRCPooling):
 
         # Connect
         edge_index_pooled, edge_weight_pooled = self.connect(
-            edge_index=adj, so=so, edge_weight=edge_weight
+            edge_index=adj, so=so, edge_weight=edge_weight, batch_pooled=batch_pooled
         )
 
         return PoolingOutput(

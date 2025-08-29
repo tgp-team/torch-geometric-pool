@@ -61,7 +61,7 @@ def sparse_connect(
     remove_self_loops: bool = True,
     reduce_op: ConnectionType = "sum",
     normalize_edge_weight: bool = False,
-    batch_pool: Optional[Tensor] = None,
+    batch_pooled: Optional[Tensor] = None,
 ) -> Tuple[Adj, OptTensor]:
     r"""Connects the nodes in the coarsened graph."""
     to_sparse = False
@@ -87,8 +87,8 @@ def sparse_connect(
         edge_index, edge_weight = rsl(edge_index, edge_weight)
 
     if normalize_edge_weight and edge_weight is not None:
-        # Per-graph normalization using batch_pool
-        edge_batch = batch_pool[edge_index[0]]
+        # Per-graph normalization using batch_pooled
+        edge_batch = batch_pooled[edge_index[0]]
 
         # Find maximum absolute edge weight per graph
         max_per_graph = scatter(edge_weight.abs(), edge_batch, dim=0, reduce="max")
@@ -136,7 +136,7 @@ class SparseConnect(Connect):
             (default: :obj:`True`)
         normalize_edge_weight (bool, optional):
             Whether to normalize the edge weights by dividing by the maximum absolute value
-            per graph (if batch_pool is provided) or globally (if batch_pool is None).
+            per graph (if batch_pooled is provided) or globally (if batch_pooled is None).
             (default: :obj:`False`)
     """
 
@@ -157,7 +157,7 @@ class SparseConnect(Connect):
         so: SelectOutput,
         *,
         edge_weight: Optional[Tensor] = None,
-        batch_pool: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Adj, Optional[Tensor]]:
         r"""Forward pass.
@@ -173,7 +173,7 @@ class SparseConnect(Connect):
             edge_weight (~torch.Tensor, optional): A vector of shape
                 :math:`[E]` containing the weights of the edges.
                 (default: :obj:`None`)
-            batch_pool (~torch.Tensor, optional):
+            batch_pooled (~torch.Tensor, optional):
                 Batch vector which assigns each supernode to a specific graph.
                 Required when normalize_edge_weight=True for per-graph normalization.
                 (default: :obj:`None`)
@@ -184,10 +184,10 @@ class SparseConnect(Connect):
             If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
             returns :obj:`None` as the edge weights.
         """
-        if self.normalize_edge_weight and batch_pool is None:
+        if self.normalize_edge_weight and batch_pooled is None:
             raise AssertionError(
-                "normalize_edge_weight=True but batch_pool=None. "
-                "batch_pool parameter is required for per-graph normalization in SparseConnect."
+                "normalize_edge_weight=True but batch_pooled=None. "
+                "batch_pooled parameter is required for per-graph normalization in SparseConnect."
             )
 
         out = sparse_connect(
@@ -200,7 +200,7 @@ class SparseConnect(Connect):
             remove_self_loops=self.remove_self_loops,
             reduce_op=self.reduce_op,
             normalize_edge_weight=self.normalize_edge_weight,
-            batch_pool=batch_pool,
+            batch_pooled=batch_pooled,
         )
 
         return out
