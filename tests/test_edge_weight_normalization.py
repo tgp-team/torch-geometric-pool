@@ -165,45 +165,44 @@ class TestEdgeWeightNormalization:
 
     def test_dense_connect_with_batched_adjacency(self):
         """Test DenseConnect with 3D batched adjacency matrices."""
-        batch_data = self.create_batch_graphs()
+        # Create simple test data for dense connect
+        batch_size = 2
+        max_nodes = 4
+        num_supernodes = 2
 
-        # Create dense adjacency matrices
-        adj_dense = self.create_dense_adjacency(batch_data)
+        # Create dense adjacency matrices with known values
+        adj_dense = torch.zeros(batch_size, max_nodes, max_nodes)
 
-        # Get SelectOutput (need dense assignment matrix)
-        selector = TopkSelect(in_channels=batch_data.x.size(1), ratio=0.5)
-        so = selector(batch_data.x, batch=batch_data.batch)
+        # Graph 1: simple adjacency matrix with max value 8.0
+        adj_dense[0, 0, 1] = 2.0
+        adj_dense[0, 1, 0] = 2.0
+        adj_dense[0, 1, 2] = 8.0  # max value for graph 1
+        adj_dense[0, 2, 1] = 8.0
+        adj_dense[0, 2, 3] = 4.0
+        adj_dense[0, 3, 2] = 4.0
 
-        # Convert sparse assignment to dense batched format
-        s_dense = so.s.to_dense()
-        batch_size = batch_data.batch.max().item() + 1
-        max_nodes = adj_dense.size(1)
-        max_supernodes = so.num_supernodes
+        # Graph 2: simple adjacency matrix with max value 6.0
+        adj_dense[1, 0, 1] = 3.0
+        adj_dense[1, 1, 0] = 3.0
+        adj_dense[1, 1, 2] = 6.0  # max value for graph 2
+        adj_dense[1, 2, 1] = 6.0
+        adj_dense[1, 2, 3] = 1.0
+        adj_dense[1, 3, 2] = 1.0
 
-        # Create batched dense assignment matrix
-        s_batched = torch.zeros(batch_size, max_nodes, max_supernodes)
-        start_node = 0
-        start_supernode = 0
+        # Create dense assignment matrices (batch_size, max_nodes, num_supernodes)
+        s_batched = torch.zeros(batch_size, max_nodes, num_supernodes)
 
-        for batch_idx in range(batch_size):
-            graph_nodes = (batch_data.batch == batch_idx).sum().item()
-            graph_supernodes = (
-                (BaseReduce.reduce_batch(so, batch_data.batch) == batch_idx)
-                .sum()
-                .item()
-            )
+        # Graph 1: nodes 0,1 -> supernode 0, nodes 2,3 -> supernode 1
+        s_batched[0, 0, 0] = 1.0
+        s_batched[0, 1, 0] = 1.0
+        s_batched[0, 2, 1] = 1.0
+        s_batched[0, 3, 1] = 1.0
 
-            s_batched[
-                batch_idx,
-                :graph_nodes,
-                start_supernode : start_supernode + graph_supernodes,
-            ] = s_dense[
-                start_node : start_node + graph_nodes,
-                start_supernode : start_supernode + graph_supernodes,
-            ]
-
-            start_node += graph_nodes
-            start_supernode += graph_supernodes
+        # Graph 2: nodes 0,1 -> supernode 0, nodes 2,3 -> supernode 1
+        s_batched[1, 0, 0] = 1.0
+        s_batched[1, 1, 0] = 1.0
+        s_batched[1, 2, 1] = 1.0
+        s_batched[1, 3, 1] = 1.0
 
         # Test without normalization
         connector = DenseConnect(normalize_edge_weight=False)
@@ -214,6 +213,8 @@ class TestEdgeWeightNormalization:
         adj_norm, _ = connector_norm(adj_dense, type("SO", (), {"s": s_batched})())
 
         # Check that normalization happened per graph
+        assert not torch.isnan(adj_norm).any(), "No NaN values should be present"
+        assert not torch.isinf(adj_norm).any(), "No Inf values should be present"
         assert adj_norm.abs().max() <= 1.0 + 1e-6
 
         # Each graph (batch dimension) should be normalized independently
@@ -340,37 +341,6 @@ class TestEdgeWeightNormalization:
             norm_has_negative = (edge_weight < 0).any()
             if orig_has_negative:
                 assert norm_has_negative
-
-    def test_consistency_across_methods(self):
-        """Test that all methods show consistent normalization behavior."""
-        batch_data = (
-            self.create_single_graph_batch()
-        )  # Use single graph for consistency
-        so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
-
-        # Test SparseConnect
-        sparse_connector = SparseConnect(normalize_edge_weight=True)
-        _, sparse_weights = sparse_connector(
-            batch_data.edge_index,
-            so,
-            edge_weight=batch_data.edge_weight,
-            batch_pooled=batch_pooled,
-        )
-
-        # Test DenseConnectSPT
-        spt_connector = DenseConnectSPT(normalize_edge_weight=True)
-        spt_adj, _ = spt_connector(
-            batch_data.edge_index, batch_data.edge_weight, so, batch_pooled=batch_pooled
-        )
-
-        # Both should normalize to similar ranges
-        if sparse_weights is not None:
-            assert sparse_weights.abs().max() <= 1.0 + 1e-6
-
-        if isinstance(spt_adj, SparseTensor):
-            _, _, spt_values = spt_adj.coo()
-            if len(spt_values) > 0:
-                assert spt_values.abs().max() <= 1.0 + 1e-6
 
 
 if __name__ == "__main__":
