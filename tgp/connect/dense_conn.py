@@ -11,6 +11,7 @@ def dense_connect(
     remove_self_loops: bool = False,
     degree_norm: bool = False,
     adj_transpose: bool = False,
+    normalize_edge_weight: bool = False,
 ) -> Tensor:
     r"""Connects the nodes in the coarsened graph for dense pooling methods."""
     sta = torch.matmul(s.transpose(-2, -1), adj)
@@ -20,6 +21,7 @@ def dense_connect(
         remove_self_loops=remove_self_loops,
         degree_norm=degree_norm,
         adj_transpose=adj_transpose,
+        normalize_edge_weight=normalize_edge_weight,
     )
 
     return adj_pool
@@ -30,6 +32,7 @@ def postprocess_adj_pool(
     remove_self_loops: bool = False,
     degree_norm: bool = False,
     adj_transpose: bool = False,
+    normalize_edge_weight: bool = False,
 ) -> Tensor:
     r"""Postprocess the adjacency matrix of the pooled graph."""
     if remove_self_loops:
@@ -45,6 +48,26 @@ def postprocess_adj_pool(
         d[d == 0] = 1  # avoid division by zero
         d = torch.sqrt(d)
         adj_pool = (adj_pool / d) / d.transpose(-2, -1)
+
+    if normalize_edge_weight:
+        # Per-graph normalization for dense adjacency matrices
+        # adj_pool has shape [batch_size, num_supernodes, num_supernodes]
+        if adj_pool.dim() == 3:  # batched case
+            batch_size = adj_pool.size(0)
+            # Find max absolute value per graph: [batch_size, 1, 1]
+            max_per_graph = (
+                adj_pool.view(batch_size, -1).abs().max(dim=1, keepdim=True)[0]
+            )
+            max_per_graph = max_per_graph.unsqueeze(-1)  # [batch_size, 1, 1]
+
+            # Avoid division by zero
+            max_per_graph = torch.where(
+                max_per_graph == 0, torch.ones_like(max_per_graph), max_per_graph
+            )
+
+            adj_pool = adj_pool / max_per_graph
+        else:  # single graph case
+            adj_pool = adj_pool / adj_pool.abs().max()
 
     return adj_pool
 
@@ -73,6 +96,9 @@ class DenseConnect(Connect):
             adjacency matrix, so that it can be passed "as is" to the dense
             message passing layers.
             (default: :obj:`True`)
+        normalize_edge_weight (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value.
+            (default: :obj:`False`)
     """
 
     def __init__(
@@ -80,11 +106,13 @@ class DenseConnect(Connect):
         remove_self_loops: bool = True,
         degree_norm: bool = True,
         adj_transpose: bool = True,
+        normalize_edge_weight: bool = False,
     ):
         super().__init__()
         self.remove_self_loops = remove_self_loops
         self.degree_norm = degree_norm
         self.adj_transpose = adj_transpose
+        self.normalize_edge_weight = normalize_edge_weight
 
     def forward(self, edge_index: Tensor, so: SelectOutput, **kwargs) -> Tensor:
         r"""Forward pass.
@@ -111,6 +139,7 @@ class DenseConnect(Connect):
             remove_self_loops=self.remove_self_loops,
             degree_norm=self.degree_norm,
             adj_transpose=self.adj_transpose,
+            normalize_edge_weight=self.normalize_edge_weight,
         )
 
         return adj_pool, None
@@ -120,5 +149,6 @@ class DenseConnect(Connect):
             f"{self.__class__.__name__}("
             f"remove_self_loops={self.remove_self_loops}, "
             f"degree_norm={self.degree_norm}, "
-            f"adj_transpose={self.adj_transpose})"
+            f"adj_transpose={self.adj_transpose}, "
+            f"normalize_edge_weight={self.normalize_edge_weight})"
         )
