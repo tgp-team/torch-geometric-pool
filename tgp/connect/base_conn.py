@@ -6,6 +6,7 @@ from torch_geometric.typing import Adj, OptTensor
 from torch_geometric.utils import coalesce, subgraph
 from torch_geometric.utils import remove_self_loops as rsl
 from torch_geometric.utils.num_nodes import maybe_num_nodes
+from torch_scatter import scatter
 from torch_sparse import SparseTensor
 
 from tgp.select import SelectOutput
@@ -59,6 +60,8 @@ def sparse_connect(
     num_supernodes: int = None,
     remove_self_loops: bool = True,
     reduce_op: ConnectionType = "sum",
+    normalize_edge_weight: bool = False,
+    batch_pool: Optional[Tensor] = None,
 ) -> Tuple[Adj, OptTensor]:
     r"""Connects the nodes in the coarsened graph."""
     to_sparse = False
@@ -82,6 +85,21 @@ def sparse_connect(
 
     if remove_self_loops:
         edge_index, edge_weight = rsl(edge_index, edge_weight)
+
+    if normalize_edge_weight and edge_weight is not None:
+        # Per-graph normalization using batch_pool
+        edge_batch = batch_pool[edge_index[0]]
+
+        # Find maximum absolute edge weight per graph
+        max_per_graph = scatter(edge_weight.abs(), edge_batch, dim=0, reduce="max")
+
+        # Avoid division by zero
+        max_per_graph = torch.where(
+            max_per_graph == 0, torch.ones_like(max_per_graph), max_per_graph
+        )
+
+        # Normalize edge weights by their respective graph's maximum
+        edge_weight = edge_weight / max_per_graph[edge_batch]
 
     if to_sparse:
         edge_index = connectivity_to_sparse_tensor(
@@ -116,14 +134,22 @@ class SparseConnect(Connect):
         remove_self_loops (bool, optional):
             Whether to remove self-loops from the graph after coarsening.
             (default: :obj:`True`)
+        normalize_edge_weight (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value
+            per graph (if batch_pool is provided) or globally (if batch_pool is None).
+            (default: :obj:`False`)
     """
 
     def __init__(
-        self, reduce_op: ConnectionType = "sum", remove_self_loops: bool = True
+        self,
+        reduce_op: ConnectionType = "sum",
+        remove_self_loops: bool = True,
+        normalize_edge_weight: bool = False,
     ):
         super().__init__()
         self.reduce_op = reduce_op
         self.remove_self_loops = remove_self_loops
+        self.normalize_edge_weight = normalize_edge_weight
 
     def forward(
         self,
@@ -131,6 +157,7 @@ class SparseConnect(Connect):
         so: SelectOutput,
         *,
         edge_weight: Optional[Tensor] = None,
+        batch_pool: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Adj, Optional[Tensor]]:
         r"""Forward pass.
@@ -146,6 +173,10 @@ class SparseConnect(Connect):
             edge_weight (~torch.Tensor, optional): A vector of shape
                 :math:`[E]` containing the weights of the edges.
                 (default: :obj:`None`)
+            batch_pool (~torch.Tensor, optional):
+                Batch vector which assigns each supernode to a specific graph.
+                Required when normalize_edge_weight=True for per-graph normalization.
+                (default: :obj:`None`)
 
         Returns:
             (~torch_geometric.typing.Adj, ~torch.Tensor or None):
@@ -153,6 +184,12 @@ class SparseConnect(Connect):
             If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
             returns :obj:`None` as the edge weights.
         """
+        if self.normalize_edge_weight and batch_pool is None:
+            raise AssertionError(
+                "normalize_edge_weight=True but batch_pool=None. "
+                "batch_pool parameter is required for per-graph normalization in SparseConnect."
+            )
+
         out = sparse_connect(
             edge_index,
             edge_weight,
@@ -162,6 +199,8 @@ class SparseConnect(Connect):
             num_supernodes=so.num_supernodes,
             remove_self_loops=self.remove_self_loops,
             reduce_op=self.reduce_op,
+            normalize_edge_weight=self.normalize_edge_weight,
+            batch_pool=batch_pool,
         )
 
         return out
@@ -170,5 +209,6 @@ class SparseConnect(Connect):
         return (
             f"{self.__class__.__name__}("
             f"reduce_op={self.reduce_op}, "
-            f"remove_self_loops={self.remove_self_loops})"
+            f"remove_self_loops={self.remove_self_loops}, "
+            f"normalize_edge_weight={self.normalize_edge_weight})"
         )

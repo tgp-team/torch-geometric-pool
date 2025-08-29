@@ -52,22 +52,17 @@ def postprocess_adj_pool(
     if normalize_edge_weight:
         # Per-graph normalization for dense adjacency matrices
         # adj_pool has shape [batch_size, num_supernodes, num_supernodes]
-        if adj_pool.dim() == 3:  # batched case
-            batch_size = adj_pool.size(0)
-            # Find max absolute value per graph: [batch_size, 1, 1]
-            max_per_graph = (
-                adj_pool.view(batch_size, -1).abs().max(dim=1, keepdim=True)[0]
-            )
-            max_per_graph = max_per_graph.unsqueeze(-1)  # [batch_size, 1, 1]
+        batch_size = adj_pool.size(0)
+        # Find max absolute value per graph: [batch_size, 1, 1]
+        max_per_graph = adj_pool.view(batch_size, -1).abs().max(dim=1, keepdim=True)[0]
+        max_per_graph = max_per_graph.unsqueeze(-1)  # [batch_size, 1, 1]
 
-            # Avoid division by zero
-            max_per_graph = torch.where(
-                max_per_graph == 0, torch.ones_like(max_per_graph), max_per_graph
-            )
+        # Avoid division by zero
+        max_per_graph = torch.where(
+            max_per_graph == 0, torch.ones_like(max_per_graph), max_per_graph
+        )
 
-            adj_pool = adj_pool / max_per_graph
-        else:  # single graph case
-            adj_pool = adj_pool / adj_pool.abs().max()
+        adj_pool = adj_pool / max_per_graph
 
     return adj_pool
 
