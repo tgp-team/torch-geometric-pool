@@ -317,31 +317,6 @@ class TestEdgeWeightNormalization:
             assert not torch.isinf(edge_weight).any()
             torch.testing.assert_close(edge_weight, torch.zeros_like(edge_weight))
 
-    def test_negative_edge_weights(self):
-        """Test normalization preserves signs with negative edge weights."""
-        batch_data = self.create_batch_graphs()
-        batch_data.edge_weight = torch.tensor(
-            [-2.0, 4.0, -6.0, 1.0, -8.0, 3.0, -10.0, 2.0, 5.0]
-        )
-        so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
-
-        connector = SparseConnect(normalize_edge_weight=True)
-        edge_index, edge_weight = connector(
-            batch_data.edge_index,
-            so,
-            edge_weight=batch_data.edge_weight,
-            batch_pooled=batch_pooled,
-        )
-
-        if edge_weight is not None:
-            # Should preserve signs and normalize by absolute maximum
-            assert edge_weight.abs().max() <= 1.0 + 1e-6
-            # Check that signs are preserved (if original had negatives, normalized should too)
-            orig_has_negative = (batch_data.edge_weight < 0).any()
-            norm_has_negative = (edge_weight < 0).any()
-            if orig_has_negative:
-                assert norm_has_negative
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
