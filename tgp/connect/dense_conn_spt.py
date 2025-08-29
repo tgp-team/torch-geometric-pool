@@ -30,7 +30,7 @@ class DenseConnectSPT(Connect):
             If :obj:`True`, the adjacency matrix will be symmetrically normalized.
             (default: :obj:`True`)
         normalize_edge_weight (bool, optional):
-            Whether to normalize the edge weights by dividing by the maximum absolute value.
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
             (default: :obj:`False`)
     """
 
