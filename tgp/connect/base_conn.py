@@ -62,6 +62,7 @@ def sparse_connect(
     reduce_op: ConnectionType = "sum",
     normalize_edge_weight: bool = False,
     batch_pooled: Optional[Tensor] = None,
+    degree_norm: bool = False,
 ) -> Tuple[Adj, OptTensor]:
     r"""Connects the nodes in the coarsened graph."""
     to_sparse = False
@@ -85,6 +86,19 @@ def sparse_connect(
 
     if remove_self_loops:
         edge_index, edge_weight = rsl(edge_index, edge_weight)
+
+    if degree_norm and edge_weight is not None:
+        # Compute degree normalization D^{-1/2} A D^{-1/2}
+        deg = scatter(
+            edge_weight, edge_index[0], dim=0, dim_size=num_supernodes, reduce="sum"
+        )
+        deg[deg == 0] = 1.0  # Avoid division by zero
+        deg_inv_sqrt = 1.0 / deg.sqrt()
+
+        # Apply symmetric normalization to edge weights
+        edge_weight = (
+            edge_weight * deg_inv_sqrt[edge_index[0]] * deg_inv_sqrt[edge_index[1]]
+        )
 
     if normalize_edge_weight and edge_weight is not None:
         # Per-graph normalization using batch_pooled
@@ -138,6 +152,10 @@ class SparseConnect(Connect):
             Whether to normalize the edge weights by dividing by the maximum absolute value
             per graph.
             (default: :obj:`False`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized using
+            :math:`D^{-1/2} A D^{-1/2}` where :math:`D` is the degree matrix.
+            (default: :obj:`False`)
     """
 
     def __init__(
@@ -145,11 +163,13 @@ class SparseConnect(Connect):
         reduce_op: ConnectionType = "sum",
         remove_self_loops: bool = True,
         normalize_edge_weight: bool = False,
+        degree_norm: bool = False,
     ):
         super().__init__()
         self.reduce_op = reduce_op
         self.remove_self_loops = remove_self_loops
         self.normalize_edge_weight = normalize_edge_weight
+        self.degree_norm = degree_norm
 
     def forward(
         self,
@@ -201,6 +221,7 @@ class SparseConnect(Connect):
             reduce_op=self.reduce_op,
             normalize_edge_weight=self.normalize_edge_weight,
             batch_pooled=batch_pooled,
+            degree_norm=self.degree_norm,
         )
 
         return out
@@ -210,5 +231,6 @@ class SparseConnect(Connect):
             f"{self.__class__.__name__}("
             f"reduce_op={self.reduce_op}, "
             f"remove_self_loops={self.remove_self_loops}, "
-            f"normalize_edge_weight={self.normalize_edge_weight})"
+            f"normalize_edge_weight={self.normalize_edge_weight}, "
+            f"degree_norm={self.degree_norm})"
         )

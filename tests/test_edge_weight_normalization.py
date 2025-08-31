@@ -161,6 +161,87 @@ class TestEdgeWeightNormalization:
         repr_str = repr(connector)
         assert "normalize_edge_weight=True" in repr_str
 
+    def test_sparse_connect_degree_norm(self):
+        """Test SparseConnect degree_norm feature."""
+        batch_data = self.create_batch_graphs()
+        so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
+
+        # Test without degree normalization
+        connector = SparseConnect(degree_norm=False)
+        edge_index_orig, edge_weight_orig = connector(
+            batch_data.edge_index, so, edge_weight=batch_data.edge_weight
+        )
+
+        # Test with degree normalization
+        connector_norm = SparseConnect(degree_norm=True)
+        edge_index_norm, edge_weight_norm = connector_norm(
+            batch_data.edge_index, so, edge_weight=batch_data.edge_weight
+        )
+
+        # Check that structure is preserved
+        torch.testing.assert_close(edge_index_orig, edge_index_norm)
+
+        # Check degree normalization applied (weights should be different)
+        if edge_weight_orig is not None and edge_weight_norm is not None:
+            assert not torch.allclose(edge_weight_orig, edge_weight_norm), (
+                "Edge weights should be different after degree normalization"
+            )
+
+            # Degree normalization should not increase maximum weight dramatically
+            # (this is a sanity check, not a strict mathematical requirement)
+            assert not torch.isnan(edge_weight_norm).any()
+            assert not torch.isinf(edge_weight_norm).any()
+
+    def test_sparse_connect_degree_norm_no_batch_pooled(self):
+        """Test SparseConnect degree_norm works without batch_pooled."""
+        batch_data = self.create_single_graph_batch()
+        so, _ = self.get_select_output_and_batch_pooled(batch_data)
+
+        # degree_norm should work without batch_pooled (unlike normalize_edge_weight)
+        connector = SparseConnect(degree_norm=True)
+        edge_index, edge_weight = connector(
+            batch_data.edge_index,
+            so,
+            edge_weight=batch_data.edge_weight,
+            batch_pooled=None,  # This should work for degree_norm
+        )
+
+        if edge_weight is not None:
+            assert not torch.isnan(edge_weight).any()
+            assert not torch.isinf(edge_weight).any()
+
+    def test_sparse_connect_degree_norm_and_normalize_combined(self):
+        """Test SparseConnect with both degree_norm and normalize_edge_weight."""
+        batch_data = self.create_batch_graphs()
+        so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
+
+        # Test with both features enabled
+        connector = SparseConnect(degree_norm=True, normalize_edge_weight=True)
+        edge_index, edge_weight = connector(
+            batch_data.edge_index,
+            so,
+            edge_weight=batch_data.edge_weight,
+            batch_pooled=batch_pooled,
+        )
+
+        if edge_weight is not None:
+            # Both transformations should be applied
+            assert edge_weight.abs().max() <= 1.0 + 1e-6  # normalize_edge_weight
+            assert not torch.isnan(edge_weight).any()
+            assert not torch.isinf(edge_weight).any()
+
+    def test_sparse_connect_degree_norm_repr(self):
+        """Test SparseConnect __repr__ includes degree_norm."""
+        connector = SparseConnect(degree_norm=True)
+        repr_str = repr(connector)
+        assert "degree_norm=True" in repr_str
+
+        # Test with both features
+        connector_both = SparseConnect(degree_norm=True, normalize_edge_weight=True)
+        repr_str_both = repr(connector_both)
+        assert "degree_norm=True" in repr_str_both
+        assert "normalize_edge_weight=True" in repr_str_both
+
     # ===== DENSE CONNECT TESTS =====
 
     def test_dense_connect_with_batched_adjacency(self):
