@@ -98,7 +98,7 @@ class MaxCutPooling(SRCPooling):
         ratio: Union[float, int] = 0.5,
         assign_all_nodes: bool = True,
         loss_coeff: float = 1.0,
-        mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
+        mp_units: list = [32, 32, 32, 32],
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",

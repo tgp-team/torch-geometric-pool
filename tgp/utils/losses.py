@@ -67,7 +67,8 @@ def mincut_loss(
     d_flat = adj.sum(-1)
     d = rank3_diag(d_flat)
     den = rank3_trace(torch.matmul(torch.matmul(S.transpose(-2, -1), d), S))
-    cut_loss = -(num / den)
+    # Add small epsilon to prevent division by zero for graphs with no edges
+    cut_loss = -(num / (den + eps))
     return _batch_reduce_loss(cut_loss, batch_reduction)
 
 
@@ -833,8 +834,13 @@ def maxcut_loss(
     cut_losses = scatter(cut_values, batch, dim=0, reduce="sum")
 
     # Compute volume (total edge weight) for each graph
+    # Need to ensure volumes has the same size as cut_losses for graphs with no edges
+    num_graphs = cut_losses.size(0)
     edge_batch = batch[edge_index[0]]
-    volumes = scatter(edge_weight, edge_batch, dim=0, reduce="sum")
+    volumes = scatter(edge_weight, edge_batch, dim=0, dim_size=num_graphs, reduce="sum")
+
+    # For graphs with no edges, volume will be 0, so we set it to 1 to avoid division by zero
+    volumes = torch.where(volumes == 0, torch.ones_like(volumes), volumes)
 
     # Normalize by volume and take mean across graphs
     normalized_cut_losses = cut_losses / volumes

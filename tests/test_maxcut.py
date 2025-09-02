@@ -153,6 +153,140 @@ class TestMaxCutLoss:
         assert scores.grad is not None
         assert torch.isfinite(scores.grad).all()
 
+    def test_maxcut_loss_with_isolated_nodes(self):
+        """Test MaxCut loss with isolated nodes."""
+        torch.manual_seed(42)
+
+        # Create graph with isolated nodes
+        # Nodes 0-2 form a triangle, nodes 3-4 are isolated
+        N = 5
+        scores = torch.randn(N)
+
+        # Triangle edges: 0-1, 1-2, 2-0 (bidirectional)
+        edge_index = torch.tensor(
+            [
+                [0, 1, 1, 2, 2, 0],  # source nodes
+                [1, 0, 2, 1, 0, 2],  # target nodes
+            ]
+        )
+        edge_weight = torch.ones(edge_index.size(1))
+        batch = torch.zeros(N, dtype=torch.long)
+
+        # Compute loss
+        loss = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_reduction="mean",
+        )
+
+        # Check output is valid
+        assert isinstance(loss, torch.Tensor)
+        assert loss.dim() == 0  # Scalar
+        assert torch.isfinite(loss)
+
+        # Test that isolated nodes don't contribute to loss calculation
+        # (they have no edges, so they don't affect the cut value)
+
+        # Create same graph but without isolated nodes
+        scores_connected = scores[:3]  # Only connected nodes
+        edge_index_connected = torch.tensor(
+            [
+                [0, 1, 1, 2, 2, 0],  # source nodes
+                [1, 0, 2, 1, 0, 2],  # target nodes
+            ]
+        )
+        edge_weight_connected = torch.ones(edge_index_connected.size(1))
+        batch_connected = torch.zeros(3, dtype=torch.long)
+
+        loss_connected = maxcut_loss(
+            scores=scores_connected,
+            edge_index=edge_index_connected,
+            edge_weight=edge_weight_connected,
+            batch=batch_connected,
+            batch_reduction="mean",
+        )
+
+        # The loss should be the same since isolated nodes don't contribute
+        assert torch.allclose(loss, loss_connected, rtol=1e-5)
+
+    def test_maxcut_loss_with_batched_isolated_nodes(self):
+        """Test MaxCut loss with isolated nodes in batched graphs."""
+        torch.manual_seed(123)
+
+        # First graph: triangle (nodes 0-2) + isolated node (3)
+        # Second graph: single edge (nodes 4-5) + isolated node (6)
+        N = 7
+        scores = torch.randn(N)
+
+        # Edges: triangle in graph 0, single edge in graph 1
+        edge_index = torch.tensor(
+            [
+                [0, 1, 1, 2, 2, 0, 4, 5],  # source nodes
+                [1, 0, 2, 1, 0, 2, 5, 4],  # target nodes
+            ]
+        )
+        edge_weight = torch.ones(edge_index.size(1))
+
+        # Batch assignment: nodes 0-3 in graph 0, nodes 4-6 in graph 1
+        batch = torch.tensor([0, 0, 0, 0, 1, 1, 1])
+
+        # Compute loss
+        loss = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_reduction="mean",
+        )
+
+        # Check output is valid
+        assert isinstance(loss, torch.Tensor)
+        assert loss.dim() == 0  # Scalar
+        assert torch.isfinite(loss)
+
+        # Test sum reduction as well
+        loss_sum = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_reduction="sum",
+        )
+
+        assert isinstance(loss_sum, torch.Tensor)
+        assert torch.isfinite(loss_sum)
+
+    def test_maxcut_loss_all_isolated_nodes(self):
+        """Test MaxCut loss when all nodes are isolated (no edges)."""
+        torch.manual_seed(456)
+
+        N = 4
+        scores = torch.randn(N)
+
+        # Empty edge_index (no edges)
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        edge_weight = torch.empty(0)
+        batch = torch.zeros(N, dtype=torch.long)
+
+        # Compute loss
+        loss = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_reduction="mean",
+        )
+
+        # With no edges, the loss should be 0 (no cut value to compute)
+        assert isinstance(loss, torch.Tensor)
+        assert loss.dim() == 0  # Scalar
+        assert torch.isfinite(loss)
+        # The volume will be 0, which gets set to 1 to avoid division by zero
+        # The cut value will be 0, so loss should be 0
+        assert torch.allclose(loss, torch.tensor(0.0))
+
     def test_maxcut_loss_score_shape_handling_lines_844_846_851(self, simple_graph):
         """Test the exact missing lines 844, 846, 851 in losses.py - score shape handling."""
         from tgp.utils.losses import maxcut_loss
