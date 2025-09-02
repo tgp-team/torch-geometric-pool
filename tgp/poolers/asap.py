@@ -88,6 +88,15 @@ class ASAPooling(SRCPooling):
             :obj:`~torch_geometric.utils.scatter`,
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
+        remove_self_loops (bool, optional):
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
+            (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
         **kwargs (optional): Additional parameters for initializing the
             graph neural network layer.
     """
@@ -106,6 +115,9 @@ class ASAPooling(SRCPooling):
         reduce_red_op: ReduceType = "sum",
         connect_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
+        remove_self_loops: bool = True,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -113,9 +125,15 @@ class ASAPooling(SRCPooling):
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
-                remove_self_loops=not add_self_loops, reduce_op=connect_red_op
+                remove_self_loops=remove_self_loops,
+                reduce_op=connect_red_op,
+                degree_norm=degree_norm,
+                edge_weight_norm=edge_weight_norm,
             ),
         )
+
+        if remove_self_loops and add_self_loops:
+            raise ValueError("remove_self_loops and add_self_loops cannot be both True")
 
         self.in_channels = in_channels
         self.ratio = ratio
@@ -239,7 +257,10 @@ class ASAPooling(SRCPooling):
 
             # Connect
             edge_index_pooled, pooled_edge_weight = self.connect(
-                edge_index=adj, so=so, edge_weight=edge_weight
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch_pooled=batch_pooled,
             )
             if self.add_self_loops:
                 edge_index_pooled, pooled_edge_weight = add_remaining_self_loops(

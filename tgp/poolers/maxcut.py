@@ -88,6 +88,15 @@ class MaxCutPooling(SRCPooling):
             :obj:`~torch_geometric.utils.scatter`,
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
+        remove_self_loops (bool, optional):
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
+            (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`True`)
 
 
     """
@@ -108,6 +117,9 @@ class MaxCutPooling(SRCPooling):
         reduce_red_op: ReduceType = "sum",
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
+        remove_self_loops: bool = True,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = True,
     ):
         super().__init__(
             selector=MaxCutSelect(
@@ -122,7 +134,12 @@ class MaxCutPooling(SRCPooling):
                 s_inv_op=s_inv_op,
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
-            connector=SparseConnect(reduce_op=connect_red_op, edge_weight_norm=True),
+            connector=SparseConnect(
+                reduce_op=connect_red_op,
+                edge_weight_norm=True,
+                degree_norm=degree_norm,
+                remove_self_loops=remove_self_loops,
+            ),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
         )
 

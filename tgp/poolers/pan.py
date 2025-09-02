@@ -89,6 +89,15 @@ class PANPooling(SRCPooling):
             Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
             :obj:`~torch_geometric.utils.scatter`,
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`) (default: :obj:`"sum"`)
+        remove_self_loops (bool, optional):
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
+            (default: :obj:`False`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
     """
 
     def __init__(
@@ -103,6 +112,9 @@ class PANPooling(SRCPooling):
         reduce_red_op: ReduceType = "sum",
         connect_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
+        remove_self_loops: bool = False,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = False,
     ):
         super().__init__(
             selector=TopkSelect(
@@ -110,7 +122,12 @@ class PANPooling(SRCPooling):
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
-            connector=SparseConnect(remove_self_loops=False, reduce_op=connect_red_op),
+            connector=SparseConnect(
+                remove_self_loops=remove_self_loops,
+                reduce_op=connect_red_op,
+                degree_norm=degree_norm,
+                edge_weight_norm=edge_weight_norm,
+            ),
         )
 
         self.in_channels = in_channels
@@ -184,7 +201,7 @@ class PANPooling(SRCPooling):
             x = self.multiplier * x if self.multiplier != 1 else x
 
             # Connect
-            adj_pool, _ = self.connect(edge_index=adj, so=so)
+            adj_pool, _ = self.connect(edge_index=adj, so=so, batch_pooled=batch_pooled)
 
             out = PoolingOutput(
                 x=x, edge_index=adj_pool, edge_weight=None, batch=batch_pooled, so=so
