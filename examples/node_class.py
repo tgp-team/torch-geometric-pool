@@ -3,9 +3,9 @@ import torch.nn.functional as F
 from torch_geometric import seed_everything
 from torch_geometric.datasets import Planetoid
 from torch_geometric.nn import DenseGCNConv, GCNConv
-from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
+from tgp.utils import connectivity_to_sparse_tensor
 
 seed_everything(8)
 
@@ -35,7 +35,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
         }
 
         #### Model definition
-        class GCN(torch.nn.Module):
+        class Net(torch.nn.Module):
             def __init__(
                 self,
                 hidden_channels,
@@ -64,8 +64,9 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 self.dropout = dropout
 
             def forward(self, x, edge_index, edge_weight, batch):
-                edge_index = SparseTensor.from_edge_index(
-                    edge_index, edge_attr=edge_weight
+                num_nodes = x.size(0)
+                edge_index = connectivity_to_sparse_tensor(
+                    edge_index, edge_weight, num_nodes
                 )
 
                 # Encoder
@@ -101,7 +102,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
         ### Model setup
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = GCN(hidden_channels=16).to(device)
+        model = Net(hidden_channels=16).to(device)
         data = data.to(device)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=5e-4)

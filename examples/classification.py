@@ -4,9 +4,9 @@ from torch_geometric import seed_everything
 from torch_geometric.datasets import TUDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DenseGCNConv, GCNConv
-from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
+from tgp.utils import connectivity_to_sparse_tensor
 
 seed_everything(8)  # Reproducibility
 
@@ -80,8 +80,9 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 self.lin = torch.nn.Linear(hidden_channels, num_classes)
 
             def forward(self, x, edge_index, edge_weight, batch=None):
-                edge_index = SparseTensor.from_edge_index(
-                    edge_index, edge_attr=edge_weight
+                num_nodes = x.size(0)
+                edge_index = connectivity_to_sparse_tensor(
+                    edge_index, edge_weight, num_nodes
                 )
 
                 # First MP layer
