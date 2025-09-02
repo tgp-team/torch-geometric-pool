@@ -121,6 +121,7 @@ class DenseConnectSPT(Connect):
             ).coalesce()
 
         if self.edge_weight_norm:
+            row, col, val = adj_pooled.coo()
             # Use batch_pooled to map edges to graphs
             edge_batch = batch_pooled[row]
 

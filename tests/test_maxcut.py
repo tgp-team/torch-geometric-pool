@@ -287,42 +287,41 @@ class TestMaxCutLoss:
         # The cut value will be 0, so loss should be 0
         assert torch.allclose(loss, torch.tensor(0.0))
 
-    def test_maxcut_loss_score_shape_handling_lines_844_846_851(self, simple_graph):
-        """Test the exact missing lines 844, 846, 851 in losses.py - score shape handling."""
+    def test_maxcut_loss_score_shape_handling(self, simple_graph):
         from tgp.utils.losses import maxcut_loss
 
         x, edge_index, edge_weight, batch = simple_graph
         N = x.size(0)
 
-        # Test line 844: scores.dim() == 2 and scores.size(1) == 1 -> scores.squeeze(-1)
+        # Test scores.dim() == 2 and scores.size(1) == 1 -> scores.squeeze(-1)
         scores_2d = torch.randn(N, 1)  # Shape [N, 1]
-        loss_line_844 = maxcut_loss(
-            scores=scores_2d,  # This should hit line 844: scores.squeeze(-1)
+        loss_1 = maxcut_loss(
+            scores=scores_2d,
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
         )
-        assert torch.isfinite(loss_line_844)
+        assert torch.isfinite(loss_1)
 
-        # Test line 846: scores.dim() != 1 (after handling 2D case) -> ValueError
+        # Test scores.dim() != 1 (after handling 2D case) -> ValueError
         scores_3d = torch.randn(N, 2, 2)  # Shape [N, 2, 2] - invalid
         with pytest.raises(ValueError, match="Expected scores to have shape"):
             maxcut_loss(
-                scores=scores_3d,  # This should hit line 846: raise ValueError
+                scores=scores_3d,
                 edge_index=edge_index,
                 edge_weight=edge_weight,
                 batch=batch,
             )
 
-        # Test line 851: batch=None -> batch = torch.zeros(...)
+        # Test batch=None -> batch = torch.zeros(...)
         scores_1d = torch.randn(N)
-        loss_line_851 = maxcut_loss(
+        loss_2 = maxcut_loss(
             scores=scores_1d,
             edge_index=edge_index,
             edge_weight=edge_weight,
-            batch=None,  # This should hit line 851: batch = torch.zeros(...)
+            batch=None,  # This should hit batch = torch.zeros(...)
         )
-        assert torch.isfinite(loss_line_851)
+        assert torch.isfinite(loss_2)
 
 
 class TestMaxCutScoreNet:
@@ -667,7 +666,6 @@ class TestMaxCutPooling:
         assert extra_args["loss_coeff"] == 2.5
 
 
-# New tests for additional functionality
 class TestBaseSelect:
     """Test base select functionality and assign_all_nodes method."""
 
@@ -862,10 +860,7 @@ class TestGetAssignments:
             )
 
 
-# Additional coverage tests
 class TestCoverageEdgeCases:
-    """Tests to cover specific edge cases and missing lines."""
-
     def test_maxcut_pooling_no_scores_fallback(self, simple_graph):
         """Test MaxCutPooling fallback when scores are not available."""
         x, edge_index, edge_weight, batch = simple_graph
@@ -883,8 +878,7 @@ class TestCoverageEdgeCases:
 
         pooler = MaxCutPooling(in_channels=x.size(1), ratio=0.5)
 
-        # Test calling compute_loss without scores - should handle gracefully
-        # This tests the fallback path in line 170 of maxcut.py
+        # Test calling compute_loss without scores
         result = pooler(x=x, adj=edge_index, edge_weight=edge_weight, batch=batch)
         assert "maxcut_loss" in result.loss
         assert torch.isfinite(result.loss["maxcut_loss"])
@@ -904,7 +898,7 @@ class TestCoverageEdgeCases:
 
         output = selector(x, edge_index, edge_weight, batch)
 
-        # Test with incorrect weight size (line 302 in base_select.py)
+        # Test with incorrect weight size
         wrong_weight = torch.ones(10)  # Wrong size
         with pytest.raises(
             ValueError, match="Weight tensor size .* must match the number of nodes"
@@ -923,7 +917,7 @@ class TestCoverageEdgeCases:
         selector.eval()
         output = selector(x, edge_index, edge_weight, batch)
 
-        # Test invalid adjacency type (line 296 in base_select.py)
+        # Test invalid adjacency type
         with pytest.raises(ValueError, match="Invalid adjacency type"):
             output.assign_all_nodes(adj="invalid_type", closest_node_assignment=True)
 
@@ -937,7 +931,7 @@ class TestCoverageEdgeCases:
         selector.eval()
         output = selector(x, edge_index, edge_weight, batch)
 
-        # Test max_iter <= 0 assertion (line 291 in base_select.py)
+        # Test max_iter <= 0 assertion
         with pytest.raises(AssertionError, match="max_iter must be greater than 0"):
             output.assign_all_nodes(
                 adj=edge_index,
@@ -953,7 +947,7 @@ class TestCoverageEdgeCases:
         edge_index = torch.tensor([[0, 1, 3, 4], [1, 2, 4, 5]])
         edge_attr = torch.ones(4)
 
-        # Test reset_node_numbers (line 213 in ops.py)
+        # Test reset_node_numbers
         new_edge_index, new_edge_attr = reset_node_numbers(edge_index, edge_attr)
 
         assert new_edge_index.size(0) == 2
@@ -964,7 +958,7 @@ class TestCoverageEdgeCases:
         """Test edge cases in create_one_hot_tensor."""
         from tgp.utils.ops import create_one_hot_tensor
 
-        # Test with 0-dimensional tensor (line 250 in ops.py)
+        # Test with 0-dimensional tensor
         kept_node_0d = torch.tensor(2)  # 0-dimensional
         result = create_one_hot_tensor(5, kept_node_0d, torch.device("cpu"))
 
@@ -980,7 +974,7 @@ class TestCoverageEdgeCases:
 
         kept_nodes = torch.tensor([0, 4])  # One from each graph
 
-        # Test with batched random assignment (lines 305->322 in ops.py)
+        # Test with batched random assignment
         assignments = get_assignments(
             kept_node_indices=kept_nodes,
             edge_index=edge_index,
@@ -999,7 +993,7 @@ class TestCoverageEdgeCases:
         x, edge_index, edge_weight, batch = simple_graph
         N = x.size(0)
 
-        # Use all nodes as kept nodes to trigger early break (line 376 in ops.py)
+        # Use all nodes as kept nodes to trigger early break
         kept_nodes = torch.arange(N)
 
         assignments = get_assignments(
@@ -1034,7 +1028,7 @@ class TestCoverageEdgeCases:
             num_nodes=N,
         )
 
-        # Original edge_index should be unchanged (line 385->392 in ops.py tests cloning)
+        # Original edge_index should be unchanged
         assert torch.equal(edge_index, original_edge_index)
         assert assignments.size(1) == N
 
@@ -1042,7 +1036,7 @@ class TestCoverageEdgeCases:
         """Test get_random_map_mask without batch parameter."""
         from tgp.utils.ops import get_random_map_mask
 
-        # Test the path without batch (lines 344, 351, 361 in ops.py)
+        # Test the path without batch
         kept_nodes = torch.tensor([0, 2])
         mask = torch.zeros(5, dtype=torch.bool)
         mask[kept_nodes] = True
@@ -1055,10 +1049,9 @@ class TestCoverageEdgeCases:
         assert torch.all(mappa[0] >= 0)  # Valid node indices
 
     def test_maxcut_select_none_edge_weight_coverage(self, simple_graph):
-        """Test MaxCutSelect with specific parameter to cover missing lines."""
         x, edge_index, edge_weight, batch = simple_graph
 
-        # Test the specific branch in maxcut_select.py line 272->275
+        # Test the specific branch in maxcut_select.py
         selector = MaxCutSelect(
             in_channels=x.size(1),
             ratio=0.5,
@@ -1077,27 +1070,16 @@ class TestCoverageEdgeCases:
 
 
 class TestFinalCoverageComplete:
-    """Final tests to achieve 100% coverage by targeting exact missing lines."""
-
     def test_maxcut_pooling_adj_none_fallback(self, simple_graph):
-        """Test MaxCutPooling line 162: adj=None fallback path."""
-        # This test was failing due to assertion in connect phase
-        # Instead, let's test a scenario where we can reach the adj=None logic
-        # The issue is that MaxCutPooling requires adj for the connect phase
-        # So we need to test this differently - by creating a minimal pooler
         from tgp.poolers.maxcut import MaxCutPooling
 
         x, edge_index, edge_weight, batch = simple_graph
         pooler = MaxCutPooling(in_channels=x.size(1), ratio=0.5)
-
-        # The adj=None path is actually hard to reach due to architecture
-        # Let's verify the pooler works normally and skip this specific test
         result = pooler(x=x, adj=edge_index, edge_weight=edge_weight, batch=batch)
         assert "maxcut_loss" in result.loss
         assert torch.isfinite(result.loss["maxcut_loss"])
 
     def test_base_select_max_iter_assertion(self, simple_graph):
-        """Test base_select.py line 291: max_iter <= 0 assertion."""
         x, edge_index, edge_weight, batch = simple_graph
 
         selector = MaxCutSelect(
@@ -1106,23 +1088,21 @@ class TestFinalCoverageComplete:
         selector.eval()
         output = selector(x, edge_index, edge_weight, batch)
 
-        # Test line 291: max_iter <= 0 assertion
+        # Test max_iter <= 0 assertion
         with pytest.raises(AssertionError, match="max_iter must be greater than 0"):
             output.assign_all_nodes(
                 adj=edge_index,
                 closest_node_assignment=True,
-                max_iter=0,  # This triggers line 291
+                max_iter=0,
             )
 
     def test_maxcut_select_edge_weight_branch_precise(self, simple_graph):
-        """Test maxcut_select.py branch 272->275 precisely."""
         x, edge_index, edge_weight, batch = simple_graph
 
-        # This should hit the exact branch 272->275 in maxcut_select.py
         selector = MaxCutSelect(
             in_channels=x.size(1),
             ratio=0.5,
-            assign_all_nodes=True,  # Important for hitting the right branch
+            assign_all_nodes=True,
             mp_units=[8],
             mlp_units=[4],
         )
@@ -1140,74 +1120,65 @@ class TestFinalCoverageComplete:
         assert output_with_weight.num_nodes == x.size(0)
         assert hasattr(output_with_weight, "scores")
 
-    def test_ops_exact_missing_lines(self):
-        """Test the exact missing lines 213, 344, 351 in ops.py."""
+    def test_ops_extra(self):
         from tgp.utils.ops import get_random_map_mask, reset_node_numbers
 
-        # Test line 213: reset_node_numbers with isolated nodes
+        # Test reset_node_numbers with isolated nodes
         edge_index = torch.tensor([[0, 2, 4], [1, 3, 5]])  # Gaps in numbering
         edge_attr = torch.ones(3)
 
-        # This should hit line 213 (the main function call)
         new_edge_index, new_edge_attr = reset_node_numbers(edge_index, edge_attr)
         assert new_edge_index.size(0) == 2
         if new_edge_attr is not None:
             assert new_edge_attr.size(0) == new_edge_index.size(1)
 
-        # Test lines 344, 351: get_random_map_mask without batch
         kept_nodes = torch.tensor([0, 3])
         mask = torch.zeros(6, dtype=torch.bool)
         mask[kept_nodes] = True
 
-        # This should hit lines 344 and 351 (batch=None path)
         result = get_random_map_mask(kept_nodes, mask, batch=None)
         assert isinstance(result, torch.Tensor)
         assert result.size(0) == 2  # Should return [indices, assignments]
 
-    def test_ops_missing_lines_213_344_351(self, simple_graph):
-        """Test the exact missing lines 213, 344, 351 in ops.py."""
+    def test_ops_maxcut(self, simple_graph):
         from tgp.utils.ops import delta_gcn_matrix, get_assignments
 
         x, edge_index, edge_weight, batch = simple_graph
 
-        # Test line 213: return propagation_matrix, None (sparse input case)
         from torch_sparse import SparseTensor
 
         sparse_adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
 
-        # This should hit line 213: return propagation_matrix, None
         result_sparse, result_weight = delta_gcn_matrix(
             sparse_adj, edge_weight, delta=2.0
         )  # type: ignore
         assert isinstance(result_sparse, SparseTensor)
-        assert result_weight is None  # Line 213: return propagation_matrix, None
+        assert result_weight is None
 
-        # Test line 344: kept_node_tensor = torch.tensor(kept_node_indices, dtype=torch.long)
         # Pass a list instead of tensor to trigger tensor conversion
         kept_nodes_list = [0, 2]  # Pass as list, not tensor
 
-        assignments_line_344 = get_assignments(
-            kept_node_indices=kept_nodes_list,  # This should hit line 344: torch.tensor conversion
+        assignments_1 = get_assignments(
+            kept_node_indices=kept_nodes_list,
             edge_index=edge_index,
             max_iter=2,
             batch=batch,
             num_nodes=x.size(0),
         )
-        assert assignments_line_344.size(0) == 2
+        assert assignments_1.size(0) == 2
 
-        # Test line 351: num_nodes = edge_index.max().item() + 1
+        # Test num_nodes = edge_index.max().item() + 1
         # Call get_assignments without num_nodes or batch to trigger edge_index.max() path
-        assignments_line_351 = get_assignments(
+        assignments_2 = get_assignments(
             kept_node_indices=torch.tensor([1, 3]),
-            edge_index=edge_index,  # This should hit line 351: edge_index.max().item() + 1
+            edge_index=edge_index,
             max_iter=1,
             batch=None,  # No batch
             num_nodes=None,  # No num_nodes -> triggers edge_index.max() + 1
         )
-        assert assignments_line_351.size(0) == 2
+        assert assignments_2.size(0) == 2
 
-    def test_maxcut_select_edge_index_none_lines_239_240(self, simple_graph):
-        """Test MaxCutSelect lines 239-240: edge_index=None branch."""
+    def test_maxcut_select_edge_index_none(self, simple_graph):
         from tgp.select.base_select import SelectOutput
         from tgp.select.maxcut_select import MaxCutSelect
 
@@ -1223,7 +1194,6 @@ class TestFinalCoverageComplete:
         )
         selector.eval()
 
-        # This should trigger lines 239-240: edge_index=None handling
         result = selector(x=x, edge_index=None, edge_weight=edge_weight, batch=batch)
 
         # Verify the result is valid despite no edge connectivity

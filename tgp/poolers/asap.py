@@ -120,6 +120,9 @@ class ASAPooling(SRCPooling):
         edge_weight_norm: bool = False,
         **kwargs,
     ):
+        if remove_self_loops and add_self_loops:
+            raise ValueError("remove_self_loops and add_self_loops cannot be both True")
+
         super().__init__(
             selector=TopkSelect(ratio=ratio, act=nonlinearity, s_inv_op=s_inv_op),
             reducer=BaseReduce(reduce_op=reduce_red_op),
@@ -131,9 +134,6 @@ class ASAPooling(SRCPooling):
                 edge_weight_norm=edge_weight_norm,
             ),
         )
-
-        if remove_self_loops and add_self_loops:
-            raise ValueError("remove_self_loops and add_self_loops cannot be both True")
 
         self.in_channels = in_channels
         self.ratio = ratio

@@ -22,7 +22,7 @@ class HOSCPooling(DenseSRCPooling):
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
-    This layer optimizes two auxiliary losses:
+    This layer optimizes a combination of the following auxiliary losses:
 
     + the mincut loss (:class:`~tgp.utils.losses.mincut_loss`),
     + the orthogonality loss (:class:`~tgp.utils.losses.orthogonality_loss`),

@@ -117,6 +117,8 @@ class DenseConnect(Connect):
         Returns:
             ~torch.Tensor: The pooled adjacency matrix :math:`\mathbf{A} \in \mathbb{R}^{B \times K \times K}`,
             where :math:`K` is the number of supernodes in the pooled graph.
+            It also returns :obj:`None` for compatibility with the interface of other
+            connect operations returning pooled edge weights as the second argument.
         """
         assert isinstance(so.s, Tensor), "SelectOutput.s must be a tensor"
 

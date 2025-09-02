@@ -136,7 +136,7 @@ class MaxCutPooling(SRCPooling):
             reducer=BaseReduce(reduce_op=reduce_red_op),
             connector=SparseConnect(
                 reduce_op=connect_red_op,
-                edge_weight_norm=True,
+                edge_weight_norm=edge_weight_norm,
                 degree_norm=degree_norm,
                 remove_self_loops=remove_self_loops,
             ),

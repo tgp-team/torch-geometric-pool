@@ -87,7 +87,10 @@ def sparse_connect(
     if remove_self_loops:
         edge_index, edge_weight = rsl(edge_index, edge_weight)
 
-    if degree_norm and edge_weight is not None:
+    if degree_norm:
+        if edge_weight is None:
+            edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
+
         # Compute degree normalization D^{-1/2} A D^{-1/2}
         deg = scatter(
             edge_weight, edge_index[0], dim=0, dim_size=num_supernodes, reduce="sum"
