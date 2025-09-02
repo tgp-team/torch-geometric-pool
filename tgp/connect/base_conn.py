@@ -60,7 +60,7 @@ def sparse_connect(
     num_supernodes: int = None,
     remove_self_loops: bool = True,
     reduce_op: ConnectionType = "sum",
-    normalize_edge_weight: bool = False,
+    edge_weight_norm: bool = False,
     batch_pooled: Optional[Tensor] = None,
     degree_norm: bool = False,
 ) -> Tuple[Adj, OptTensor]:
@@ -100,7 +100,7 @@ def sparse_connect(
             edge_weight * deg_inv_sqrt[edge_index[0]] * deg_inv_sqrt[edge_index[1]]
         )
 
-    if normalize_edge_weight and edge_weight is not None:
+    if edge_weight_norm and edge_weight is not None:
         # Per-graph normalization using batch_pooled
         edge_batch = batch_pooled[edge_index[0]]
 
@@ -148,7 +148,7 @@ class SparseConnect(Connect):
         remove_self_loops (bool, optional):
             Whether to remove self-loops from the graph after coarsening.
             (default: :obj:`True`)
-        normalize_edge_weight (bool, optional):
+        edge_weight_norm (bool, optional):
             Whether to normalize the edge weights by dividing by the maximum absolute value
             per graph.
             (default: :obj:`False`)
@@ -162,13 +162,13 @@ class SparseConnect(Connect):
         self,
         reduce_op: ConnectionType = "sum",
         remove_self_loops: bool = True,
-        normalize_edge_weight: bool = False,
+        edge_weight_norm: bool = False,
         degree_norm: bool = False,
     ):
         super().__init__()
         self.reduce_op = reduce_op
         self.remove_self_loops = remove_self_loops
-        self.normalize_edge_weight = normalize_edge_weight
+        self.edge_weight_norm = edge_weight_norm
         self.degree_norm = degree_norm
 
     def forward(
@@ -195,7 +195,7 @@ class SparseConnect(Connect):
                 (default: :obj:`None`)
             batch_pooled (~torch.Tensor, optional):
                 Batch vector which assigns each supernode to a specific graph.
-                Required when normalize_edge_weight=True for per-graph normalization.
+                Required when edge_weight_norm=True for per-graph normalization.
                 (default: :obj:`None`)
 
         Returns:
@@ -204,9 +204,9 @@ class SparseConnect(Connect):
             If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
             returns :obj:`None` as the edge weights.
         """
-        if self.normalize_edge_weight and batch_pooled is None:
+        if self.edge_weight_norm and batch_pooled is None:
             raise AssertionError(
-                "normalize_edge_weight=True but batch_pooled=None. "
+                "edge_weight_norm=True but batch_pooled=None. "
                 "batch_pooled parameter is required for per-graph normalization in SparseConnect."
             )
 
@@ -219,7 +219,7 @@ class SparseConnect(Connect):
             num_supernodes=so.num_supernodes,
             remove_self_loops=self.remove_self_loops,
             reduce_op=self.reduce_op,
-            normalize_edge_weight=self.normalize_edge_weight,
+            edge_weight_norm=self.edge_weight_norm,
             batch_pooled=batch_pooled,
             degree_norm=self.degree_norm,
         )
@@ -231,6 +231,6 @@ class SparseConnect(Connect):
             f"{self.__class__.__name__}("
             f"reduce_op={self.reduce_op}, "
             f"remove_self_loops={self.remove_self_loops}, "
-            f"normalize_edge_weight={self.normalize_edge_weight}, "
+            f"edge_weight_norm={self.edge_weight_norm}, "
             f"degree_norm={self.degree_norm})"
         )

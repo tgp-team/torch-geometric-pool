@@ -90,7 +90,7 @@ class TestEdgeWeightNormalization:
         batch_data = self.create_batch_graphs()
         so, _ = self.get_select_output_and_batch_pooled(batch_data)
 
-        connector = SparseConnect(normalize_edge_weight=True)
+        connector = SparseConnect(edge_weight_norm=True)
 
         with pytest.raises(AssertionError, match="batch_pooled parameter is required"):
             connector(
@@ -106,13 +106,13 @@ class TestEdgeWeightNormalization:
         so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
 
         # Test without normalization
-        connector = SparseConnect(normalize_edge_weight=False)
+        connector = SparseConnect(edge_weight_norm=False)
         edge_index_orig, edge_weight_orig = connector(
             batch_data.edge_index, so, edge_weight=batch_data.edge_weight
         )
 
         # Test with normalization
-        connector_norm = SparseConnect(normalize_edge_weight=True)
+        connector_norm = SparseConnect(edge_weight_norm=True)
         edge_index_norm, edge_weight_norm = connector_norm(
             batch_data.edge_index,
             so,
@@ -143,7 +143,7 @@ class TestEdgeWeightNormalization:
         batch_data = self.create_single_graph_batch()
         so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
 
-        connector = SparseConnect(normalize_edge_weight=True)
+        connector = SparseConnect(edge_weight_norm=True)
         edge_index, edge_weight = connector(
             batch_data.edge_index,
             so,
@@ -156,10 +156,10 @@ class TestEdgeWeightNormalization:
             assert edge_weight.abs().max() <= 1.0 + 1e-6
 
     def test_sparse_connect_repr(self):
-        """Test SparseConnect __repr__ includes normalize_edge_weight."""
-        connector = SparseConnect(normalize_edge_weight=True)
+        """Test SparseConnect __repr__ includes edge_weight_norm."""
+        connector = SparseConnect(edge_weight_norm=True)
         repr_str = repr(connector)
-        assert "normalize_edge_weight=True" in repr_str
+        assert "edge_weight_norm=True" in repr_str
 
     def test_sparse_connect_degree_norm(self):
         """Test SparseConnect degree_norm feature."""
@@ -197,7 +197,7 @@ class TestEdgeWeightNormalization:
         batch_data = self.create_single_graph_batch()
         so, _ = self.get_select_output_and_batch_pooled(batch_data)
 
-        # degree_norm should work without batch_pooled (unlike normalize_edge_weight)
+        # degree_norm should work without batch_pooled (unlike edge_weight_norm)
         connector = SparseConnect(degree_norm=True)
         edge_index, edge_weight = connector(
             batch_data.edge_index,
@@ -211,12 +211,12 @@ class TestEdgeWeightNormalization:
             assert not torch.isinf(edge_weight).any()
 
     def test_sparse_connect_degree_norm_and_normalize_combined(self):
-        """Test SparseConnect with both degree_norm and normalize_edge_weight."""
+        """Test SparseConnect with both degree_norm and edge_weight_norm."""
         batch_data = self.create_batch_graphs()
         so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
 
         # Test with both features enabled
-        connector = SparseConnect(degree_norm=True, normalize_edge_weight=True)
+        connector = SparseConnect(degree_norm=True, edge_weight_norm=True)
         edge_index, edge_weight = connector(
             batch_data.edge_index,
             so,
@@ -226,7 +226,7 @@ class TestEdgeWeightNormalization:
 
         if edge_weight is not None:
             # Both transformations should be applied
-            assert edge_weight.abs().max() <= 1.0 + 1e-6  # normalize_edge_weight
+            assert edge_weight.abs().max() <= 1.0 + 1e-6  # edge_weight_norm
             assert not torch.isnan(edge_weight).any()
             assert not torch.isinf(edge_weight).any()
 
@@ -237,10 +237,10 @@ class TestEdgeWeightNormalization:
         assert "degree_norm=True" in repr_str
 
         # Test with both features
-        connector_both = SparseConnect(degree_norm=True, normalize_edge_weight=True)
+        connector_both = SparseConnect(degree_norm=True, edge_weight_norm=True)
         repr_str_both = repr(connector_both)
         assert "degree_norm=True" in repr_str_both
-        assert "normalize_edge_weight=True" in repr_str_both
+        assert "edge_weight_norm=True" in repr_str_both
 
     # ===== DENSE CONNECT TESTS =====
 
@@ -286,11 +286,11 @@ class TestEdgeWeightNormalization:
         s_batched[1, 3, 1] = 1.0
 
         # Test without normalization
-        connector = DenseConnect(normalize_edge_weight=False)
+        connector = DenseConnect(edge_weight_norm=False)
         adj_orig, _ = connector(adj_dense, type("SO", (), {"s": s_batched})())
 
         # Test with normalization
-        connector_norm = DenseConnect(normalize_edge_weight=True)
+        connector_norm = DenseConnect(edge_weight_norm=True)
         adj_norm, _ = connector_norm(adj_dense, type("SO", (), {"s": s_batched})())
 
         # Check that normalization happened per graph
@@ -310,10 +310,10 @@ class TestEdgeWeightNormalization:
                 )
 
     def test_dense_connect_repr(self):
-        """Test DenseConnect __repr__ includes normalize_edge_weight."""
-        connector = DenseConnect(normalize_edge_weight=True)
+        """Test DenseConnect __repr__ includes edge_weight_norm."""
+        connector = DenseConnect(edge_weight_norm=True)
         repr_str = repr(connector)
-        assert "normalize_edge_weight=True" in repr_str
+        assert "edge_weight_norm=True" in repr_str
 
     # ===== DENSE CONNECT SPT TESTS =====
 
@@ -322,7 +322,7 @@ class TestEdgeWeightNormalization:
         batch_data = self.create_batch_graphs()
         so, _ = self.get_select_output_and_batch_pooled(batch_data)
 
-        connector = DenseConnectSPT(normalize_edge_weight=True)
+        connector = DenseConnectSPT(edge_weight_norm=True)
 
         with pytest.raises(AssertionError, match="batch_pooled parameter is required"):
             connector(
@@ -335,11 +335,11 @@ class TestEdgeWeightNormalization:
         so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
 
         # Test without normalization
-        connector = DenseConnectSPT(normalize_edge_weight=False)
+        connector = DenseConnectSPT(edge_weight_norm=False)
         adj_orig, _ = connector(batch_data.edge_index, batch_data.edge_weight, so)
 
         # Test with normalization
-        connector_norm = DenseConnectSPT(normalize_edge_weight=True)
+        connector_norm = DenseConnectSPT(edge_weight_norm=True)
         adj_norm, _ = connector_norm(
             batch_data.edge_index, batch_data.edge_weight, so, batch_pooled=batch_pooled
         )
@@ -371,10 +371,10 @@ class TestEdgeWeightNormalization:
                             )
 
     def test_dense_connect_spt_repr(self):
-        """Test DenseConnectSPT __repr__ includes normalize_edge_weight."""
-        connector = DenseConnectSPT(normalize_edge_weight=True)
+        """Test DenseConnectSPT __repr__ includes edge_weight_norm."""
+        connector = DenseConnectSPT(edge_weight_norm=True)
         repr_str = repr(connector)
-        assert "normalize_edge_weight=True" in repr_str
+        assert "edge_weight_norm=True" in repr_str
 
     # ===== EDGE CASES =====
 
@@ -385,7 +385,7 @@ class TestEdgeWeightNormalization:
         so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
 
         # SparseConnect
-        connector = SparseConnect(normalize_edge_weight=True)
+        connector = SparseConnect(edge_weight_norm=True)
         edge_index, edge_weight = connector(
             batch_data.edge_index,
             so,

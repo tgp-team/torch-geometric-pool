@@ -3,7 +3,7 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 
-from tgp.connect import DenseConnect, postprocess_adj_pool
+from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import DenseSelect, SelectOutput
@@ -52,6 +52,15 @@ class HOSCPooling(DenseSRCPooling):
             Specifies either to use the hosc_orthogonality_loss or the
             orthogonality_loss.
             (default: :obj:`False`)
+        remove_self_loops (bool, optional):
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
+            (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`True`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
         adj_transpose (bool, optional):
             If :obj:`True`, the preprocessing step in :class:`~tgp.src.DenseSRCPooling` and
             the :class:`~tgp.connect.DenseConnect` operation returns transposed
@@ -87,6 +96,9 @@ class HOSCPooling(DenseSRCPooling):
         mu: float = 0.1,
         alpha: float = 0.5,
         hosc_ortho: bool = False,
+        remove_self_loops: bool = True,
+        degree_norm: bool = True,
+        edge_weight_norm: bool = False,
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
@@ -102,7 +114,10 @@ class HOSCPooling(DenseSRCPooling):
             reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift),
             connector=DenseConnect(
-                remove_self_loops=False, degree_norm=False, adj_transpose=adj_transpose
+                remove_self_loops=remove_self_loops,
+                degree_norm=degree_norm,
+                adj_transpose=adj_transpose,
+                edge_weight_norm=edge_weight_norm,
             ),
             adj_transpose=adj_transpose,
         )
@@ -154,17 +169,18 @@ class HOSCPooling(DenseSRCPooling):
             x_pooled, _ = self.reduce(x=x, so=so)
 
             # Connect
-            adj_pool, _ = self.connect(edge_index=adj, so=so)
-
-            # Normalize coarsened adjacency matrix
-            adj_pool = postprocess_adj_pool(
-                adj_pool,
-                remove_self_loops=True,
-                degree_norm=True,
-                adj_transpose=self.adj_transpose,
-            )
+            adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
 
             loss = self.compute_loss(adj, so.s, adj_pool, mask)
+
+            # Normalize coarsened adjacency matrix
+            adj_pool = self.connector.postprocess_adj_pool(
+                adj_pool,
+                remove_self_loops=self.connector.remove_self_loops,
+                degree_norm=self.connector.degree_norm,
+                adj_transpose=self.connector.adj_transpose,
+                edge_weight_norm=self.connector.edge_weight_norm,
+            )
 
             out = PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 

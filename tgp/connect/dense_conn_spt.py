@@ -29,7 +29,7 @@ class DenseConnectSPT(Connect):
         degree_norm (bool, optional):
             If :obj:`True`, the adjacency matrix will be symmetrically normalized.
             (default: :obj:`True`)
-        normalize_edge_weight (bool, optional):
+        edge_weight_norm (bool, optional):
             Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
             (default: :obj:`False`)
     """
@@ -38,13 +38,13 @@ class DenseConnectSPT(Connect):
         self,
         remove_self_loops: bool = True,
         degree_norm: bool = False,
-        normalize_edge_weight: bool = False,
+        edge_weight_norm: bool = False,
     ):
         super().__init__()
 
         self.remove_self_loops = remove_self_loops
         self.degree_norm = degree_norm
-        self.normalize_edge_weight = normalize_edge_weight
+        self.edge_weight_norm = edge_weight_norm
 
     def forward(
         self,
@@ -70,7 +70,7 @@ class DenseConnectSPT(Connect):
                 The output of the :math:`\texttt{select}` operator.
             batch_pooled (~torch.Tensor, optional):
                 Batch vector which assigns each supernode to a specific graph.
-                Required when normalize_edge_weight=True for per-graph normalization.
+                Required when edge_weight_norm=True for per-graph normalization.
                 (default: :obj:`None`)
 
         Returns:
@@ -79,9 +79,9 @@ class DenseConnectSPT(Connect):
             If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
             returns :obj:`None` as the edge weights.
         """
-        if self.normalize_edge_weight and batch_pooled is None:
+        if self.edge_weight_norm and batch_pooled is None:
             raise AssertionError(
-                "normalize_edge_weight=True but batch_pooled=None. "
+                "edge_weight_norm=True but batch_pooled=None. "
                 "batch_pooled parameter is required for per-graph normalization in DenseConnectSPT."
             )
         if isinstance(edge_index, SparseTensor):
@@ -120,7 +120,7 @@ class DenseConnectSPT(Connect):
                 row=row, col=col, value=val, sparse_sizes=adj_pooled.sparse_sizes()
             ).coalesce()
 
-        if self.normalize_edge_weight:
+        if self.edge_weight_norm:
             # Use batch_pooled to map edges to graphs
             edge_batch = batch_pooled[row]
 
@@ -152,5 +152,5 @@ class DenseConnectSPT(Connect):
             f"{self.__class__.__name__}("
             f"remove_self_loops={self.remove_self_loops}, "
             f"degree_norm={self.degree_norm}, "
-            f"normalize_edge_weight={self.normalize_edge_weight})"
+            f"edge_weight_norm={self.edge_weight_norm})"
         )

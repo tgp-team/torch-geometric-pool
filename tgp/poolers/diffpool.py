@@ -55,6 +55,9 @@ class DiffPool(DenseSRCPooling):
         degree_norm (bool, optional):
             If :obj:`True`, the adjacency matrix will be symmetrically normalized.
             (default: :obj:`True`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
         adj_transpose (bool, optional):
             If :obj:`True`, the preprocessing step in :class:`~tgp.src.DenseSRCPooling` and
             the :class:`~tgp.connect.DenseConnect` operation returns transposed
@@ -92,6 +95,7 @@ class DiffPool(DenseSRCPooling):
         normalize_loss: bool = False,
         remove_self_loops: bool = True,
         degree_norm: bool = True,
+        edge_weight_norm: bool = False,
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
@@ -110,6 +114,7 @@ class DiffPool(DenseSRCPooling):
                 remove_self_loops=remove_self_loops,
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
+                edge_weight_norm=edge_weight_norm,
             ),
             adj_transpose=adj_transpose,
         )
