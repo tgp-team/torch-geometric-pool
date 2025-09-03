@@ -47,9 +47,8 @@ class DenseConnect(Connect):
         self.adj_transpose = adj_transpose
         self.edge_weight_norm = edge_weight_norm
 
-    @classmethod
+    @staticmethod
     def dense_connect(
-        cls,
         s: Tensor,
         adj: Tensor,
     ) -> Tensor:
@@ -58,9 +57,8 @@ class DenseConnect(Connect):
         adj_pool = torch.matmul(sta, s)
         return adj_pool
 
-    @classmethod
+    @staticmethod
     def postprocess_adj_pool(
-        cls,
         adj_pool: Tensor,
         remove_self_loops: bool = False,
         degree_norm: bool = False,

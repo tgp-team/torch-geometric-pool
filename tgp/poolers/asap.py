@@ -47,8 +47,6 @@ class ASAPooling(SRCPooling):
             sampled neighborhood during training. (default: :obj:`0`)
         negative_slope (float, optional): LeakyReLU angle of the negative
             slope. (default: :obj:`0.2`)
-        add_self_loops (bool, optional): If set to :obj:`True`, will add self
-            loops to the new graph connectivity. (default: :obj:`False`)
         nonlinearity (str or callable, optional):
             The non-linearity to use when computing the score.
             (default: :obj:`"tanh"`)
@@ -262,10 +260,6 @@ class ASAPooling(SRCPooling):
                 edge_weight=edge_weight,
                 batch_pooled=batch_pooled,
             )
-            if self.add_self_loops:
-                edge_index_pooled, pooled_edge_weight = add_remaining_self_loops(
-                    edge_index_pooled, pooled_edge_weight, num_nodes=so.num_supernodes
-                )
 
             out = PoolingOutput(
                 x=x,
