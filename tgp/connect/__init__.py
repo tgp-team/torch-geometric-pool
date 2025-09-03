@@ -3,11 +3,7 @@ from .dense_conn import DenseConnect
 from .dense_conn_spt import DenseConnectSPT
 from .kron_conn import KronConnect
 
-connect_functions = [
-    "sparse_connect",
-    "dense_connect",
-    "postprocess_adj_pool",
-]
+connect_functions = ["sparse_connect"]
 
 connect_classes = [
     "Connect",
