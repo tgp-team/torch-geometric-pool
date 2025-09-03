@@ -57,6 +57,15 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
             If set to :obj:`True`, the output of the :math:`\texttt{select}` and :math:`\texttt{select}`
             operations will be cached, so that they do not need to be recomputed.
             (default: :obj:`False`)
+        remove_self_loops (bool, optional):
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
+            (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
     """
 
     def __init__(
@@ -67,12 +76,20 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
         cached: bool = False,
+        remove_self_loops: bool = True,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = False,
     ):
         super().__init__(
             selector=GraclusSelect(s_inv_op=s_inv_op),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
-            connector=SparseConnect(reduce_op=connect_red_op),
+            connector=SparseConnect(
+                reduce_op=connect_red_op,
+                remove_self_loops=remove_self_loops,
+                degree_norm=degree_norm,
+                edge_weight_norm=edge_weight_norm,
+            ),
             cached=cached,
         )
         self.cached = cached
@@ -129,7 +146,10 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
 
             # Connect
             edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj, so=so, edge_weight=edge_weight
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch_pooled=batch_pooled,
             )
 
             out = PoolingOutput(

@@ -47,6 +47,8 @@ class MaxCutScoreNet(torch.nn.Module):
     ):
         super().__init__()
 
+        self.initial_layer = Linear(in_channels, in_channels)  # initial embedding
+
         # Message passing layers
         if mp_act.lower() in ["identity", "none"]:
             self.mp_act = lambda x: x
@@ -104,6 +106,8 @@ class MaxCutScoreNet(torch.nn.Module):
         edge_index, edge_weight = delta_gcn_matrix(
             edge_index, edge_weight, delta=self.delta
         )
+
+        x = self.initial_layer(x)  # initial embedding
 
         # Message passing layers
         for mp_conv in self.mp_convs:

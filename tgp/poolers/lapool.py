@@ -33,6 +33,9 @@ class LaPooling(BasePrecoarseningMixin, SRCPooling):
             If :obj:`True`, normalize the pooled adjacency matrix by the
             nodes' degree.
             (default: :obj:`True`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
         lift (~tgp.utils.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
@@ -76,6 +79,7 @@ class LaPooling(BasePrecoarseningMixin, SRCPooling):
         shortest_path_reg: bool = False,
         remove_self_loops: bool = True,
         degree_norm: bool = True,
+        edge_weight_norm: bool = False,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
@@ -88,7 +92,9 @@ class LaPooling(BasePrecoarseningMixin, SRCPooling):
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=DenseConnectSPT(
-                remove_self_loops=remove_self_loops, degree_norm=degree_norm
+                remove_self_loops=remove_self_loops,
+                degree_norm=degree_norm,
+                edge_weight_norm=edge_weight_norm,
             ),
         )
 
@@ -148,7 +154,10 @@ class LaPooling(BasePrecoarseningMixin, SRCPooling):
 
             # Connect
             edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj, so=so, edge_weight=edge_weight
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch_pooled=batch_pooled,
             )
 
             out = PoolingOutput(

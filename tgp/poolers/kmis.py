@@ -113,6 +113,12 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         remove_self_loops (bool, optional):
             Whether to remove self-loops from the graph after coarsening.
             (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
         cached (bool, optional):
             If set to :obj:`True`, the output of the :math:`\texttt{select}` and :math:`\texttt{select}`
             operations will be cached, so that they do not need to be recomputed.
@@ -135,6 +141,8 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
         remove_self_loops: bool = True,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = False,
         cached: bool = False,
         node_dim: int = -2,
     ):
@@ -153,7 +161,10 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
             ),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
-                reduce_op=connect_red_op, remove_self_loops=remove_self_loops
+                reduce_op=connect_red_op,
+                remove_self_loops=remove_self_loops,
+                degree_norm=degree_norm,
+                edge_weight_norm=edge_weight_norm,
             ),
             cached=cached,
         )
@@ -223,6 +234,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
                 edge_index=adj,
                 so=so,
                 edge_weight=edge_weight,
+                batch_pooled=batch_pooled,
             )
 
             out = PoolingOutput(

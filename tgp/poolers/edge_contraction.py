@@ -69,7 +69,6 @@ class EdgeContractionPooling(SRCPooling):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
             :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
-
             - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
@@ -93,8 +92,14 @@ class EdgeContractionPooling(SRCPooling):
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
         remove_self_loops (bool, optional):
-            Whether to remove self-loops from the graph after coarsening.
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
             (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
     """
 
     def __init__(
@@ -109,6 +114,8 @@ class EdgeContractionPooling(SRCPooling):
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
         remove_self_loops: bool = True,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = False,
     ):
         super().__init__(
             selector=EdgeContractionSelect(
@@ -121,7 +128,10 @@ class EdgeContractionPooling(SRCPooling):
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
-                reduce_op=connect_red_op, remove_self_loops=remove_self_loops
+                reduce_op=connect_red_op,
+                remove_self_loops=remove_self_loops,
+                degree_norm=degree_norm,
+                edge_weight_norm=edge_weight_norm,
             ),
         )
 
@@ -180,7 +190,10 @@ class EdgeContractionPooling(SRCPooling):
 
             # Connect
             edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj, so=so, edge_weight=edge_weight
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch_pooled=batch_pooled,
             )
 
             out = PoolingOutput(
