@@ -120,9 +120,16 @@ def test_kron_conn_without_ndp():
         connector=KronConnect(),
     )
 
-    so = pooler.select(data.x, data.edge_index, data.edge_weight, batch=data.batch)
-    x_pool, batch_pool = pooler.reduce(data.x, so, batch=data.batch)
-    adj_pool = pooler.connect(data.edge_index, so, edge_weight=data.edge_weight)
+    so = pooler.select(
+        x=data.x,
+        edge_index=data.edge_index,
+        edge_weight=data.edge_weight,
+        batch=data.batch,
+    )
+    x_pool, batch_pool = pooler.reduce(x=data.x, so=so, batch=data.batch)
+    adj_pool = pooler.connect(
+        edge_index=data.edge_index, so=so, edge_weight=data.edge_weight
+    )
     assert x_pool.shape[-2] == 4
     assert batch_pool.size(0) == x_pool.size(-2)
     assert adj_pool is not None
@@ -135,9 +142,16 @@ def test_kron_conn_without_ndp():
         reducer=BaseReduce(),
         connector=KronConnect(),
     )
-    so = pooler.select(data.x, data.edge_index, data.edge_weight, batch=data.batch)
-    x_pool, batch_pool = pooler.reduce(data.x, so, batch=data.batch)
-    adj_pool = pooler.connect(data.edge_index, so, edge_weight=data.edge_weight)
+    so = pooler.select(
+        x=data.x,
+        edge_index=data.edge_index,
+        edge_weight=data.edge_weight,
+        batch=data.batch,
+    )
+    x_pool, batch_pool = pooler.reduce(x=data.x, so=so, batch=data.batch)
+    adj_pool = pooler.connect(
+        edge_index=data.edge_index, so=so, edge_weight=data.edge_weight
+    )
     assert x_pool.shape[-2] == 4
     assert batch_pool.size(0) == x_pool.size(-2)
     assert adj_pool is not None
@@ -239,6 +253,66 @@ def test_kronconnect_single_node_selection():
     # Should return a SparseTensor with None edge weights (preserving input format)
     assert isinstance(adj_pool_spt_no_L, SparseTensor)
     assert edge_weight_pool_spt_no_L is None
+
+
+def test_sparse_connect_degree_norm_without_edge_weight():
+    """Test sparse_connect with degree_norm=True and edge_weight=None.
+
+    This tests the specific case where edge_weight is None but degree_norm is True,
+    which should trigger the creation of ones tensor for edge weights.
+    """
+    # Create a simple graph with 4 nodes
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]], dtype=torch.long
+    )
+    num_nodes = 4
+    num_supernodes = 2
+
+    # Create cluster_index for coarsening (2 nodes per supernode)
+    cluster_index = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+    # Test with degree_norm=True and edge_weight=None
+    adj_pool, edge_weight_pool = sparse_connect(
+        edge_index=edge_index,
+        edge_weight=None,
+        cluster_index=cluster_index,
+        num_nodes=num_nodes,
+        num_supernodes=num_supernodes,
+        degree_norm=True,
+        remove_self_loops=True,
+    )
+
+    # Verify that edge weights were created and are not None
+    assert edge_weight_pool is not None
+    assert isinstance(edge_weight_pool, torch.Tensor)
+    assert edge_weight_pool.size(0) == adj_pool.size(1)  # Same number of edges
+
+    # Verify that the edge weights are normalized (should be between 0 and 1)
+    assert torch.all(edge_weight_pool >= 0.0)
+    assert torch.all(edge_weight_pool <= 1.0)
+
+    # Test with SparseConnect class as well
+    connector = SparseConnect(degree_norm=True)
+    so = SelectOutput(
+        cluster_index=cluster_index,
+        num_nodes=num_nodes,
+        num_supernodes=num_supernodes,
+    )
+
+    adj_pool_class, edge_weight_pool_class = connector(
+        edge_index=edge_index,
+        edge_weight=None,
+        so=so,
+    )
+
+    # Verify that edge weights were created and are not None
+    assert edge_weight_pool_class is not None
+    assert isinstance(edge_weight_pool_class, torch.Tensor)
+    assert edge_weight_pool_class.size(0) == adj_pool_class.size(1)
+
+    # Verify that the edge weights are normalized
+    assert torch.all(edge_weight_pool_class >= 0.0)
+    assert torch.all(edge_weight_pool_class <= 1.0)
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ class Reduce(nn.Module):
     def forward(
         self,
         x: Tensor,
-        so: SelectOutput = None,
+        so: SelectOutput,
         *,
         batch: Optional[Tensor] = None,
         **kwargs,
@@ -61,7 +61,6 @@ class Reduce(nn.Module):
                 where :math:`N` is the number of nodes in the batch and :math:`F` is the number of node features.
                 For a dense pooler, :obj:`x` has shape :math:`[B, N, F]`, where :math:`B` is the batch size.
             so (~tgp.select.SelectOutput): The output of the :math:`\texttt{select}` operator.
-                (default: :obj:`None`)
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
@@ -111,7 +110,6 @@ class BaseReduce(Reduce):
                 where :math:`N` is the number of nodes in the batch and :math:`F` is the number of node features.
                 For a dense pooler, :obj:`x` has shape :math:`[B, N, F]`, where :math:`B` is the batch size.
             so (~tgp.select.SelectOutput): The output of the :math:`\texttt{select}` operator.
-                (default: :obj:`None`)
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)

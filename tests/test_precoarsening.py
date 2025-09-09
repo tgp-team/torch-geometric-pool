@@ -49,6 +49,7 @@ def test_nmf_precoarsening(sparse_batch_graph, pooler_name):
     assert data_batch.num_nodes == 13
 
     pooling_out = pooler.precoarsening(
+        x=data_batch.x,
         edge_index=data_batch.edge_index,
         edge_weight=data_batch.edge_attr,
         batch=data_batch.batch,
@@ -99,8 +100,8 @@ def test_precoarsening_attaches_single_level():
     # After one level of pre‐coarsening, attribute "pooled_data" should exist
     assert hasattr(data_t, "pooled_data")
     pooled = data_t.pooled_data
-    assert isinstance(pooled, Data)
-    assert pooled.num_nodes >= 1
+    assert isinstance(pooled, list)
+    assert pooled[0].num_nodes >= 1
 
 
 def test_precoarsening_multiple_levels_returns_list():

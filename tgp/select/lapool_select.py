@@ -3,6 +3,7 @@ from typing import Optional
 import scipy.sparse.csgraph as csgraph
 import torch
 from torch import Tensor
+from torch_geometric.typing import Adj
 from torch_geometric.utils import get_laplacian, to_scipy_sparse_matrix
 from torch_scatter import scatter_add, scatter_mul
 from torch_sparse import SparseTensor, spmm
@@ -112,7 +113,7 @@ class LaPoolSelect(Select):
     def forward(
         self,
         x: Tensor,
-        edge_index: Tensor,
+        edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
         batch: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
@@ -149,10 +150,6 @@ class LaPoolSelect(Select):
             )
         edge_weight = check_and_filter_edge_weights(edge_weight)
 
-        # Use dummy x if not provided (e.g., in precoarsening)
-        if x is None:
-            x = torch.ones((num_nodes, 1), device=edge_index.device)
-
         # Compute Laplacian and its associated node feature norm
         lap_edge_index, lap_edge_weights = get_laplacian(
             edge_index, edge_weight=edge_weight, num_nodes=num_nodes
@@ -168,8 +165,16 @@ class LaPoolSelect(Select):
 
         # Determine leader nodes: a node is a leader if its norm is >= that of its neighbors for all incident edges
         row, col = lap_edge_index[0], lap_edge_index[1]
-        leader_check = (v[row] >= v[col]).int().squeeze()
-        leader_mask = scatter_mul(leader_check, row, dim=0, dim_size=num_nodes).bool()
+
+        # Check if we have meaningful edges (non-zero weights)
+        if row.size(0) == 0 or (lap_edge_weights == 0).all():
+            # No meaningful edges: all nodes are leaders since they have no neighbors to compare against
+            leader_mask = torch.ones(num_nodes, dtype=torch.bool, device=x.device)
+        else:
+            leader_check = (v[row] >= v[col]).int().squeeze()
+            leader_mask = scatter_mul(
+                leader_check, row, dim=0, dim_size=num_nodes
+            ).bool()
 
         # Compute sparse cosine similarity
         cosine_similarity = sparse_cosine_similarity(x, num_nodes, leader_mask, batch)
@@ -214,6 +219,8 @@ class LaPoolSelect(Select):
 
         # Construct a sparse identity (Kronecker delta) for leader nodes
         leader_idx = torch.nonzero(leader_mask).squeeze()
+        if leader_idx.dim() == 0:  # edge case where there is only one leader
+            leader_idx = leader_idx.unsqueeze(0)
         leader_cols = torch.arange(leader_idx.size(0), device=leader_idx.device)
         kd_values = torch.ones(leader_cols.size(0), dtype=s.dtype, device=s.device)
         kronecker_delta_sparse = SparseTensor(
