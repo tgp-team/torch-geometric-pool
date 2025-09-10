@@ -50,6 +50,8 @@ class MaxCutPooling(SRCPooling):
             (default: :obj:`[16, 16]`)
         mlp_act (str, optional): Activation function for MLP layers.
             (default: :obj:`"relu"`)
+        act (str, optional): Activation function for the final score.
+            (default: :obj:`"tanh"`)
         delta (float, optional): Delta parameter for propagation matrix computation.
             (default: :obj:`2.0`)
         lift (~tgp.utils.typing.LiftType, optional):
@@ -111,6 +113,7 @@ class MaxCutPooling(SRCPooling):
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",
+        act: str = "tanh",
         delta: float = 2.0,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
@@ -130,6 +133,7 @@ class MaxCutPooling(SRCPooling):
                 mp_act=mp_act,
                 mlp_units=mlp_units,
                 mlp_act=mlp_act,
+                act=act,
                 delta=delta,
                 s_inv_op=s_inv_op,
             ),
@@ -151,6 +155,7 @@ class MaxCutPooling(SRCPooling):
         self.mp_act = mp_act
         self.mlp_units = mlp_units
         self.mlp_act = mlp_act
+        self.act = act
         self.delta = delta
 
     def forward(

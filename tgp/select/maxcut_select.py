@@ -31,6 +31,8 @@ class MaxCutScoreNet(torch.nn.Module):
             (default: :obj:`[16, 16]`)
         mlp_act (str, optional): Activation function for MLP layers.
             (default: :obj:`"relu"`)
+        act (str, optional): Activation function for the final score.
+            (default: :obj:`"tanh"`)
         delta (float, optional): Delta parameter for propagation matrix computation.
             (default: :obj:`2.0`)
     """
@@ -42,6 +44,7 @@ class MaxCutScoreNet(torch.nn.Module):
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",
+        act: str = "tanh",
         delta: float = 2.0,
         **kwargs,  # Accept and ignore extra kwargs for compatibility
     ):
@@ -75,6 +78,10 @@ class MaxCutScoreNet(torch.nn.Module):
             in_units = out_units
 
         self.final_layer = Linear(in_units, 1)
+        if act.lower() in ["identity", "none"]:
+            self.act = lambda x: x
+        else:
+            self.act = activation_resolver(act)
         self.delta = delta
 
     def reset_parameters(self):
@@ -121,7 +128,7 @@ class MaxCutScoreNet(torch.nn.Module):
 
         # Final score computation
         score = self.final_layer(x)
-        return torch.tanh(score)
+        return self.act(score)
 
 
 class MaxCutSelect(TopkSelect):
@@ -164,6 +171,8 @@ class MaxCutSelect(TopkSelect):
             (default: :obj:`[16, 16]`)
         mlp_act (str, optional): Activation function for MLP layers.
             (default: :obj:`"relu"`)
+        act (str, optional): Activation function for the final score.
+            (default: :obj:`"tanh"`)
         delta (float, optional): Delta parameter for propagation matrix computation.
             (default: :obj:`2.0`)
         min_score (float, optional): Minimal node score threshold.
@@ -188,6 +197,7 @@ class MaxCutSelect(TopkSelect):
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",
+        act: str = "tanh",
         delta: float = 2.0,
         min_score: Optional[float] = None,
         s_inv_op: SinvType = "transpose",
@@ -206,6 +216,7 @@ class MaxCutSelect(TopkSelect):
         self.mp_act = mp_act
         self.mlp_units = mlp_units
         self.mlp_act = mlp_act
+        self.score_act = act
         self.delta = delta
         self.assign_all_nodes = assign_all_nodes
 
@@ -216,6 +227,7 @@ class MaxCutSelect(TopkSelect):
             mp_act=mp_act,
             mlp_units=mlp_units,
             mlp_act=mlp_act,
+            act=self.score_act,
             delta=delta,
         )
 
@@ -293,5 +305,6 @@ class MaxCutSelect(TopkSelect):
             f"mp_act='{self.mp_act}', "
             f"mlp_units={self.mlp_units}, "
             f"mlp_act='{self.mlp_act}', "
+            f"act='{self.score_act}', "
             f"delta={self.delta})"
         )

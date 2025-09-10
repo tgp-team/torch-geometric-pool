@@ -665,6 +665,55 @@ class TestMaxCutPooling:
         assert isinstance(extra_args, dict)
         assert extra_args["loss_coeff"] == 2.5
 
+    def test_maxcut_pooling_act_identity(self, simple_graph):
+        """Test MaxCutPooling with act=identity activation function."""
+        x, edge_index, edge_weight, batch = simple_graph
+        N, F = x.shape
+
+        pooler = MaxCutPooling(
+            in_channels=F,
+            ratio=0.5,
+            assign_all_nodes=True,
+            mp_units=[8, 4],
+            mlp_units=[4],
+            act="identity",  # Test identity activation
+        )
+        pooler.eval()
+
+        out = pooler(x=x, adj=edge_index, edge_weight=edge_weight, batch=batch)
+
+        expected_k = math.ceil(0.5 * N)
+
+        # Check pooled output
+        assert out.x.size(0) == expected_k  # Pooled to supernodes
+        assert out.x.size(1) == F  # Same feature dimension
+        assert out.edge_index.size(0) == 2  # Valid edge format
+        assert out.batch is not None
+
+        # Check SelectOutput
+        assert out.so.num_nodes == N
+        assert out.so.num_supernodes == expected_k
+
+        # Check loss computation
+        assert out.has_loss
+        assert "maxcut_loss" in out.loss
+        assert torch.isfinite(out.loss["maxcut_loss"])
+
+        # Verify that the activation function is indeed identity
+        # Test the activation function directly on some input
+        test_input = torch.tensor([-2.5, -1.0, 0.0, 1.0, 2.5])
+        activated_output = pooler.selector.score_net.act(test_input)
+
+        # With identity activation, input should equal output
+        assert torch.allclose(test_input, activated_output), (
+            "Identity activation should return input unchanged"
+        )
+
+        # Also verify scores shape and finiteness
+        scores = out.so.scores
+        assert scores.shape == (N,)  # Scores are squeezed to 1D
+        assert torch.isfinite(scores).all()
+
 
 class TestBaseSelect:
     """Test base select functionality and assign_all_nodes method."""
