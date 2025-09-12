@@ -6,6 +6,9 @@ from torch_geometric.utils import to_dense_adj
 from tgp.data.loaders import PoolCollater, PoolDataLoader, PooledBatch
 from tgp.data.transforms import NormalizeAdj, PreCoarsening
 from tgp.poolers import NDPPooling, get_pooler
+from tgp.poolers.graclus import GraclusPooling
+from tgp.poolers.kmis import KMISPooling
+from tgp.poolers.maxcut import MaxCutPooling
 
 
 @pytest.fixture(scope="module")
@@ -34,7 +37,7 @@ def sparse_batch_graph():
     return data_batch
 
 
-poolers = ["ndp", "kmis", "graclus", "lap"]
+poolers = ["ndp", "kmis", "graclus"]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
@@ -49,7 +52,6 @@ def test_nmf_precoarsening(sparse_batch_graph, pooler_name):
     assert data_batch.num_nodes == 13
 
     pooling_out = pooler.precoarsening(
-        x=data_batch.x,
         edge_index=data_batch.edge_index,
         edge_weight=data_batch.edge_attr,
         batch=data_batch.batch,
@@ -191,6 +193,233 @@ def test_poolcollater_and_pooldataloader(tmp_path):
     collator = PoolCollater(dataset, follow_batch=["x"], exclude_keys=None)
     collated = collator([d1, d2])
     assert isinstance(collated, PooledBatch)
+
+
+class TestKMISPrecoarsenableScorers:
+    """Test KMIS scorers with and without node features."""
+
+    @pytest.fixture
+    def simple_graph(self):
+        """Create a simple test graph."""
+        torch.manual_seed(42)
+        x = torch.randn(6, 4)
+        edge_index = torch.tensor(
+            [
+                [0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 0],
+                [1, 0, 2, 1, 3, 2, 4, 3, 5, 4, 0, 5],
+            ],
+            dtype=torch.long,
+        )
+        edge_weight = torch.ones(edge_index.size(1))
+        batch = torch.zeros(6, dtype=torch.long)
+        return x, edge_index, edge_weight, batch
+
+    def test_kmis_scorers_without_x(self, simple_graph):
+        """Test KMIS scorers that work without node features."""
+        _, edge_index, edge_weight, batch = simple_graph
+
+        # These scorers should work without x
+        precoarsenable_scorers = ["degree", "random", "constant", "canonical"]
+
+        for scorer in precoarsenable_scorers:
+            pooler = KMISPooling(in_channels=4, scorer=scorer)
+            result = pooler.selector(
+                edge_index=edge_index, edge_weight=edge_weight, batch=batch
+            )
+
+            assert result.num_nodes == 6
+            assert result.num_supernodes > 0
+            assert result.num_supernodes <= 6
+
+    def test_kmis_scorers_require_x(self, simple_graph):
+        """Test KMIS scorers that require node features."""
+        _, edge_index, edge_weight, batch = simple_graph
+
+        # These scorers should fail without x
+        scorers_requiring_x = ["linear", "first", "last"]
+
+        for scorer in scorers_requiring_x:
+            pooler = KMISPooling(in_channels=4, scorer=scorer)
+            with pytest.raises(
+                TypeError, match="missing 1 required positional argument: 'x'"
+            ):
+                pooler.selector(
+                    edge_index=edge_index, edge_weight=edge_weight, batch=batch
+                )
+
+    def test_kmis_scorers_with_x(self, simple_graph):
+        """Test KMIS scorers work with node features (backward compatibility)."""
+        x, edge_index, edge_weight, batch = simple_graph
+
+        # Test all scorers with x
+        all_scorers = [
+            "degree",
+            "random",
+            "constant",
+            "canonical",
+            "linear",
+            "first",
+            "last",
+        ]
+
+        for scorer in all_scorers:
+            pooler = KMISPooling(in_channels=4, scorer=scorer)
+            result = pooler.selector(
+                x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch
+            )
+
+            assert result.num_nodes == 6
+            assert result.num_supernodes > 0
+            assert result.num_supernodes <= 6
+
+    def test_kmis_unrecognized_scorer(self, simple_graph):
+        """Test KMIS with unrecognized scorer raises appropriate error."""
+        x, edge_index, edge_weight, batch = simple_graph
+
+        # Test with an unrecognized scorer
+        with pytest.raises(AssertionError, match="Unrecognized `scorer` value."):
+            KMISPooling(in_channels=4, scorer="invalid_scorer")
+
+
+class TestIsPrecoarsenableProperty:
+    """Test the is_precoarsenable property for various poolers."""
+
+    def test_ndp_pooling_is_precoarsenable(self):
+        """Test NDPPooling is correctly identified as precoarsenable."""
+        pooler = NDPPooling()
+
+        assert not pooler.is_trainable
+        assert pooler.is_precoarsenable
+
+    def test_graclus_pooling_is_precoarsenable(self):
+        """Test GraclusPooling is correctly identified as precoarsenable."""
+        pooler = GraclusPooling()
+
+        assert not pooler.is_trainable
+        assert pooler.is_precoarsenable
+
+    def test_kmis_degree_scorer_is_precoarsenable(self):
+        """Test KMISPooling with degree scorer is correctly identified as precoarsenable."""
+        pooler = KMISPooling(in_channels=8, scorer="degree")
+
+        assert not pooler.is_trainable
+        assert pooler.is_precoarsenable
+
+    def test_kmis_random_scorer_is_precoarsenable(self):
+        """Test KMISPooling with random scorer is correctly identified as precoarsenable."""
+        pooler = KMISPooling(in_channels=8, scorer="random")
+
+        assert not pooler.is_trainable
+        assert pooler.is_precoarsenable
+
+    def test_kmis_constant_scorer_is_precoarsenable(self):
+        """Test KMISPooling with constant scorer is correctly identified as precoarsenable."""
+        pooler = KMISPooling(in_channels=8, scorer="constant")
+
+        assert not pooler.is_trainable
+        assert pooler.is_precoarsenable
+
+    def test_kmis_canonical_scorer_is_precoarsenable(self):
+        """Test KMISPooling with canonical scorer is correctly identified as precoarsenable."""
+        pooler = KMISPooling(in_channels=8, scorer="canonical")
+
+        assert not pooler.is_trainable
+        assert pooler.is_precoarsenable
+
+    def test_kmis_linear_scorer_is_not_precoarsenable(self):
+        """Test KMISPooling with linear scorer is correctly identified as NOT precoarsenable."""
+        pooler = KMISPooling(in_channels=8, scorer="linear")
+
+        assert pooler.is_trainable
+        assert not pooler.is_precoarsenable
+
+    def test_kmis_first_scorer_is_not_precoarsenable(self):
+        """Test KMISPooling with first scorer is correctly identified as NOT precoarsenable."""
+        pooler = KMISPooling(in_channels=8, scorer="first")
+
+        assert not pooler.is_trainable  # No learnable parameters
+        assert not pooler.is_precoarsenable  # But requires x
+
+    def test_kmis_last_scorer_is_not_precoarsenable(self):
+        """Test KMISPooling with last scorer is correctly identified as NOT precoarsenable."""
+        pooler = KMISPooling(in_channels=8, scorer="last")
+
+        assert not pooler.is_trainable  # No learnable parameters
+        assert not pooler.is_precoarsenable  # But requires x
+
+    def test_maxcut_pooling_is_not_precoarsenable(self):
+        """Test MaxCutPooling is correctly identified as NOT precoarsenable."""
+        pooler = MaxCutPooling(in_channels=8, ratio=0.5)
+
+        assert pooler.is_trainable
+        assert not pooler.is_precoarsenable
+
+    def test_precoarsenable_poolers_work_without_x(self):
+        """Test that all precoarsenable poolers actually work without node features."""
+        torch.manual_seed(42)
+        edge_index = torch.tensor(
+            [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]], dtype=torch.long
+        )
+        edge_weight = torch.ones(edge_index.size(1))
+        batch = torch.zeros(4, dtype=torch.long)
+
+        precoarsenable_poolers = [
+            NDPPooling(),
+            GraclusPooling(),
+            KMISPooling(in_channels=8, scorer="degree"),
+            KMISPooling(in_channels=8, scorer="random"),
+            KMISPooling(in_channels=8, scorer="constant"),
+            KMISPooling(in_channels=8, scorer="canonical"),
+        ]
+
+        for pooler in precoarsenable_poolers:
+            assert pooler.is_precoarsenable, (
+                f"{type(pooler).__name__} should be precoarsenable"
+            )
+
+            # Test that selector works without x (except for first/last scorers which need x)
+            if hasattr(pooler.selector, "scorer") and pooler.selector.scorer in [
+                "first",
+                "last",
+            ]:
+                # These scorers need x even though signature allows None
+                with pytest.raises(ValueError):
+                    pooler.selector(
+                        edge_index=edge_index, edge_weight=edge_weight, batch=batch
+                    )
+            else:
+                # These scorers should work without x
+                result = pooler.selector(
+                    edge_index=edge_index, edge_weight=edge_weight, batch=batch
+                )
+                assert result.num_nodes == 4
+                assert result.num_supernodes > 0
+                assert result.num_supernodes <= 4
+
+    def test_non_precoarsenable_poolers_fail_without_x(self):
+        """Test that non-precoarsenable poolers fail without node features."""
+        torch.manual_seed(42)
+        edge_index = torch.tensor(
+            [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]], dtype=torch.long
+        )
+        edge_weight = torch.ones(edge_index.size(1))
+        batch = torch.zeros(4, dtype=torch.long)
+
+        non_precoarsenable_poolers = [
+            MaxCutPooling(in_channels=8, ratio=0.5),
+            KMISPooling(in_channels=8, scorer="linear"),
+        ]
+
+        for pooler in non_precoarsenable_poolers:
+            assert not pooler.is_precoarsenable, (
+                f"{type(pooler).__name__} should NOT be precoarsenable"
+            )
+
+            # Test that selector fails without x
+            with pytest.raises((ValueError, TypeError)):
+                pooler.selector(
+                    edge_index=edge_index, edge_weight=edge_weight, batch=batch
+                )
 
 
 if __name__ == "__main__":

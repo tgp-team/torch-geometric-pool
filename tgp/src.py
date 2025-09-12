@@ -1,3 +1,4 @@
+import inspect
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
@@ -254,6 +255,39 @@ class SRCPooling(torch.nn.Module):
         """
         return any(p.requires_grad for p in self.parameters())
 
+    @property
+    def is_precoarsenable(self) -> bool:
+        r"""Returns :obj:`True` if the pooler is non-trainable and the select and connect
+        operations do not require node features (:obj:`x`).
+
+        A pooler is precoarsenable when:
+        1. It is not trainable (no learnable parameters)
+        2. The selector can work without node features (only needs edge_index)
+        3. The connector can work without node features (only needs edge_index and SelectOutput)
+
+        This is useful for pre-coarsening strategies where node features are not available
+        during the pooling operation.
+        """
+        # Check if pooler is non-trainable
+        if self.is_trainable:
+            return False
+
+        # Check if selector requires x by inspecting its forward method signature
+
+        selector_forward = self.selector.forward
+        sig = inspect.signature(selector_forward)
+
+        # Check if 'x' parameter exists and is not optional (no default value)
+        if "x" in sig.parameters:
+            x_param = sig.parameters["x"]
+            # If x has no default value, it's required
+            if x_param.default == inspect.Parameter.empty:
+                return False
+
+        # Connect operations typically don't require x, but let's be explicit
+        # All current connect operations only need edge_index and SelectOutput
+        return True
+
     def compute_loss(self, *args, **kwargs) -> Optional[dict]:
         """Compute loss function."""
         return None
@@ -460,12 +494,13 @@ class BasePrecoarseningMixin:
             num_nodes=num_nodes,
             **kwargs,
         )
-        x_pooled, batch_pooled = self.reduce(so=so, batch=batch, **kwargs)
+        batch_pooled = self.reducer.reduce_batch(
+            select_output=so, batch=batch, **kwargs
+        )
         edge_index_pooled, edge_weight_pooled = self.connector(
             so=so, edge_index=edge_index, edge_weight=edge_weight
         )
         return PoolingOutput(
-            x=x_pooled,
             edge_index=edge_index_pooled,
             edge_weight=edge_weight_pooled,
             batch=batch_pooled,

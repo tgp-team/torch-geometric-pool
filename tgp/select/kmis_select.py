@@ -1,3 +1,4 @@
+import types
 from typing import Callable, Optional, Union
 
 import torch
@@ -307,7 +308,7 @@ class KMISSelect(Select):
 
     def _scorer(
         self,
-        x: Tensor,
+        x: Optional[Tensor],
         edge_index: Adj,
         edge_weight: OptTensor = None,
         batch: OptTensor = None,
@@ -337,13 +338,67 @@ class KMISSelect(Select):
             return degree_scorer(
                 x, edge_index=edge_index, edge_weight=edge_weight, num_nodes=num_nodes
             )
-
         return self.scorer(x, edge_index, edge_weight, batch)
 
-    def forward(
+    def __getattribute__(self, name):
+        """Override forward method to have dynamic signature based on scorer."""
+        if name == "forward":
+            # Create a dynamic forward method based on scorer
+            if self.scorer in ["first", "last", "linear"]:
+                # These scorers require x
+                def forward_with_required_x(
+                    self,
+                    x: Tensor,  # Required, no default
+                    edge_index: Adj = None,
+                    edge_weight: Optional[Tensor] = None,
+                    *,
+                    batch: Optional[Tensor] = None,
+                    num_nodes: Optional[int] = None,
+                    **kwargs,
+                ) -> SelectOutput:
+                    return self._forward_impl(
+                        x=x,
+                        edge_index=edge_index,
+                        edge_weight=edge_weight,
+                        batch=batch,
+                        num_nodes=num_nodes,
+                        **kwargs,
+                    )
+
+                # Bind the method to self
+                bound_method = types.MethodType(forward_with_required_x, self)
+                return bound_method
+            else:
+                # These scorers can work without x
+                def forward_without_x(
+                    self,
+                    x: Optional[Tensor] = None,
+                    edge_index: Adj = None,
+                    edge_weight: Optional[Tensor] = None,
+                    *,
+                    batch: Optional[Tensor] = None,
+                    num_nodes: Optional[int] = None,
+                    **kwargs,
+                ) -> SelectOutput:
+                    return self._forward_impl(
+                        x=x,
+                        edge_index=edge_index,
+                        edge_weight=edge_weight,
+                        batch=batch,
+                        num_nodes=num_nodes,
+                        **kwargs,
+                    )
+
+                # Bind the method to self
+                bound_method = types.MethodType(forward_without_x, self)
+                return bound_method
+        else:
+            return super().__getattribute__(name)
+
+    def _forward_impl(
         self,
-        x: Tensor,
-        edge_index: Adj,
+        x: Optional[Tensor] = None,
+        edge_index: Adj = None,
         edge_weight: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
@@ -353,10 +408,11 @@ class KMISSelect(Select):
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor):
+            x (~torch.Tensor, optional):
                 The node feature matrix of shape :math:`[N, F]`,
                 where :math:`N` is the number of nodes in the batch and
                 :math:`F` is the number of node features.
+                Can be None for topology-based scorers like "degree".
             edge_index (~torch_geometric.typing.Adj):
                 The connectivity matrix.
                 It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
@@ -376,10 +432,12 @@ class KMISSelect(Select):
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of the :math:`\texttt{select}` operator.
         """
+        if x is None:
+            x_size = None
+        else:
+            x_size = x.size(0)
         num_nodes = (
-            num_nodes
-            if num_nodes is not None
-            else maybe_num_nodes(edge_index, x.size(0))
+            num_nodes if num_nodes is not None else maybe_num_nodes(edge_index, x_size)
         )
 
         if self.force_undirected:

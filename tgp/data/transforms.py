@@ -202,7 +202,7 @@ class PreCoarsening(BaseTransform):
     ) -> None:
         super().__init__()
         assert isinstance(pooler, SRCPooling)
-        assert not pooler.is_trainable, "The pooler must not be trainable."
+        assert pooler.is_precoarsenable, "The pooler must be precoarsenable."
         self.pooler = pooler
         self.input_key = input_key
         self.output_key = output_key
@@ -217,7 +217,6 @@ class PreCoarsening(BaseTransform):
         pooled_out = []
         for d in range(self.recursive_depth):
             data_pooled = self.pooler.precoarsening(
-                x=data_obj.x,
                 edge_index=data_obj.edge_index,
                 edge_weight=data_obj.edge_weight,
                 batch=data_obj.batch,
