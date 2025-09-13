@@ -201,9 +201,22 @@ class MaxCutPooling(SRCPooling):
         # Reduce
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
-        # Connect
+        # Connect (it is always based on the full assignment)
+        if not self.assign_all_nodes:
+            full_so = so.assign_all_nodes(
+                adj=adj,
+                weight=None,
+                max_iter=2,
+                batch=batch,
+                closest_node_assignment=True,
+            )
+        else:
+            full_so = so
         edge_index_pooled, edge_weight_pooled = self.connect(
-            edge_index=adj, so=so, edge_weight=edge_weight, batch_pooled=batch_pooled
+            edge_index=adj,
+            so=full_so,
+            edge_weight=edge_weight,
+            batch_pooled=batch_pooled,
         )
 
         return PoolingOutput(
