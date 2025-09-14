@@ -13,7 +13,7 @@ os.environ["PYTORCH_JIT"] = '0'  # generate doc for torch.jit.script methods
 #
 
 project = "Torch Geometric Pool"
-author = "Filippo Maria Bianchi, Ivan Marisca"
+author = "Filippo Maria Bianchi, Ivan Marisca, Carlo Abate"
 copyright = "Copyright &copy; {}, {}".format(datetime.datetime.now().year, author)
 
 version = tgp.__version__
