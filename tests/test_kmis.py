@@ -106,10 +106,8 @@ def test_degree_scorer_invalid_edge_weight(simple_edge_index):
     invalid_weight = torch.randn((2, 2), dtype=torch.float)
     with pytest.raises(ValueError, match="`edge_weight` must be a 1D tensor"):
         _ = degree_scorer(
-            x=torch.randn((3,)),
             edge_index=simple_edge_index,
             edge_weight=invalid_weight,
-            batch=None,
             num_nodes=3,
         )
 
@@ -118,10 +116,8 @@ def test_degree_scorer_valid(simple_edge_index):
     # Valid 1D edge_weight: degrees computed correctly
     weight = torch.tensor([1.0, 2.0])
     deg = degree_scorer(
-        x=torch.randn((3,)),
         edge_index=simple_edge_index,
         edge_weight=weight,
-        batch=None,
         num_nodes=3,
     )
     # Node 0: no incoming, deg=0; node1: one incoming (weight=1); node2: one incoming (weight=2)
@@ -172,7 +168,7 @@ def test_kmis_select_scorers_and_s_inv(simple_edge_index):
     x = torch.randn((N, 3), dtype=torch.float)
 
     # Test each non-linear scorer
-    for scorer in ["random", "constant", "canonical", "first", "last", "degree"]:
+    for scorer in ["random", "constant", "canonical", "degree"]:
         selector = KMISSelect(
             in_channels=None,
             order_k=2,
@@ -351,41 +347,6 @@ def test_mis_without_torch_scatter(monkeypatch, simple_undirected_edge_index):
     assert isinstance(out, SelectOutput)
 
 
-def test_kmis_select_custom_scorer(simple_edge_index):
-    """Test KMISSelect with a user-provided callable scorer. This ensures that
-    the branch `return self.scorer(x, edge_index, edge_weight, batch)` is covered.
-    """
-    # Our simple_edge_index fixture defines a 3-node chain (0->1, 1->2).
-    edge_index = simple_edge_index
-    N = edge_index.max().item() + 1  # here 3
-
-    # Create a feature matrix x of shape [N, 1]
-    x = torch.arange(N, dtype=torch.float).view(N, 1)
-    batch = None
-
-    # Custom scorer: returns scores [0, 1, 2]^T
-    def custom_scorer(x_in, edge_idx, edge_weight, batch_in):
-        num_nodes = x_in.size(0)
-        return torch.arange(num_nodes, dtype=torch.float).view(-1, 1)
-
-    selector = KMISSelect(
-        in_channels=None,
-        order_k=1,
-        scorer=custom_scorer,
-        score_heuristic=None,
-        force_undirected=False,
-        s_inv_op="transpose",
-    )
-    selector.eval()
-
-    out = selector.forward(x=x, edge_index=edge_index, batch=batch)
-
-    # The SelectOutput stores weight = score.view(-1)
-    expected_scores = custom_scorer(x, edge_index, None, None).view(-1)
-    assert torch.equal(out.weight, expected_scores)
-    assert isinstance(out, SelectOutput)
-
-
 def test_skip_torch_scatter_import(monkeypatch):
     # 1) Ensure the flag is False before kmis_select ever runs its top‐level import:
     monkeypatch.setattr(imports_mod, "HAS_TORCH_SCATTER", False)
@@ -397,11 +358,34 @@ def test_skip_torch_scatter_import(monkeypatch):
     # 3) Now re‐import (this will re‐run the top‐level code, and skip the torch_scatter imports)
     kmis_mod = importlib.import_module("tgp.select.kmis_select")
 
-    # 4) Verify that the module’s flag is False, and that the torch_scatter names were never bound:
+    # 4) Verify that the module's flag is False, and that the torch_scatter names were never bound:
     assert kmis_mod.HAS_TORCH_SCATTER is False
     assert not hasattr(kmis_mod, "scatter_add")
     assert not hasattr(kmis_mod, "scatter_max")
     assert not hasattr(kmis_mod, "scatter_min")
+
+
+def test_kmis_invalid_scorer_raises_value_error():
+    """Test that KMISSelect raises ValueError when scorer is invalid."""
+    import torch
+    from torch_sparse import SparseTensor
+
+    from tgp.select.kmis_select import KMISSelect
+
+    # Create a simple graph
+    x = torch.randn(3, 8)
+    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
+    adj = SparseTensor.from_edge_index(edge_index, sparse_sizes=(3, 3))
+
+    # Instantiate KMISSelect with degree scorer
+    kmis_select = KMISSelect(scorer="degree", order_k=1)
+
+    # Manually modify the scorer attribute to something invalid
+    kmis_select.scorer = "invalid_scorer"
+
+    # Call _scorer method - this should raise ValueError
+    with pytest.raises(ValueError, match="Unrecognized `scorer` value: invalid_scorer"):
+        kmis_select._scorer(x, adj, num_nodes=3)
 
 
 if __name__ == "__main__":

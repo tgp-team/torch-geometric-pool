@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -7,7 +7,7 @@ from torch_geometric.typing import Adj
 from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select.kmis_select import KMISSelect, Scorer, SelectOutput
+from tgp.select.kmis_select import KMISSelect, SelectOutput
 from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
 from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
@@ -132,7 +132,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         self,
         in_channels: Optional[int] = None,
         order_k: int = 1,
-        scorer: Union[Scorer, str] = "linear",
+        scorer: str = "linear",
         score_heuristic: Optional[str] = "greedy",
         force_undirected: bool = False,
         lift: LiftType = "precomputed",
@@ -171,9 +171,12 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
 
         self.reduce_red_op = reduce_red_op
         self.cached = cached
+        self.precoarsenable = scorer in ["random", "constant", "canonical", "degree"]
 
-        if cached and scorer == "linear":
-            raise Exception("Caching should be disabled when using a linear scorer.")
+        if cached and scorer == "linear" or callable(scorer):
+            raise Exception(
+                "Caching should be disabled when using a linear scorer or a callable scorer."
+            )
 
     def forward(
         self,

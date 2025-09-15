@@ -5,7 +5,21 @@ from torch_geometric.utils import to_dense_adj
 
 from tgp.data.loaders import PoolCollater, PoolDataLoader, PooledBatch
 from tgp.data.transforms import NormalizeAdj, PreCoarsening
-from tgp.poolers import NDPPooling, get_pooler
+from tgp.poolers import (
+    ASAPooling,
+    EdgeContractionPooling,
+    GraclusPooling,
+    KMISPooling,
+    LaPooling,
+    MaxCutPooling,  # Should NOT be precoarsenable
+    NDPPooling,  # Should be precoarsenable
+    NMFPooling,
+    PANPooling,  # Should NOT be precoarsenable
+    SAGPooling,
+    TopkPooling,  # Should NOT be precoarsenable
+    get_pooler,
+)
+from tgp.src import Precoarsenable, SRCPooling
 
 
 @pytest.fixture(scope="module")
@@ -34,7 +48,7 @@ def sparse_batch_graph():
     return data_batch
 
 
-poolers = ["ndp", "kmis", "graclus", "lap"]
+poolers = ["ndp", "kmis", "graclus"]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
@@ -191,6 +205,82 @@ def test_poolcollater_and_pooldataloader(tmp_path):
     collator = PoolCollater(dataset, follow_batch=["x"], exclude_keys=None)
     collated = collator([d1, d2])
     assert isinstance(collated, PooledBatch)
+
+
+def test_is_precoarsenable_property():
+    """Test the is_precoarsenable property for various poolers."""
+    # Test poolers that have implemented precoarsening method (should be precoarsenable)
+    precoarsenable_poolers = [
+        NDPPooling(),
+        NMFPooling(k=5),
+        GraclusPooling(),
+        KMISPooling(in_channels=8, scorer="degree"),  # Non-trainable scorer
+    ]
+
+    for pooler in precoarsenable_poolers:
+        assert pooler.is_precoarsenable, (
+            f"{type(pooler).__name__} should be precoarsenable"
+        )
+        assert not pooler.is_trainable, (
+            f"{type(pooler).__name__} should not be trainable"
+        )
+
+    # Test poolers that do NOT have implemented precoarsening method (should NOT be precoarsenable)
+    non_precoarsenable_poolers = [
+        MaxCutPooling(in_channels=8, ratio=0.5),
+        LaPooling(),
+        PANPooling(in_channels=8, ratio=0.5),
+        ASAPooling(in_channels=8, ratio=0.5),
+        SAGPooling(in_channels=8, ratio=0.5),
+        TopkPooling(in_channels=8, ratio=0.5),
+        EdgeContractionPooling(in_channels=8),
+    ]
+
+    for pooler in non_precoarsenable_poolers:
+        assert not pooler.is_precoarsenable, (
+            f"{type(pooler).__name__} should NOT be precoarsenable"
+        )
+
+    # Test KMISPooling with linear scorer (should be trainable and NOT precoarsenable)
+    kmis_linear = KMISPooling(in_channels=8, scorer="linear")
+    assert not kmis_linear.is_precoarsenable, (
+        "KMISPooling with linear scorer should NOT be precoarsenable"
+    )
+    assert kmis_linear.is_trainable, (
+        "KMISPooling with linear scorer should be trainable"
+    )
+
+
+def test_is_precoarsenable_edge_cases():
+    """Test edge cases for the is_precoarsenable property."""
+
+    # Test that the property correctly identifies implemented precoarsening method
+    class TestPrecoarsenablePooler(SRCPooling, Precoarsenable):
+        def __init__(self):
+            super().__init__()
+
+    class TestNonPrecoarsenablePooler(SRCPooling):
+        def __init__(self):
+            super().__init__()
+
+    # Test pooler with implemented precoarsening method but no trainable parameters
+    test_pooler = TestPrecoarsenablePooler()
+    assert test_pooler.is_precoarsenable, (
+        "Pooler with implemented precoarsening should be precoarsenable"
+    )
+
+    # Test pooler without implemented precoarsening method
+    test_non_pooler = TestNonPrecoarsenablePooler()
+    print(test_non_pooler.is_precoarsenable)
+    assert not test_non_pooler.is_precoarsenable, (
+        "Pooler without implemented precoarsening should NOT be precoarsenable"
+    )
+
+    # Test that the property is consistent
+    ndp_pooler = NDPPooling()
+    assert ndp_pooler.is_precoarsenable == (
+        hasattr(ndp_pooler, "precoarsening") and not ndp_pooler.is_trainable
+    )
 
 
 if __name__ == "__main__":

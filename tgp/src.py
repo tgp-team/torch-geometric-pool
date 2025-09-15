@@ -205,15 +205,6 @@ class SRCPooling(torch.nn.Module):
             return pooled_edge_index, pooled_edge_weight
         raise NotImplementedError
 
-    def precoarsening(
-        self,
-        **kwargs,
-    ) -> PoolingOutput:
-        """Precompute a coarsened graph from the original graph.
-        Must be implemented by the poolers that support precoarsening.
-        """
-        raise NotImplementedError("Precoarsening is not supported by this pooler.")
-
     def preprocessing(
         self, x: Tensor, edge_index: Tensor, **kwargs
     ) -> Tuple[Adj, Tensor, Optional[Tensor]]:
@@ -263,6 +254,14 @@ class SRCPooling(torch.nn.Module):
         self._so_cached = None
         self._pooled_edge_index = None
         self._pooled_edge_weight = None
+
+    @property
+    def is_precoarsenable(self) -> bool:
+        r"""Returns :obj:`True` if the pooler is precoarsenable."""
+        if isinstance(self, Precoarsenable):
+            return not self.is_trainable
+        else:
+            return False
 
     @classmethod
     def get_signature(cls) -> Signature:
@@ -439,7 +438,18 @@ class DenseSRCPooling(SRCPooling):
         return dense_global_reduce(x, reduce_op, self.node_dim)
 
 
-class BasePrecoarseningMixin:
+class Precoarsenable:
+    def precoarsening(
+        self,
+        **kwargs,
+    ) -> PoolingOutput:
+        """Precompute a coarsened graph from the original graph.
+        Must be implemented by the poolers that support precoarsening.
+        """
+        raise NotImplementedError("Precoarsening is not supported by this pooler.")
+
+
+class BasePrecoarseningMixin(Precoarsenable):
     r"""A mixin class for pooling layers that implements the
     pre-coarsening strategy.
     """

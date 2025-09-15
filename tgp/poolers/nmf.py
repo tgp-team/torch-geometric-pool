@@ -10,11 +10,11 @@ from tgp.connect import DenseConnect, DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
-from tgp.src import DenseSRCPooling, PoolingOutput
+from tgp.src import DenseSRCPooling, PoolingOutput, Precoarsenable
 from tgp.utils.typing import LiftType, SinvType
 
 
-class NMFPooling(DenseSRCPooling):
+class NMFPooling(Precoarsenable, DenseSRCPooling):
     r"""The Non-negative Matrix Factorization
     pooling as proposed in the paper `"A Non-Negative Factorization approach
     to node pooling in Graph Convolutional Neural Networks"
