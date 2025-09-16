@@ -37,9 +37,10 @@ class MaxCutPooling(SRCPooling):
         ratio (Union[float, int]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
         assign_all_nodes (bool, optional): Whether to create assignment matrices that map
-            ALL nodes to supernodes (True) or perform standard top-k selection (False).
-            When True, mimics the original MaxCutPool "expressive" mode.
+            all nodes to the closest supernode (True) or perform standard top-k selection (False).
             (default: :obj:`True`)
+        max_iter (int, optional): Maximum distance for the closest node assignment.
+            (default: :obj:`5`)
         loss_coeff (float, optional): Coefficient for the MaxCut auxiliary loss.
             (default: :obj:`1.0`)
         mp_units (list, optional): List of hidden units for message passing layers.
@@ -108,6 +109,7 @@ class MaxCutPooling(SRCPooling):
         in_channels: int,
         ratio: Union[float, int] = 0.5,
         assign_all_nodes: bool = True,
+        max_iter: int = 5,
         loss_coeff: float = 1.0,
         mp_units: list = [32, 32, 32, 32],
         mp_act: str = "tanh",
@@ -129,6 +131,7 @@ class MaxCutPooling(SRCPooling):
                 in_channels=in_channels,
                 ratio=ratio,
                 assign_all_nodes=assign_all_nodes,
+                max_iter=max_iter,
                 mp_units=mp_units,
                 mp_act=mp_act,
                 mlp_units=mlp_units,
@@ -150,6 +153,7 @@ class MaxCutPooling(SRCPooling):
         self.in_channels = in_channels
         self.ratio = ratio
         self.assign_all_nodes = assign_all_nodes
+        self.max_iter = max_iter
         self.loss_coeff = loss_coeff
         self.mp_units = mp_units
         self.mp_act = mp_act
@@ -206,7 +210,7 @@ class MaxCutPooling(SRCPooling):
             full_so = so.assign_all_nodes(
                 adj=adj,
                 weight=None,
-                max_iter=2,
+                max_iter=self.max_iter,
                 batch=batch,
                 closest_node_assignment=True,
             )

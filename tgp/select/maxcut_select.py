@@ -160,9 +160,10 @@ class MaxCutSelect(TopkSelect):
         ratio (Union[int, float]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
         assign_all_nodes (bool, optional): Whether to create assignment matrices that map
-            ALL nodes to supernodes (True) or perform standard top-k selection (False).
-            When True, mimics the original MaxCutPool "expressive" mode.
+            all nodes to the closest supernode (True) or perform standard top-k selection (False).
             (default: :obj:`True`)
+        max_iter (int, optional): Maximum distance for the closest node assignment.
+            (default: :obj:`5`)
         mp_units (list, optional): List of hidden units for message passing layers.
             (default: :obj:`[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]`)
         mp_act (str, optional): Activation function for message passing layers.
@@ -193,6 +194,7 @@ class MaxCutSelect(TopkSelect):
         in_channels: int,
         ratio: Union[int, float] = 0.5,
         assign_all_nodes: bool = True,
+        max_iter: int = 5,
         mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
@@ -219,6 +221,7 @@ class MaxCutSelect(TopkSelect):
         self.score_act = act
         self.delta = delta
         self.assign_all_nodes = assign_all_nodes
+        self.max_iter = max_iter
 
         # Score network - initialize after calling super().__init__
         self.score_net = MaxCutScoreNet(
@@ -282,7 +285,7 @@ class MaxCutSelect(TopkSelect):
             select_output = topk_select_output.assign_all_nodes(
                 adj=edge_index,
                 weight=scores.squeeze(-1),
-                max_iter=5,
+                max_iter=self.max_iter,
                 batch=batch,
                 closest_node_assignment=True,
             )
@@ -306,5 +309,6 @@ class MaxCutSelect(TopkSelect):
             f"mlp_units={self.mlp_units}, "
             f"mlp_act='{self.mlp_act}', "
             f"act='{self.score_act}', "
-            f"delta={self.delta})"
+            f"delta={self.delta}, "
+            f"max_iter={self.max_iter})"
         )
