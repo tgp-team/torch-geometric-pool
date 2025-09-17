@@ -217,7 +217,6 @@ class PreCoarsening(BaseTransform):
         pooled_out = []
         for d in range(self.recursive_depth):
             data_pooled = self.pooler.precoarsening(
-                x=data_obj.x,
                 edge_index=data_obj.edge_index,
                 edge_weight=data_obj.edge_weight,
                 batch=data_obj.batch,
