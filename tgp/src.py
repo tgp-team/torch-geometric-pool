@@ -470,12 +470,11 @@ class BasePrecoarseningMixin(Precoarsenable):
             num_nodes=num_nodes,
             **kwargs,
         )
-        x_pooled, batch_pooled = self.reduce(so=so, batch=batch, **kwargs)
+        batch_pooled = self.reducer.reduce_batch(select_output=so, batch=batch)
         edge_index_pooled, edge_weight_pooled = self.connector(
             so=so, edge_index=edge_index, edge_weight=edge_weight
         )
         return PoolingOutput(
-            x=x_pooled,
             edge_index=edge_index_pooled,
             edge_weight=edge_weight_pooled,
             batch=batch_pooled,
