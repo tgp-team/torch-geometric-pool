@@ -288,13 +288,14 @@ class KMISSelect(Select):
 
     def _scorer(
         self,
-        x: Tensor,
         adj: SparseTensor,
+        x: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
     ) -> Tensor:
         device = adj.device()
 
         if self.scorer == "linear":
+            assert x is not None, "x must be provided when scorer is 'linear'"
             return self.lin(x).sigmoid()
 
         if self.scorer == "random":
@@ -312,10 +313,10 @@ class KMISSelect(Select):
 
     def forward(
         self,
-        x: Tensor,
+        *,
         edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
-        *,
+        x: Optional[Tensor] = None,
         batch: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
         **kwargs,
@@ -323,10 +324,6 @@ class KMISSelect(Select):
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor):
-                The node feature matrix of shape :math:`[N, F]`,
-                where :math:`N` is the number of nodes in the batch and
-                :math:`F` is the number of node features.
             edge_index (~torch_geometric.typing.Adj):
                 The connectivity matrix.
                 It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
@@ -334,6 +331,11 @@ class KMISSelect(Select):
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):
                 A vector of shape  :math:`[E]` or  :math:`[E, 1]` containing the weights of the edges.
+                (default: :obj:`None`)
+            x (~torch.Tensor, optional):
+                The node feature matrix of shape :math:`[N, F]`,
+                where :math:`N` is the number of nodes in the batch and
+                :math:`F` is the number of node features.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
@@ -346,10 +348,9 @@ class KMISSelect(Select):
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of the :math:`\texttt{select}` operator.
         """
+        size_x = x.size(0) if x is not None else None
         num_nodes = (
-            num_nodes
-            if num_nodes is not None
-            else maybe_num_nodes(edge_index, x.size(0))
+            num_nodes if num_nodes is not None else maybe_num_nodes(edge_index, size_x)
         )
 
         if self.force_undirected:
@@ -362,7 +363,7 @@ class KMISSelect(Select):
         adj = connectivity_to_sparse_tensor(
             edge_index, edge_weight, num_nodes=num_nodes
         )
-        score = self._scorer(x, adj, num_nodes=num_nodes)
+        score = self._scorer(adj, x, num_nodes=num_nodes)
         updated_score = self._apply_heuristic(score, adj)
         perm = torch.argsort(updated_score.view(-1), 0, descending=True)
 

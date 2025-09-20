@@ -367,11 +367,6 @@ def test_skip_torch_scatter_import(monkeypatch):
 
 def test_kmis_invalid_scorer_raises_value_error():
     """Test that KMISSelect raises ValueError when scorer is invalid."""
-    import torch
-    from torch_sparse import SparseTensor
-
-    from tgp.select.kmis_select import KMISSelect
-
     # Create a simple graph
     x = torch.randn(3, 8)
     edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
@@ -385,7 +380,7 @@ def test_kmis_invalid_scorer_raises_value_error():
 
     # Call _scorer method - this should raise ValueError
     with pytest.raises(ValueError, match="Unrecognized `scorer` value: invalid_scorer"):
-        kmis_select._scorer(x, adj, num_nodes=3)
+        kmis_select._scorer(x=x, adj=adj, num_nodes=3)
 
 
 if __name__ == "__main__":
