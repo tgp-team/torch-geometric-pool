@@ -3,6 +3,7 @@ from .dense_select import DenseSelect
 from .dp_select import DPSelect
 from .edge_contraction_select import EdgeContractionSelect
 from .graclus_select import GraclusSelect
+from .identity_select import IdentitySelect
 from .kmis_select import KMISSelect, degree_scorer
 from .lapool_select import LaPoolSelect
 from .maxcut_select import MaxCutScoreNet, MaxCutSelect
@@ -21,6 +22,7 @@ select_classes = [
     "DPSelect",
     "EdgeContractionSelect",
     "GraclusSelect",
+    "IdentitySelect",
     "LaPoolSelect",
     "KMISSelect",
     "MaxCutSelect",
