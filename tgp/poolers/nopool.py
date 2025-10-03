@@ -1,21 +1,17 @@
-from typing import Optional, Union
+from typing import Optional
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_sparse import SparseTensor
 
-from tgp.connect import IdentityConnect, SparseConnect
+from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
-from tgp.reduce import BaseReduce, IdentityReduce
+from tgp.reduce import BaseReduce
 from tgp.select import IdentitySelect, SelectOutput
 from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
-from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
 class NoPool(BasePrecoarseningMixin, SRCPooling):
     r"""Identity pooling operator that performs no actual pooling.
-    
     This pooler creates a consistent SelectOutput and PoolingOutput structure
     but doesn't perform any actual pooling - each node maps to itself and
     all features and edges are preserved unchanged.
@@ -26,9 +22,9 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
     ):
         super().__init__(
             selector=IdentitySelect(),
-            reducer=IdentityReduce(),
+            reducer=BaseReduce(reduce_op="sum"),
             lifter=BaseLift(matrix_op="precomputed", reduce_op="sum"),
-            connector=IdentityConnect(),
+            connector=SparseConnect(reduce_op="sum", remove_self_loops=False),
         )
 
     def forward(
@@ -117,7 +113,7 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
         edge_index_pooled, edge_weight_pooled = self.connector(
             so=so, edge_index=edge_index, edge_weight=edge_weight
         )
-        
+
         return PoolingOutput(
             edge_index=edge_index_pooled,
             edge_weight=edge_weight_pooled,
