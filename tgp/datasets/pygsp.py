@@ -24,7 +24,7 @@ class PyGSPDataset(InMemoryDataset):
     def __init__(
         self,
         root,
-        name="community",
+        name="Community",
         transform=None,
         pre_transform=None,
         pre_filter=None,
