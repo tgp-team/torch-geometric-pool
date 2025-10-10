@@ -15,10 +15,6 @@ class IdentitySelect(Select):
     def __init__(self):
         super().__init__()
 
-    def reset_parameters(self):
-        """Reset parameters (no-op for identity)."""
-        pass
-
     def forward(
         self,
         *,
