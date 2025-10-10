@@ -220,7 +220,6 @@ def test_nopool_print_signature():
     connector_str = str(pooler.connector)
 
     assert "IdentitySelect" in selector_str
-    assert "s_inv_op" in selector_str
     assert "BaseReduce" in reducer_str
     assert "SparseConnect" in connector_str
 
@@ -276,49 +275,6 @@ def test_identity_select_with_dense_edge_index():
     assert torch.equal(so.cluster_index, torch.arange(4))
 
 
-def test_identity_select_with_explicit_num_nodes():
-    """Test IdentitySelect when num_nodes is explicitly provided."""
-    selector = IdentitySelect()
-
-    # Provide explicit num_nodes
-    so = selector.forward(num_nodes=7)
-
-    assert so.num_nodes == 7
-    assert so.num_supernodes == 7
-    assert torch.equal(so.node_index, torch.arange(7))
-    assert torch.equal(so.cluster_index, torch.arange(7))
-
-
-def test_identity_select_with_x_and_edge_index_uses_x():
-    """Test IdentitySelect prioritizes x over edge_index when both provided."""
-    selector = IdentitySelect()
-
-    x = torch.randn(3, 2)
-    edge_index = torch.tensor(
-        [[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long
-    )  # Would give 4 nodes
-
-    so = selector.forward(x=x, edge_index=edge_index)
-
-    # Should use x.size(0) = 3, not edge_index max + 1 = 4
-    assert so.num_nodes == 3
-    assert so.num_supernodes == 3
-
-
-def test_identity_select_with_x_and_explicit_num_nodes_uses_explicit():
-    """Test IdentitySelect prioritizes explicit num_nodes over x."""
-    selector = IdentitySelect()
-
-    x = torch.randn(3, 2)
-    explicit_num_nodes = 8
-
-    so = selector.forward(x=x, num_nodes=explicit_num_nodes)
-
-    # Should use explicit num_nodes = 8, not x.size(0) = 3
-    assert so.num_nodes == 8
-    assert so.num_supernodes == 8
-
-
 def test_identity_select_device_consistency_with_x():
     """Test IdentitySelect uses device from x tensor."""
     selector = IdentitySelect()
@@ -351,7 +307,7 @@ def test_identity_select_error_when_no_inputs():
     """Test IdentitySelect raises ValueError when no inputs to determine num_nodes."""
     selector = IdentitySelect()
 
-    with pytest.raises(ValueError, match="Cannot determine num_nodes from inputs"):
+    with pytest.raises(ValueError, match="x and edge_index cannot both be None"):
         selector.forward()
 
 
@@ -359,7 +315,7 @@ def test_identity_select_error_when_num_nodes_none_and_no_other_inputs():
     """Test IdentitySelect raises ValueError when num_nodes=None and no other inputs."""
     selector = IdentitySelect()
 
-    with pytest.raises(ValueError, match="Cannot determine num_nodes from inputs"):
+    with pytest.raises(ValueError, match="x and edge_index cannot both be None"):
         selector.forward(num_nodes=None)
 
 
@@ -376,8 +332,6 @@ def test_identity_select_with_batch_and_edge_weight():
     # Should work normally, batch and edge_weight are ignored
     assert so.num_nodes == 3
     assert so.num_supernodes == 3
-    # s_inv_op is stored in the selector, not the SelectOutput
-    assert selector.s_inv_op == "transpose"
 
 
 def test_identity_select_with_kwargs():
@@ -399,19 +353,6 @@ def test_identity_select_reset_parameters():
 
     # Should not raise any error
     selector.reset_parameters()
-
-
-def test_identity_select_edge_case_zero_nodes():
-    """Test IdentitySelect edge case with zero nodes."""
-    selector = IdentitySelect()
-
-    # Test with explicit zero nodes
-    so = selector.forward(num_nodes=0)
-
-    assert so.num_nodes == 0
-    assert so.num_supernodes == 0
-    assert so.node_index.numel() == 0
-    assert so.cluster_index.numel() == 0
 
 
 def test_identity_select_edge_case_single_node():

@@ -34,7 +34,6 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
         edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         batch: Optional[Tensor] = None,
-        attn: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
@@ -54,8 +53,6 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
-            attn (~torch.Tensor, optional): Optional node-level matrix (ignored).
-                (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -68,15 +65,13 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
             return x_lifted
         else:
             # Select - create identity mapping
-            so = self.select(x=x, batch=batch)
+            so = self.select(x=x, edge_index=adj)
 
             # Reduce - pass features unchanged
-            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+            x_pooled, batch_pooled = x, batch
 
             # Connect - pass edges unchanged
-            edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj, edge_weight=edge_weight, so=so
-            )
+            edge_index_pooled, edge_weight_pooled = adj, edge_weight
 
             out = PoolingOutput(
                 x=x_pooled,
@@ -86,11 +81,6 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
                 so=so,
             )
             return out
-
-    @property
-    def is_dense(self) -> bool:
-        """Returns :obj:`False` as this is a sparse pooling method."""
-        return False
 
     def precoarsening(
         self,
@@ -109,10 +99,8 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
             num_nodes=num_nodes,
             **select_kwargs,
         )
-        batch_pooled = self.reducer.reduce_batch(so, batch)
-        edge_index_pooled, edge_weight_pooled = self.connector(
-            so=so, edge_index=edge_index, edge_weight=edge_weight
-        )
+        batch_pooled = batch
+        edge_index_pooled, edge_weight_pooled = edge_index, edge_weight
 
         return PoolingOutput(
             edge_index=edge_index_pooled,
@@ -120,7 +108,3 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
             batch=batch_pooled,
             so=so,
         )
-
-    def extra_repr_args(self) -> dict:
-        """Additional representation arguments for debugging."""
-        return {}
