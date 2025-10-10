@@ -4,20 +4,21 @@
 Reduce
 ======
 
+The most general interface is :class:`~tgp.reduce.Reduce`, which is the
+parent class for every :math:`\texttt{reduce}` operator in :mod:`tgp`.
+
 .. autosummary::
     :nosignatures:
+    {% for cls in tgp.reduce.reduce_classes %}
+        {{ cls }}
+    {% endfor %}
 
-        BaseReduce
-        Reduce
-
-.. autoclass:: BaseReduce
+{% for cls in tgp.reduce.reduce_classes %}
+.. autoclass:: {{ cls }}
     :members:
+{% endfor %}
 
-.. autoclass:: Reduce
-    :members:
-
-.. autodata:: global_reduce
+{% for func in tgp.reduce.reduce_functions %}
+.. autodata:: {{ func }}
    :annotation:
-
-.. autodata:: dense_global_reduce
-   :annotation:
+{% endfor %}
