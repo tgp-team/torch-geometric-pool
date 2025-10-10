@@ -144,12 +144,6 @@ class SRCPooling(torch.nn.Module):
 
     def select(
         self,
-        x: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        edge_weight: Optional[Tensor] = None,
-        *,
-        batch: Optional[Tensor] = None,
-        num_nodes: Optional[int] = None,
         **kwargs,
     ) -> SelectOutput:
         r"""Calls the :class:`~tgp.select.Select` operator.
@@ -162,11 +156,6 @@ class SRCPooling(torch.nn.Module):
             if self._so_cached is not None:
                 return self._so_cached
             so = self.selector(
-                x=x,
-                edge_index=edge_index,
-                edge_weight=edge_weight,
-                batch=batch,
-                num_nodes=num_nodes,
                 **kwargs,
             )
             if self.cached:
@@ -176,10 +165,6 @@ class SRCPooling(torch.nn.Module):
 
     def reduce(
         self,
-        x: Tensor,
-        so: SelectOutput = None,
-        *,
-        batch: Optional[Tensor] = None,
         **kwargs,
     ) -> Tensor:
         r"""Calls the :class:`~tgp.reduce.Reduce` operator.
@@ -188,25 +173,21 @@ class SRCPooling(torch.nn.Module):
             The pooled supernode features :math:`\mathbf{X}_{\text{pool}}`.
         """
         if self.reducer is not None:
-            return self.reducer(x=x, so=so, batch=batch, **kwargs)
+            return self.reducer(**kwargs)
         raise NotImplementedError
 
-    def lift(self, x_pool: Tensor, so: SelectOutput = None, **kwargs) -> Adj:
+    def lift(self, **kwargs) -> Adj:
         r"""Calls the :class:`~tgp.lift.Lift` operator.
 
         Returns:
             The un-pooled node features :math:`\mathbf{X}_{\text{lift}} \approx \mathbf{X}`.
         """
         if self.lifter is not None:
-            return self.lifter(x_pool=x_pool, so=so, **kwargs)
+            return self.lifter(**kwargs)
         raise NotImplementedError
 
     def connect(
         self,
-        edge_index: Adj,
-        so: SelectOutput = None,
-        *,
-        edge_weight: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Adj, Optional[Tensor]]:
         r"""Calls the :class:`~tgp.connect.Connect` operator.
@@ -217,28 +198,12 @@ class SRCPooling(torch.nn.Module):
         if self.connector is not None:
             if self._pooled_edge_index is not None:
                 return self._pooled_edge_index, self._pooled_edge_weight
-            pooled_edge_index, pooled_edge_weight = self.connector(
-                edge_index=edge_index, edge_weight=edge_weight, so=so, **kwargs
-            )
+            pooled_edge_index, pooled_edge_weight = self.connector(**kwargs)
             if self.cached:
                 self._pooled_edge_index = pooled_edge_index
                 self._pooled_edge_weight = pooled_edge_weight
             return pooled_edge_index, pooled_edge_weight
         raise NotImplementedError
-
-    def precoarsening(
-        self,
-        edge_index: Optional[Adj] = None,
-        edge_weight: Optional[Tensor] = None,
-        *,
-        batch: Optional[Tensor] = None,
-        num_nodes: Optional[int] = None,
-        **select_kwargs,
-    ) -> PoolingOutput:
-        """Precompute a coarsened graph from the original graph.
-        Must be implemented by the poolers that support precoarsening.
-        """
-        raise NotImplementedError("Precoarsening is not supported by this pooler.")
 
     def preprocessing(
         self, x: Tensor, edge_index: Tensor, **kwargs
@@ -289,6 +254,14 @@ class SRCPooling(torch.nn.Module):
         self._so_cached = None
         self._pooled_edge_index = None
         self._pooled_edge_weight = None
+
+    @property
+    def is_precoarsenable(self) -> bool:
+        r"""Returns :obj:`True` if the pooler is precoarsenable."""
+        if isinstance(self, Precoarsenable):
+            return not self.is_trainable
+        else:
+            return False
 
     @classmethod
     def get_signature(cls) -> Signature:
@@ -465,7 +438,18 @@ class DenseSRCPooling(SRCPooling):
         return dense_global_reduce(x, reduce_op, self.node_dim)
 
 
-class BasePrecoarseningMixin:
+class Precoarsenable:
+    def precoarsening(
+        self,
+        **kwargs,
+    ) -> PoolingOutput:
+        """Precompute a coarsened graph from the original graph.
+        Must be implemented by the poolers that support precoarsening.
+        """
+        raise NotImplementedError("Precoarsening is not supported by this pooler.")
+
+
+class BasePrecoarseningMixin(Precoarsenable):
     r"""A mixin class for pooling layers that implements the
     pre-coarsening strategy.
     """
@@ -477,16 +461,16 @@ class BasePrecoarseningMixin:
         *,
         batch: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
-        **select_kwargs,
+        **kwargs,
     ) -> PoolingOutput:
         so = self.select(
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
             num_nodes=num_nodes,
-            **select_kwargs,
+            **kwargs,
         )
-        batch_pooled = self.reducer.reduce_batch(so, batch)
+        batch_pooled = self.reducer.reduce_batch(select_output=so, batch=batch)
         edge_index_pooled, edge_weight_pooled = self.connector(
             so=so, edge_index=edge_index, edge_weight=edge_weight
         )

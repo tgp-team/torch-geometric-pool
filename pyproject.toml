@@ -7,7 +7,8 @@ name = "torch-geometric-pool"
 dynamic = ["version", "description"]
 authors = [
     { name = "Filippo Maria Bianchi", email = "filippombianchi@gmail.com" },
-    { name = "Ivan Marisca", email = "ivan.marisca@usi.ch" }
+    { name = "Ivan Marisca", email = "ivan.marisca@usi.ch" },
+    { name = "Carlo Abate", email = "carlo.abate@uit.no" }
 ]
 readme = "README.md"
 license = "MIT"

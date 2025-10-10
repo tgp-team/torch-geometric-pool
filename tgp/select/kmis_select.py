@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Union
+from typing import Optional
 
 import torch
 from torch_geometric.nn.dense import Linear
@@ -21,14 +21,10 @@ from tgp.utils import (
 )
 from tgp.utils.typing import SinvType
 
-Scorer = Callable[[Tensor, Adj, OptTensor, OptTensor], Tensor]
-
 
 def degree_scorer(
-    x: Tensor,
-    edge_index: Tensor,
+    edge_index: Adj,
     edge_weight: Optional[Tensor] = None,
-    batch: Optional[Tensor] = None,
     num_nodes: Optional[int] = None,
     dim: int = 1,
 ):
@@ -190,24 +186,19 @@ class KMISSelect(Select):
             :obj:`"linear"`. (default: :obj:`None`)
         order_k (int):
             The :math:`k`-th order for the independent set. (default: :obj:`1`)
-        scorer (str or Callable):
+        scorer (str):
             A function that computes a score for each node. Nodes with higher score
             have a higher chance of being selected for pooling. It can be one of:
 
             - :obj:`"linear"` (default): Uses a sigmoid-activated linear layer to
-              compute the scores. :obj:`in_channels` and :obj:`score_passthrough`
+              compute the scores. :obj:`in_channels`
               must be set when using this option.
             - :obj:`"random"`: Assigns a random score in :math:`[0, 1]` to each
               node.
             - :obj:`"constant"`: Assigns a constant score of :math:`1` to each node.
             - :obj:`"canonical"`: Assigns the score :math:`-i` to the :math:`i`-th
               node.
-            - :obj:`"first"` (or :obj:`"last"`): Uses the first (or last) feature
-              dimension of :math:`\mathbf{X}` as the node scores.
             - :obj:`"degree"`: Uses the degree of each node as the score.
-            - A custom function: Accepts the arguments
-              :obj:`(x, edge_index, edge_weight, batch)` and must return a
-              one-dimensional :class:`~torch.Tensor`.
         score_heuristic (str, optional):
             Heuristic to increase the total score of selected nodes. Given an initial
             score vector :math:`\mathbf{s} \in \mathbb{R}^n`, options include:
@@ -242,21 +233,13 @@ class KMISSelect(Select):
     """
 
     _heuristics = {None, "greedy", "w-greedy"}
-    _scorers = {
-        "linear",
-        "degree",
-        "random",
-        "constant",
-        "canonical",
-        "first",
-        "last",
-    }
+    _scorers = {"linear", "degree", "random", "constant", "canonical"}
 
     def __init__(
         self,
         in_channels: Optional[int] = None,
         order_k: int = 1,
-        scorer: Union[Scorer, str] = "linear",
+        scorer: str = "linear",
         score_heuristic: Optional[str] = "greedy",
         force_undirected: bool = False,
         s_inv_op: SinvType = "transpose",
@@ -265,11 +248,9 @@ class KMISSelect(Select):
         super(KMISSelect, self).__init__()
 
         assert score_heuristic in self._heuristics, (
-            "Unrecognized `score_heuristic` value."
+            f"Unrecognized `score_heuristic` value: {score_heuristic}"
         )
-
-        if not callable(scorer):
-            assert scorer in self._scorers, "Unrecognized `scorer` value."
+        assert scorer in self._scorers, f"Unrecognized `scorer` value: {scorer}"
 
         self.order_k = order_k
         self.scorer = scorer
@@ -307,15 +288,14 @@ class KMISSelect(Select):
 
     def _scorer(
         self,
-        x: Tensor,
-        edge_index: Adj,
-        edge_weight: OptTensor = None,
-        batch: OptTensor = None,
+        adj: SparseTensor,
+        x: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
     ) -> Tensor:
-        device = edge_index.device()
+        device = adj.device()
 
         if self.scorer == "linear":
+            assert x is not None, "x must be provided when scorer is 'linear'"
             return self.lin(x).sigmoid()
 
         if self.scorer == "random":
@@ -327,25 +307,16 @@ class KMISSelect(Select):
         if self.scorer == "canonical":
             return -torch.arange(num_nodes, device=device).view(-1, 1)
 
-        if self.scorer == "first":
-            return x[..., [0]]
-
-        if self.scorer == "last":
-            return x[..., [-1]]
-
         if self.scorer == "degree":
-            return degree_scorer(
-                x, edge_index=edge_index, edge_weight=edge_weight, num_nodes=num_nodes
-            )
-
-        return self.scorer(x, edge_index, edge_weight, batch)
+            return degree_scorer(edge_index=adj, num_nodes=num_nodes)
+        raise ValueError(f"Unrecognized `scorer` value: {self.scorer}")
 
     def forward(
         self,
-        x: Tensor,
+        *,
         edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
-        *,
+        x: Optional[Tensor] = None,
         batch: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
         **kwargs,
@@ -353,10 +324,6 @@ class KMISSelect(Select):
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor):
-                The node feature matrix of shape :math:`[N, F]`,
-                where :math:`N` is the number of nodes in the batch and
-                :math:`F` is the number of node features.
             edge_index (~torch_geometric.typing.Adj):
                 The connectivity matrix.
                 It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
@@ -364,6 +331,11 @@ class KMISSelect(Select):
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):
                 A vector of shape  :math:`[E]` or  :math:`[E, 1]` containing the weights of the edges.
+                (default: :obj:`None`)
+            x (~torch.Tensor, optional):
+                The node feature matrix of shape :math:`[N, F]`,
+                where :math:`N` is the number of nodes in the batch and
+                :math:`F` is the number of node features.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
@@ -376,10 +348,9 @@ class KMISSelect(Select):
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of the :math:`\texttt{select}` operator.
         """
+        size_x = x.size(0) if x is not None else None
         num_nodes = (
-            num_nodes
-            if num_nodes is not None
-            else maybe_num_nodes(edge_index, x.size(0))
+            num_nodes if num_nodes is not None else maybe_num_nodes(edge_index, size_x)
         )
 
         if self.force_undirected:
@@ -392,7 +363,7 @@ class KMISSelect(Select):
         adj = connectivity_to_sparse_tensor(
             edge_index, edge_weight, num_nodes=num_nodes
         )
-        score = self._scorer(x, adj, batch=batch, num_nodes=num_nodes)
+        score = self._scorer(adj, x, num_nodes=num_nodes)
         updated_score = self._apply_heuristic(score, adj)
         perm = torch.argsort(updated_score.view(-1), 0, descending=True)
 

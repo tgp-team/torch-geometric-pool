@@ -37,9 +37,10 @@ class MaxCutPooling(SRCPooling):
         ratio (Union[float, int]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
         assign_all_nodes (bool, optional): Whether to create assignment matrices that map
-            ALL nodes to supernodes (True) or perform standard top-k selection (False).
-            When True, mimics the original MaxCutPool "expressive" mode.
+            all nodes to the closest supernode (True) or perform standard top-k selection (False).
             (default: :obj:`True`)
+        max_iter (int, optional): Maximum distance for the closest node assignment.
+            (default: :obj:`5`)
         loss_coeff (float, optional): Coefficient for the MaxCut auxiliary loss.
             (default: :obj:`1.0`)
         mp_units (list, optional): List of hidden units for message passing layers.
@@ -50,6 +51,8 @@ class MaxCutPooling(SRCPooling):
             (default: :obj:`[16, 16]`)
         mlp_act (str, optional): Activation function for MLP layers.
             (default: :obj:`"relu"`)
+        act (str, optional): Activation function for the final score.
+            (default: :obj:`"tanh"`)
         delta (float, optional): Delta parameter for propagation matrix computation.
             (default: :obj:`2.0`)
         lift (~tgp.utils.typing.LiftType, optional):
@@ -88,6 +91,15 @@ class MaxCutPooling(SRCPooling):
             :obj:`~torch_geometric.utils.scatter`,
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
+        remove_self_loops (bool, optional):
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
+            (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`True`)
 
 
     """
@@ -97,43 +109,57 @@ class MaxCutPooling(SRCPooling):
         in_channels: int,
         ratio: Union[float, int] = 0.5,
         assign_all_nodes: bool = True,
+        max_iter: int = 5,
         loss_coeff: float = 1.0,
-        mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
+        mp_units: list = [32, 32, 32, 32],
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",
+        act: str = "tanh",
         delta: float = 2.0,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
+        remove_self_loops: bool = True,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = True,
     ):
         super().__init__(
             selector=MaxCutSelect(
                 in_channels=in_channels,
                 ratio=ratio,
                 assign_all_nodes=assign_all_nodes,
+                max_iter=max_iter,
                 mp_units=mp_units,
                 mp_act=mp_act,
                 mlp_units=mlp_units,
                 mlp_act=mlp_act,
+                act=act,
                 delta=delta,
                 s_inv_op=s_inv_op,
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
-            connector=SparseConnect(reduce_op=connect_red_op),
+            connector=SparseConnect(
+                reduce_op=connect_red_op,
+                edge_weight_norm=edge_weight_norm,
+                degree_norm=degree_norm,
+                remove_self_loops=remove_self_loops,
+            ),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
         )
 
         self.in_channels = in_channels
         self.ratio = ratio
         self.assign_all_nodes = assign_all_nodes
+        self.max_iter = max_iter
         self.loss_coeff = loss_coeff
         self.mp_units = mp_units
         self.mp_act = mp_act
         self.mlp_units = mlp_units
         self.mlp_act = mlp_act
+        self.act = act
         self.delta = delta
 
     def forward(
@@ -179,9 +205,22 @@ class MaxCutPooling(SRCPooling):
         # Reduce
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
-        # Connect
+        # Connect (it is always based on the full assignment)
+        if not self.assign_all_nodes:
+            full_so = so.assign_all_nodes(
+                adj=adj,
+                weight=None,
+                max_iter=self.max_iter,
+                batch=batch,
+                closest_node_assignment=True,
+            )
+        else:
+            full_so = so
         edge_index_pooled, edge_weight_pooled = self.connect(
-            edge_index=adj, so=so, edge_weight=edge_weight
+            edge_index=adj,
+            so=full_so,
+            edge_weight=edge_weight,
+            batch_pooled=batch_pooled,
         )
 
         return PoolingOutput(

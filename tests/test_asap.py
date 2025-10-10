@@ -74,6 +74,7 @@ def test_forward_with_gnn_and_sparse_adj_and_add_self_loops_and_extra_repr():
         dropout=0.1,
         negative_slope=0.1,
         nonlinearity="sigmoid",
+        remove_self_loops=False,
     )
     pooler.eval()
     pooler.reset_parameters()
@@ -124,6 +125,16 @@ def test_graph_disconnected_case():
 
     out = pooler(x=x, adj=edge_index, so=None, batch=batch, lifting=False)
     assert isinstance(out, PoolingOutput)
+
+
+def test_both_add_and_remove_self_loops_raises_error():
+    """Test that ASAPooling raises ValueError when both add_self_loops and remove_self_loops are True."""
+    with pytest.raises(
+        ValueError, match="remove_self_loops and add_self_loops cannot be both True"
+    ):
+        ASAPooling(
+            in_channels=3, ratio=0.5, add_self_loops=True, remove_self_loops=True
+        )
 
 
 if __name__ == "__main__":

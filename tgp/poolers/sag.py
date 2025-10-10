@@ -92,6 +92,15 @@ class SAGPooling(SRCPooling):
             :obj:`~torch_geometric.utils.scatter`,
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
+        remove_self_loops (bool, optional):
+            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
+            (default: :obj:`True`)
+        degree_norm (bool, optional):
+            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
+            (default: :obj:`False`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
         **kwargs (any, optional):
             Additional parameters for initializing the graph
             neural network layer.
@@ -110,6 +119,9 @@ class SAGPooling(SRCPooling):
         reduce_red_op: ReduceType = "sum",
         connect_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
+        remove_self_loops: bool = True,
+        degree_norm: bool = False,
+        edge_weight_norm: bool = False,
         **kwargs,
     ):
         super().__init__(
@@ -118,7 +130,12 @@ class SAGPooling(SRCPooling):
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
-            connector=SparseConnect(reduce_op=connect_red_op),
+            connector=SparseConnect(
+                reduce_op=connect_red_op,
+                degree_norm=degree_norm,
+                edge_weight_norm=edge_weight_norm,
+                remove_self_loops=remove_self_loops,
+            ),
         )
 
         # keep only the kwargs that are used in the GNN
@@ -193,7 +210,10 @@ class SAGPooling(SRCPooling):
 
             # Connect
             edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj, so=so, edge_weight=edge_weight
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch_pooled=batch_pooled,
             )
 
             out = PoolingOutput(

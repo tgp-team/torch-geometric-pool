@@ -10,11 +10,11 @@ from tgp.connect import DenseConnect, DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
-from tgp.src import DenseSRCPooling, PoolingOutput
+from tgp.src import DenseSRCPooling, PoolingOutput, Precoarsenable
 from tgp.utils.typing import LiftType, SinvType
 
 
-class NMFPooling(DenseSRCPooling):
+class NMFPooling(Precoarsenable, DenseSRCPooling):
     r"""The Non-negative Matrix Factorization
     pooling as proposed in the paper `"A Non-Negative Factorization approach
     to node pooling in Graph Convolutional Neural Networks"
@@ -47,6 +47,9 @@ class NMFPooling(DenseSRCPooling):
             If :obj:`True`, normalize the pooled adjacency matrix by the
             nodes' degree.
             (default: :obj:`True`)
+        edge_weight_norm (bool, optional):
+            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
+            (default: :obj:`False`)
         adj_transpose (bool, optional):
             If :obj:`True`, the preprocessing step in :class:`~tgp.src.DenseSRCPooling` and
             the :class:`~tgp.connect.DenseConnect` operation returns transposed
@@ -79,6 +82,7 @@ class NMFPooling(DenseSRCPooling):
         cached: bool = False,
         remove_self_loops: bool = True,
         degree_norm: bool = True,
+        edge_weight_norm: bool = False,
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
@@ -91,6 +95,7 @@ class NMFPooling(DenseSRCPooling):
                 remove_self_loops=remove_self_loops,
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
+                edge_weight_norm=edge_weight_norm,
             ),
             cached=cached,
             adj_transpose=adj_transpose,
@@ -102,6 +107,7 @@ class NMFPooling(DenseSRCPooling):
         self.preconnector = DenseConnectSPT(
             remove_self_loops=remove_self_loops,
             degree_norm=degree_norm,
+            edge_weight_norm=edge_weight_norm,
         )
 
     def forward(

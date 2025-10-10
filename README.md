@@ -116,16 +116,16 @@ If you use Torch Geometric Pool for your research, please consider citing the li
 
 ```bibtex
 @software{Bianchi_Torch_Geometric_Pool_2025,
-    author = {Bianchi, Filippo Maria and Marisca, Ivan},
+    author = {Bianchi, Filippo Maria and Marisca, Ivan and Abate, Carlo},
     license = {MIT},
     month = {3},
     title = {{Torch Geometric Pool}},
-    url = {https://github.com/tgp-team/tgp},
+    url = {https://github.com/tgp-team/torch-geometric-pool},
     year = {2025}
 }
 ```
 
-By [Filippo Maria Bianchi](https://sites.google.com/view/filippombianchi/home) and [Ivan Marisca](https://marshka.github.io/).
+By [Filippo Maria Bianchi](https://sites.google.com/view/filippombianchi/home), [Ivan Marisca](https://marshka.github.io/) and [Carlo Abate](https://carloabate.it/).
 
 ## License
 

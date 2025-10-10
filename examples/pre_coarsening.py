@@ -12,7 +12,7 @@ seed_everything(8)
 
 N_LEVELS = 2  # Number of coarsening levels
 poolers = {
-    "lap": {},
+    "nopool": {},
     "ndp": {},
     "nmf": {"k": 5},
     "graclus": {},

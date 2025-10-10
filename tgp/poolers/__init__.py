@@ -13,6 +13,7 @@ from .maxcut import MaxCutPooling
 from .mincut import MinCutPooling
 from .ndp import NDPPooling
 from .nmf import NMFPooling
+from .nopool import NoPool
 from .pan import PANPooling
 from .sag import SAGPooling
 from .topk import TopkPooling
@@ -33,6 +34,7 @@ pooler_classes = [
     "MinCutPooling",
     "NDPPooling",
     "NMFPooling",
+    "NoPool",
     "PANPooling",
     "SAGPooling",
     "TopkPooling",
@@ -54,6 +56,7 @@ pooler_map = {
     "mincut": MinCutPooling,
     "ndp": NDPPooling,
     "nmf": NMFPooling,
+    "nopool": NoPool,
     "pan": PANPooling,
     "sag": SAGPooling,
     "topk": TopkPooling,

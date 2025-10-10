@@ -31,6 +31,8 @@ class MaxCutScoreNet(torch.nn.Module):
             (default: :obj:`[16, 16]`)
         mlp_act (str, optional): Activation function for MLP layers.
             (default: :obj:`"relu"`)
+        act (str, optional): Activation function for the final score.
+            (default: :obj:`"tanh"`)
         delta (float, optional): Delta parameter for propagation matrix computation.
             (default: :obj:`2.0`)
     """
@@ -42,10 +44,13 @@ class MaxCutScoreNet(torch.nn.Module):
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",
+        act: str = "tanh",
         delta: float = 2.0,
         **kwargs,  # Accept and ignore extra kwargs for compatibility
     ):
         super().__init__()
+
+        self.initial_layer = Linear(in_channels, in_channels)  # initial embedding
 
         # Message passing layers
         if mp_act.lower() in ["identity", "none"]:
@@ -73,6 +78,10 @@ class MaxCutScoreNet(torch.nn.Module):
             in_units = out_units
 
         self.final_layer = Linear(in_units, 1)
+        if act.lower() in ["identity", "none"]:
+            self.act = lambda x: x
+        else:
+            self.act = activation_resolver(act)
         self.delta = delta
 
     def reset_parameters(self):
@@ -105,6 +114,8 @@ class MaxCutScoreNet(torch.nn.Module):
             edge_index, edge_weight, delta=self.delta
         )
 
+        x = self.initial_layer(x)  # initial embedding
+
         # Message passing layers
         for mp_conv in self.mp_convs:
             x = mp_conv(x, edge_index, edge_weight)
@@ -117,7 +128,7 @@ class MaxCutScoreNet(torch.nn.Module):
 
         # Final score computation
         score = self.final_layer(x)
-        return torch.tanh(score)
+        return self.act(score)
 
 
 class MaxCutSelect(TopkSelect):
@@ -149,9 +160,10 @@ class MaxCutSelect(TopkSelect):
         ratio (Union[int, float]): Graph pooling ratio for top-k selection.
             (default: :obj:`0.5`)
         assign_all_nodes (bool, optional): Whether to create assignment matrices that map
-            ALL nodes to supernodes (True) or perform standard top-k selection (False).
-            When True, mimics the original MaxCutPool "expressive" mode.
+            all nodes to the closest supernode (True) or perform standard top-k selection (False).
             (default: :obj:`True`)
+        max_iter (int, optional): Maximum distance for the closest node assignment.
+            (default: :obj:`5`)
         mp_units (list, optional): List of hidden units for message passing layers.
             (default: :obj:`[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]`)
         mp_act (str, optional): Activation function for message passing layers.
@@ -160,6 +172,8 @@ class MaxCutSelect(TopkSelect):
             (default: :obj:`[16, 16]`)
         mlp_act (str, optional): Activation function for MLP layers.
             (default: :obj:`"relu"`)
+        act (str, optional): Activation function for the final score.
+            (default: :obj:`"tanh"`)
         delta (float, optional): Delta parameter for propagation matrix computation.
             (default: :obj:`2.0`)
         min_score (float, optional): Minimal node score threshold.
@@ -180,10 +194,12 @@ class MaxCutSelect(TopkSelect):
         in_channels: int,
         ratio: Union[int, float] = 0.5,
         assign_all_nodes: bool = True,
+        max_iter: int = 5,
         mp_units: list = [32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8],
         mp_act: str = "tanh",
         mlp_units: list = [16, 16],
         mlp_act: str = "relu",
+        act: str = "tanh",
         delta: float = 2.0,
         min_score: Optional[float] = None,
         s_inv_op: SinvType = "transpose",
@@ -202,8 +218,10 @@ class MaxCutSelect(TopkSelect):
         self.mp_act = mp_act
         self.mlp_units = mlp_units
         self.mlp_act = mlp_act
+        self.score_act = act
         self.delta = delta
         self.assign_all_nodes = assign_all_nodes
+        self.max_iter = max_iter
 
         # Score network - initialize after calling super().__init__
         self.score_net = MaxCutScoreNet(
@@ -212,6 +230,7 @@ class MaxCutSelect(TopkSelect):
             mp_act=mp_act,
             mlp_units=mlp_units,
             mlp_act=mlp_act,
+            act=self.score_act,
             delta=delta,
         )
 
@@ -266,7 +285,7 @@ class MaxCutSelect(TopkSelect):
             select_output = topk_select_output.assign_all_nodes(
                 adj=edge_index,
                 weight=scores.squeeze(-1),
-                max_iter=5,
+                max_iter=self.max_iter,
                 batch=batch,
                 closest_node_assignment=True,
             )
@@ -289,5 +308,7 @@ class MaxCutSelect(TopkSelect):
             f"mp_act='{self.mp_act}', "
             f"mlp_units={self.mlp_units}, "
             f"mlp_act='{self.mlp_act}', "
-            f"delta={self.delta})"
+            f"act='{self.score_act}', "
+            f"delta={self.delta}, "
+            f"max_iter={self.max_iter})"
         )
