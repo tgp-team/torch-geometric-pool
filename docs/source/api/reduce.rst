@@ -5,7 +5,7 @@ Reduce
 ======
 
 The most general interface is :class:`~tgp.reduce.Reduce`, which is the
-parent class for every reduce operator in :mod:`tgp`.
+parent class for every :math:`\texttt{reduce}` operator in :mod:`tgp`.
 
 .. autosummary::
     :nosignatures:

@@ -38,10 +38,9 @@ class IdentitySelect(torch.nn.Module):
                 else:
                     num_nodes = edge_index.max().item() + 1
             else:
-                raise ValueError("Cannot determine num_nodes from inputs")
+                raise ValueError("x and edge_index cannot both be None")
 
         # Create identity matrix: each node maps to itself
-        # For sparse representation, create cluster_index = node_index = [0, 1, 2, ..., num_nodes-1]
         node_index = torch.arange(num_nodes, device=x.device if x is not None else None)
         cluster_index = torch.arange(
             num_nodes, device=x.device if x is not None else None
