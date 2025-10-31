@@ -9,6 +9,20 @@ from torch_sparse import SparseTensor
 from tgp.select import Select, SelectOutput
 
 
+def get_device(
+    x: Optional[Tensor] = None, edge_index: Optional[Adj] = None
+) -> torch.device:
+    if edge_index is not None:
+        if isinstance(edge_index, SparseTensor):
+            return edge_index.device()
+        else:
+            return edge_index.device
+    elif x is not None:
+        return x.device
+    else:
+        raise ValueError("No device found")
+
+
 class IdentitySelect(Select):
     """Identity select operator that maps each node to itself (no pooling)."""
 
@@ -18,25 +32,27 @@ class IdentitySelect(Select):
     def forward(
         self,
         *,
-        x: Optional[Tensor] = None,
         edge_index: Optional[Adj] = None,
+        num_nodes: Optional[int] = None,
+        device: Optional[torch.device] = None,
         **kwargs,
     ) -> SelectOutput:
-        """Create identity mapping where each node maps to itself."""
-        if x is None and edge_index is None:
-            raise ValueError("x and edge_index cannot both be None")
+        """Create identity mapping where each node maps to itself.
 
-        if x is not None:
-            num_nodes = x.size(0)
-            device = x.device
-        else:
-            num_nodes = maybe_num_nodes(edge_index)
-            if isinstance(edge_index, SparseTensor):
-                device = edge_index.device()
-            else:
-                device = edge_index.device
+        Args:
+            edge_index (Optional[Adj]): The edge index of the graph.
+            num_nodes (Optional[int]): The number of nodes in the graph.
+                If not provided, it will be inferred from the edge_index.
+            device (Optional[torch.device]): The device to use for the output tensors.
+                If not provided, it will be inferred from the edge_index.
+
+        Returns:
+            SelectOutput: The output of the identity select operator.
+        """
+        num_nodes = maybe_num_nodes(edge_index, num_nodes)
+        device = device if device is not None else get_device(edge_index=edge_index)
+
         # Create identity matrix: each node maps to itself
-
         node_index = torch.arange(num_nodes, device=device)
         cluster_index = torch.arange(num_nodes, device=device)
 

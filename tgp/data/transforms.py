@@ -225,9 +225,6 @@ class PreCoarsening(BaseTransform):
             data_obj = data_pooled.as_data()
             pooled_out.append(data_obj)
 
-        # if self.recursive_depth == 1:
-        #     setattr(data, self.output_key, pooled_out[0])
-        # else:
         setattr(data, self.output_key, pooled_out)
 
         return data

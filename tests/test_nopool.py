@@ -7,7 +7,7 @@ from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
 from tgp.select.base_select import SelectOutput
-from tgp.select.identity_select import IdentitySelect
+from tgp.select.identity_select import IdentitySelect, get_device
 
 
 @pytest.fixture(scope="module")
@@ -229,20 +229,6 @@ def test_nopool_print_signature():
 # ============================================================================
 
 
-def test_identity_select_with_x_tensor():
-    """Test IdentitySelect when num_nodes is determined from x tensor."""
-    selector = IdentitySelect()
-
-    # Test with x tensor
-    x = torch.randn(5, 3)
-    so = selector.forward(x=x)
-
-    assert so.num_nodes == 5
-    assert so.num_supernodes == 5
-    assert torch.equal(so.node_index, torch.arange(5))
-    assert torch.equal(so.cluster_index, torch.arange(5))
-
-
 def test_identity_select_with_sparse_edge_index():
     """Test IdentitySelect when num_nodes is determined from SparseTensor edge_index."""
     selector = IdentitySelect()
@@ -275,74 +261,69 @@ def test_identity_select_with_dense_edge_index():
     assert torch.equal(so.cluster_index, torch.arange(4))
 
 
-def test_identity_select_device_consistency_with_x():
-    """Test IdentitySelect uses device from x tensor."""
+def test_identity_select_device_consistency_with_edge_index():
+    """Test IdentitySelect uses device from edge_index tensor."""
     selector = IdentitySelect()
 
     # Test with CUDA if available, otherwise CPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    x = torch.randn(4, 2, device=device)
+    edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long, device=device)
 
-    so = selector.forward(x=x)
+    so = selector.forward(edge_index=edge_index)
 
     # Check device type and index separately to handle CUDA device differences
     assert so.node_index.device.type == device.type
     assert so.cluster_index.device.type == device.type
 
 
-def test_identity_select_device_consistency_without_x():
-    """Test IdentitySelect uses None device when x is not provided."""
-    selector = IdentitySelect()
-
-    edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
-
-    so = selector.forward(edge_index=edge_index)
-
-    # When x is None, device should be None (default)
-    assert so.node_index.device.type == "cpu"  # Default device
-    assert so.cluster_index.device.type == "cpu"
-
-
 def test_identity_select_error_when_no_inputs():
-    """Test IdentitySelect raises ValueError when no inputs to determine num_nodes."""
+    """Test IdentitySelect raises NotImplementedError when no inputs to determine num_nodes."""
     selector = IdentitySelect()
 
-    with pytest.raises(ValueError, match="x and edge_index cannot both be None"):
+    with pytest.raises(NotImplementedError):
         selector.forward()
 
 
-def test_identity_select_error_when_num_nodes_none_and_no_other_inputs():
-    """Test IdentitySelect raises ValueError when num_nodes=None and no other inputs."""
+def test_identity_select_with_num_nodes_not_none():
+    """Test IdentitySelect when num_nodes is explicitly provided (not None)."""
     selector = IdentitySelect()
 
-    with pytest.raises(ValueError, match="x and edge_index cannot both be None"):
-        selector.forward(num_nodes=None)
+    # Test case 1: num_nodes provided with edge_index
+    # When num_nodes is explicitly provided, it should override the inferred value from edge_index
+    edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+    explicit_num_nodes = 6
+    # edge_index would normally infer 4 nodes (max index + 1), but explicit num_nodes=6 should be used
+    so = selector.forward(edge_index=edge_index, num_nodes=explicit_num_nodes)
 
+    assert so.num_nodes == explicit_num_nodes
+    assert so.num_supernodes == explicit_num_nodes
+    assert torch.equal(so.node_index, torch.arange(explicit_num_nodes))
+    assert torch.equal(so.cluster_index, torch.arange(explicit_num_nodes))
 
-def test_identity_select_with_batch_and_edge_weight():
-    """Test IdentitySelect works with batch and edge_weight parameters (ignored)."""
-    selector = IdentitySelect()
+    # Test case 2: num_nodes provided with SparseTensor edge_index
+    sparse_edge_index = SparseTensor.from_edge_index(edge_index, sparse_sizes=(4, 4))
+    explicit_num_nodes = 8
+    # SparseTensor would normally infer 4 nodes, but explicit num_nodes=8 should be used
+    so = selector.forward(edge_index=sparse_edge_index, num_nodes=explicit_num_nodes)
 
-    x = torch.randn(3, 2)
-    batch = torch.tensor([0, 0, 1], dtype=torch.long)
-    edge_weight = torch.tensor([1.0, 2.0, 3.0])
-
-    so = selector.forward(x=x, batch=batch, edge_weight=edge_weight)
-
-    # Should work normally, batch and edge_weight are ignored
-    assert so.num_nodes == 3
-    assert so.num_supernodes == 3
+    assert so.num_nodes == explicit_num_nodes
+    assert so.num_supernodes == explicit_num_nodes
+    assert torch.equal(so.node_index, torch.arange(explicit_num_nodes))
+    assert torch.equal(so.cluster_index, torch.arange(explicit_num_nodes))
 
 
 def test_identity_select_with_kwargs():
     """Test IdentitySelect handles additional kwargs."""
     selector = IdentitySelect()
 
-    x = torch.randn(2, 3)
+    edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
 
     # Pass additional kwargs that should be ignored
-    so = selector.forward(x=x, some_random_param=42, another_param="test")
+    so = selector.forward(
+        edge_index=edge_index, some_random_param=42, another_param="test"
+    )
 
+    # num_nodes inferred from edge_index: max(1) + 1 = 2
     assert so.num_nodes == 2
     assert so.num_supernodes == 2
 
@@ -359,10 +340,116 @@ def test_identity_select_edge_case_single_node():
     """Test IdentitySelect edge case with single node."""
     selector = IdentitySelect()
 
-    x = torch.randn(1, 3)
-    so = selector.forward(x=x)
+    # Test with single node using edge_index
+    edge_index = torch.tensor([[0], [0]], dtype=torch.long)
+    so = selector.forward(edge_index=edge_index)
 
     assert so.num_nodes == 1
     assert so.num_supernodes == 1
     assert torch.equal(so.node_index, torch.tensor([0]))
     assert torch.equal(so.cluster_index, torch.tensor([0]))
+
+
+class TestGetDevice:
+    """Test the get_device utility function."""
+
+    def test_get_device_from_edge_index_tensor(self):
+        """Test get_device returns device from edge_index Tensor."""
+        # Test on CPU
+        edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+        device = get_device(None, edge_index)
+        assert device == torch.device("cpu")
+        assert device.type == "cpu"
+
+        # Test on CUDA if available
+        if torch.cuda.is_available():
+            edge_index_cuda = edge_index.cuda()
+            device_cuda = get_device(None, edge_index_cuda)
+            assert device_cuda.type == "cuda"
+
+    def test_get_device_from_sparse_tensor(self):
+        """Test get_device returns device from SparseTensor edge_index."""
+        # Create SparseTensor on CPU
+        edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
+        sparse_edge_index = SparseTensor.from_edge_index(
+            edge_index, sparse_sizes=(4, 4)
+        )
+
+        device = get_device(None, sparse_edge_index)
+        assert device == torch.device("cpu")
+        assert device.type == "cpu"
+
+        # Test on CUDA if available
+        if torch.cuda.is_available():
+            sparse_edge_index_cuda = sparse_edge_index.cuda()
+            device_cuda = get_device(None, sparse_edge_index_cuda)
+            assert device_cuda.type == "cuda"
+
+    def test_get_device_from_x_tensor(self):
+        """Test get_device returns device from x tensor when edge_index is None."""
+        # Test on CPU
+        x = torch.randn(5, 3)
+        device = get_device(x, None)
+        assert device == torch.device("cpu")
+        assert device.type == "cpu"
+
+        # Test on CUDA if available
+        if torch.cuda.is_available():
+            x_cuda = x.cuda()
+            device_cuda = get_device(x_cuda, None)
+            assert device_cuda.type == "cuda"
+
+    def test_get_device_edge_index_priority(self):
+        """Test that edge_index takes priority over x when both are provided."""
+        # Create tensors on different devices if CUDA is available
+        x = torch.randn(5, 3)
+        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+
+        device = get_device(x, edge_index)
+        # Should use edge_index device (both CPU in this case)
+        assert device == torch.device("cpu")
+
+        if torch.cuda.is_available():
+            # x on CPU, edge_index on CUDA
+            edge_index_cuda = edge_index.cuda()
+            device = get_device(x, edge_index_cuda)
+            assert device.type == "cuda"  # Should use edge_index device
+
+            # x on CUDA, edge_index on CPU
+            x_cuda = x.cuda()
+            device = get_device(x_cuda, edge_index)
+            assert device.type == "cpu"  # Should use edge_index device
+
+    def test_get_device_raises_when_both_none(self):
+        """Test get_device raises ValueError when both x and edge_index are None."""
+        with pytest.raises(ValueError, match="No device found"):
+            get_device(None, None)
+
+        with pytest.raises(ValueError, match="No device found"):
+            get_device()
+
+    def test_get_device_with_empty_edge_index(self):
+        """Test get_device works with empty edge_index."""
+        # Empty edge_index tensor
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        device = get_device(None, edge_index)
+        assert device == torch.device("cpu")
+
+    def test_get_device_with_single_node_edge_index(self):
+        """Test get_device works with single node edge_index."""
+        # Self-loop
+        edge_index = torch.tensor([[0], [0]], dtype=torch.long)
+        device = get_device(None, edge_index)
+        assert device == torch.device("cpu")
+
+    def test_get_device_with_sparse_tensor_priority(self):
+        """Test that SparseTensor edge_index takes priority over x."""
+        x = torch.randn(3, 2)
+        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+        sparse_edge_index = SparseTensor.from_edge_index(
+            edge_index, sparse_sizes=(3, 3)
+        )
+
+        device = get_device(x, sparse_edge_index)
+        # Should use sparse_edge_index device
+        assert device == torch.device("cpu")
