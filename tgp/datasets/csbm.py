@@ -98,7 +98,7 @@ def _generate_connected_sbm(
     rng: np.random.Generator,
     max_attempts: int = 128,
 ) -> Tuple[nx.Graph, np.ndarray]:
-    """Sample a connected SBM graph, retrying when necessary.
+    """Sample a connected SBM graph, retrying when necessary (ie, rejection sampling).
 
     Args:
         num_nodes_per_class (int): Number of nodes in each block.
@@ -336,7 +336,7 @@ class CSBMDataset(InMemoryDataset):
         for _ in range(num_unstructured):
             sbm_graph, _ = _generate_connected_sbm(
                 p.num_nodes_per_class, pin, pout, rng
-            )
+            )  # to work exactly with a degree distribution drawn from an SBM
             degrees = _degree_vector(sbm_graph).tolist()
             random_graph = _generate_random_graph_with_degree_sequence(degrees, rng)
 
