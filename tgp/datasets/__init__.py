@@ -1,3 +1,4 @@
+from .csbm import CSBMDataset
 from .expwl1 import EXPWL1Dataset
 from .graph_classification_bench import GraphClassificationBench
 from .gset import GsetDataset
@@ -10,4 +11,5 @@ dataset_classes = [
     "GsetDataset",
     "MultipartiteGraphDataset",
     "PyGSPDataset",
+    "CSBMDataset",
 ]
