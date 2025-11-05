@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn.functional as F
 from torch_geometric import seed_everything
@@ -131,6 +133,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             return accs
 
         ### Training loop
+        start_time = time.time()
         for epoch in range(1, 11):
             loss = train()
             train_acc, val_acc, test_acc = test()
@@ -141,3 +144,5 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 f"Val Acc: {val_acc:.4f}, "
                 f"Test Acc: {test_acc:.4f}"
             )
+        end_time = time.time()
+        print(f"Time taken: {end_time - start_time:.2f} seconds")

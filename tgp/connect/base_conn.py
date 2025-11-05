@@ -72,11 +72,13 @@ def sparse_connect(
         to_sparse = True
 
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
-    if node_index is not None and len(node_index) < num_nodes:
+    if node_index is not None and len(node_index) < num_nodes:  # e.g. topkpooling
         edge_index, edge_weight = subgraph(
             node_index, edge_index, edge_weight, relabel_nodes=True, num_nodes=num_nodes
         )
-    elif cluster_index is not None and len(cluster_index) == num_nodes:
+    elif (
+        cluster_index is not None and len(cluster_index) == num_nodes
+    ):  # e.g. maxcutpool (assign all nodes) - kmis
         edge_index = cluster_index[edge_index]
         edge_index, edge_weight = coalesce(
             edge_index, edge_weight, num_nodes=num_supernodes, reduce=reduce_op
