@@ -70,18 +70,25 @@ class KronConnect(Connect):
         # Compute the Laplacian (if not given)
         if hasattr(so, "L"):
             L = so.L
+            idx_pos = so.node_index.cpu()
         else:
             warnings.warn(
                 "Laplacian not provided. The SelectOutput is not computed with NDPSelect."
-            )
-            assert len(so.node_index) == so.num_supernodes, (
-                "Inconsistent number of clusters and node indices."
             )
 
             eiL, ewL = get_laplacian(edge_index, edge_weight, normalization=None)
             L = to_scipy_sparse_matrix(eiL, ewL).tocsr()
 
-        idx_pos = so.node_index.cpu()
+            # Identify the supernode indices (the "positive set" of nodes to keep)
+            if len(so.node_index) == so.num_supernodes:
+                # Case 1: node_index directly contains the supernodes (e.g., NDP, TopK)
+                idx_pos = so.node_index.cpu()
+            elif hasattr(so, "mis") and so.mis is not None:
+                # Case 2: For KMIS pooling, use the MIS nodes as supernodes
+                # The MIS nodes are the semantically meaningful selected nodes
+                idx_pos = so.mis.cpu()
+            else:
+                raise ValueError("Inconsistent number of clusters and node indices.")
         all_nodes = torch.arange(so.num_nodes)
         idx_neg = all_nodes[~torch.isin(all_nodes, idx_pos)]
 
