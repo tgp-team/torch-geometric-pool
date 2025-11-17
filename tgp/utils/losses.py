@@ -263,10 +263,49 @@ def totvar_loss(
     Returns:
         ~torch.Tensor: The total variation regularization loss.
     """
-    l1_norm = torch.sum(torch.abs(S[..., None, :] - S[:, None, ...]), dim=-1)
-    loss = torch.sum(adj * l1_norm, dim=(-1, -2))
-    n_edges = torch.count_nonzero(adj, dim=(-1, -2))
-    loss *= 1 / (2 * n_edges)
+    # Memory-efficient implementation: only compute L1 norms for actual edges
+    # instead of all N×N pairs (reduces memory from O(N²K) to O(E×K))
+    batch_size, N, K = S.shape
+
+    # Get edge indices from dense adjacency (only non-zero entries)
+    edge_indices = adj.nonzero(
+        as_tuple=False
+    )  # Shape: (num_edges, 3) with [batch, i, j]
+    edge_weights = adj[edge_indices[:, 0], edge_indices[:, 1], edge_indices[:, 2]]
+
+    # Sort edges to ensure deterministic summation order (reduces numerical differences)
+    # This makes the summation order consistent with the original implementation
+    sort_key = (
+        edge_indices[:, 0] * (N * N) + edge_indices[:, 1] * N + edge_indices[:, 2]
+    )
+    sorted_indices = torch.argsort(sort_key)
+    edge_indices = edge_indices[sorted_indices]
+    edge_weights = edge_weights[sorted_indices]
+
+    # Get source and target assignments for each edge
+    batch_idx = edge_indices[:, 0]
+    src_idx = edge_indices[:, 1]
+    tgt_idx = edge_indices[:, 2]
+
+    # Compute L1 norm only for edges: |S[b,i,:] - S[b,j,:]| for each edge (i,j) in batch b
+    S_src = S[batch_idx, src_idx, :]  # Shape: (num_edges, K)
+    S_tgt = S[batch_idx, tgt_idx, :]  # Shape: (num_edges, K)
+    l1_norms = torch.sum(torch.abs(S_src - S_tgt), dim=-1)  # Shape: (num_edges,)
+
+    # Weight by edge weights and sum per batch
+    weighted_norms = edge_weights * l1_norms
+    loss = scatter(weighted_norms, batch_idx, dim=0, dim_size=batch_size, reduce="sum")
+
+    # Count edges per batch and normalize
+    n_edges = scatter(
+        torch.ones_like(edge_weights),
+        batch_idx,
+        dim=0,
+        dim_size=batch_size,
+        reduce="sum",
+    )
+    loss = loss / (2 * torch.clamp(n_edges, min=1))
+
     return _batch_reduce_loss(loss, batch_reduction)
 
 
