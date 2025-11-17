@@ -76,8 +76,11 @@ class KronConnect(Connect):
                 "Laplacian not provided. The SelectOutput is not computed with NDPSelect."
             )
 
-            eiL, ewL = get_laplacian(edge_index, edge_weight, normalization=None)
-            L = to_scipy_sparse_matrix(eiL, ewL).tocsr()
+            # Build Laplacian with correct number of nodes (including isolated nodes)
+            eiL, ewL = get_laplacian(
+                edge_index, edge_weight, normalization=None, num_nodes=so.num_nodes
+            )
+            L = to_scipy_sparse_matrix(eiL, ewL, num_nodes=so.num_nodes).tocsr()
 
             # Identify the supernode indices (the "positive set" of nodes to keep)
             if len(so.node_index) == so.num_supernodes:
@@ -87,9 +90,21 @@ class KronConnect(Connect):
                 # Case 2: For KMIS pooling, use the MIS nodes as supernodes
                 # The MIS nodes are the semantically meaningful selected nodes
                 idx_pos = so.mis.cpu()
+
+                # Validate that MIS indices are within bounds
+                if torch.any(idx_pos >= so.num_nodes):
+                    raise ValueError(
+                        f"MIS indices out of range: max idx={idx_pos.max().item()}, "
+                        f"but graph has only {so.num_nodes} nodes. "
+                        f"This indicates an internal error in KMIS selection. "
+                        f"Please report this issue."
+                    )
             else:
                 raise ValueError("Inconsistent number of clusters and node indices.")
-        all_nodes = torch.arange(so.num_nodes)
+
+        # Get negative set (nodes to eliminate)
+        # L.shape[0] should now equal so.num_nodes (we ensure this when building L)
+        all_nodes = torch.arange(L.shape[0])
         idx_neg = all_nodes[~torch.isin(all_nodes, idx_pos)]
 
         # Link reconstruction with Kron reduction
