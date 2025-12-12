@@ -15,8 +15,7 @@ from tgp.select import Select, SelectOutput
 from tgp.utils import (
     check_and_filter_edge_weights,
     connectivity_to_edge_index,
-    connectivity_to_row_col,
-    connectivity_to_sparse_tensor,
+    connectivity_to_sparsetensor,
     weighted_degree,
 )
 from tgp.utils.typing import SinvType
@@ -67,7 +66,8 @@ def maximal_independent_set(
     :rtype: :class:`ByteTensor`
     """
     n = maybe_num_nodes(edge_index)
-    row, col = connectivity_to_row_col(edge_index)
+    ei, _ = connectivity_to_edge_index(edge_index)
+    row, col = ei[0], ei[1]
     device = row.device
 
     if perm is None:
@@ -149,7 +149,8 @@ def maximal_independent_set_cluster(
     mis = maximal_independent_set(edge_index=edge_index, order_k=order_k, perm=perm)
     n, device = mis.size(0), mis.device
 
-    row, col = connectivity_to_row_col(edge_index)
+    ei, _ = connectivity_to_edge_index(edge_index)
+    row, col = ei[0], ei[1]
 
     if perm is None:
         rank = torch.arange(n, dtype=torch.long, device=device)
@@ -270,7 +271,8 @@ class KMISSelect(Select):
         if self.score_heuristic is None:
             return x
 
-        row, col = connectivity_to_row_col(adj)
+        ei, _ = connectivity_to_edge_index(adj)
+        row, col = ei[0], ei[1]
         x = x.view(-1)
 
         k_sums = torch.ones_like(x) if self.score_heuristic == "greedy" else x.clone()
@@ -360,9 +362,7 @@ class KMISSelect(Select):
                 edge_index, edge_weight, num_nodes, reduce="max"
             )
         edge_weight = check_and_filter_edge_weights(edge_weight)
-        adj = connectivity_to_sparse_tensor(
-            edge_index, edge_weight, num_nodes=num_nodes
-        )
+        adj = connectivity_to_sparsetensor(edge_index, edge_weight, num_nodes=num_nodes)
         score = self._scorer(adj, x, num_nodes=num_nodes)
         updated_score = self._apply_heuristic(score, adj)
         perm = torch.argsort(updated_score.view(-1), 0, descending=True)

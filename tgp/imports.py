@@ -55,3 +55,10 @@ def check_pygsp_available():
             "The 'pygsp' package is required for this operation. "
             "Please install it with `pip install pygsp`."
         )
+
+
+def is_torch_sparse_tensor(obj):
+    """Check if object is a torch_sparse.SparseTensor (if library is available)."""
+    if not HAS_TORCH_SPARSE:
+        return False
+    return isinstance(obj, SparseTensor)

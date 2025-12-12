@@ -95,9 +95,10 @@ class BaseLift(Lift):
                 s_inv = so.s_inv.t()
         elif self.matrix_op == "inverse":
             if isinstance(so.s, Tensor):
-                s_inv = pseudo_inverse(so.s).transpose(-2, -1)
-            else:
-                s_inv = pseudo_inverse(so.s).t()
+                if not so.s.is_sparse:
+                    s_inv = pseudo_inverse(so.s).transpose(-2, -1)
+                else:
+                    s_inv = pseudo_inverse(so.s).t()
         elif self.matrix_op == "transpose":
             s_inv = so.s
         else:

@@ -10,7 +10,7 @@ from torch_geometric.utils import (
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_sparse import eye as torch_sparse_eye
 
-from tgp.imports import SparseTensor
+from tgp.imports import HAS_TORCH_SPARSE, SparseTensor
 
 
 def rank3_trace(x):
@@ -21,21 +21,21 @@ def rank3_diag(x):
     return torch.diag_embed(x)
 
 
-def connectivity_to_row_col(edge_index: Adj) -> Tuple[Tensor, Tensor]:
-    if isinstance(edge_index, Tensor):
-        return edge_index[0], edge_index[1]
-    elif isinstance(edge_index, SparseTensor):
-        row, col, _ = edge_index.coo()
-        return row, col
-    else:
-        raise NotImplementedError()
+####### EXTERNAL FUNCTIONS - INPUT CAN BE EDGE INDEX, TORCH COO SPARSE TENSOR OR SPARSE TENSOR ###########
 
 
 def connectivity_to_edge_index(
     edge_index: Adj, edge_weight: Optional[Tensor] = None
 ) -> Tuple[Tensor, Optional[Tensor]]:
     if isinstance(edge_index, Tensor):
-        return edge_index, edge_weight
+        if edge_index.is_sparse:
+            # Handle torch COO sparse tensor
+            indices = edge_index.indices()
+            values = edge_index.values()
+            return indices, values
+        else:
+            # Handle regular tensor [2, E]
+            return edge_index, edge_weight
     elif isinstance(edge_index, SparseTensor):
         row, col, edge_weight = edge_index.coo()
         edge_index = torch.stack([row, col], dim=0)
@@ -44,15 +44,51 @@ def connectivity_to_edge_index(
         raise NotImplementedError()
 
 
-def connectivity_to_sparse_tensor(
+def connectivity_to_torch_coo(
+    edge_index: Adj,
+    edge_weight: Optional[Tensor] = None,
+    num_nodes: Optional[int] = None,
+) -> torch.Tensor:
+    num_nodes = maybe_num_nodes(edge_index, num_nodes)
+    if isinstance(edge_index, Tensor):
+        if edge_index.is_sparse:
+            # Already a torch COO sparse tensor
+            return edge_index
+        else:
+            # Handle regular tensor [2, E]
+            if edge_weight is None:
+                edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
+            return torch.sparse_coo_tensor(
+                edge_index, edge_weight, (num_nodes, num_nodes)
+            )
+    elif isinstance(edge_index, SparseTensor):
+        row, col, value = edge_index.coo()
+        indices = torch.stack([row, col], dim=0)
+        if value is None:
+            value = torch.ones(row.size(0), device=row.device)
+        return torch.sparse_coo_tensor(indices, value, (num_nodes, num_nodes))
+    else:
+        raise NotImplementedError()
+
+
+def connectivity_to_sparsetensor(
     edge_index: Adj,
     edge_weight: Optional[Tensor] = None,
     num_nodes: Optional[int] = None,
 ) -> SparseTensor:
+    if not HAS_TORCH_SPARSE:
+        raise ImportError(
+            "Cannot convert connectivity to sparse tensor: torch_sparse is not installed."
+        )
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
     if isinstance(edge_index, SparseTensor):
         return edge_index
     elif isinstance(edge_index, Tensor):
+        if edge_index.is_sparse:
+            # Handle torch COO sparse tensor
+            edge_index = edge_index.indices()
+            edge_weight = edge_index.values()
+
         adj = SparseTensor.from_edge_index(
             edge_index, edge_weight, (num_nodes, num_nodes)
         )
@@ -61,18 +97,25 @@ def connectivity_to_sparse_tensor(
         raise NotImplementedError()
 
 
-def pseudo_inverse(edge_index: Adj) -> Tuple[Adj, Optional[Tensor]]:
-    if isinstance(edge_index, Tensor):  # Dense pooling
-        adj_inv = torch.linalg.pinv(edge_index)
+########### INTERNAL FUNCTIONS - ONLY INPUT ARE TENSORS (EDGE INDEX OR TORCH COO SPARSE TENSOR) ###########
+
+
+def pseudo_inverse(edge_index: Tensor) -> Tuple[Adj, Optional[Tensor]]:
+    if isinstance(edge_index, Tensor):
+        to_torch_coo = False
+        if edge_index.is_sparse:  # Sparse pooling with torch COO
+            to_torch_coo = True
+            edge_index = edge_index.to_dense()
+        # Convert to float for pinv computation
+        adj_inv = torch.linalg.pinv(edge_index.float())
+        if to_torch_coo:
+            adj_inv = torch.where(
+                torch.abs(adj_inv) < 1e-5, torch.zeros_like(adj_inv), adj_inv
+            )
+            adj_inv = adj_inv.to_sparse_coo()
         return adj_inv
-    elif isinstance(edge_index, SparseTensor):  # Sparse pooling
-        adj = edge_index
     else:
         raise NotImplementedError()
-    adj_inv = torch.linalg.pinv(adj.to_dense().float())
-    adj_inv = torch.where(torch.abs(adj_inv) < 1e-5, torch.zeros_like(adj_inv), adj_inv)
-    adj_inv = SparseTensor.from_dense(adj_inv)
-    return adj_inv
 
 
 def weighted_degree(

@@ -10,7 +10,7 @@ from torch_scatter import scatter
 from torch_sparse import SparseTensor
 
 from tgp.select import SelectOutput
-from tgp.utils import connectivity_to_edge_index, connectivity_to_sparse_tensor
+from tgp.utils import connectivity_to_edge_index, connectivity_to_sparsetensor
 from tgp.utils.typing import ConnectionType
 
 
@@ -121,7 +121,7 @@ def sparse_connect(
         edge_weight = edge_weight / max_per_graph[edge_batch]
 
     if to_sparse:
-        edge_index = connectivity_to_sparse_tensor(
+        edge_index = connectivity_to_sparsetensor(
             edge_index, edge_weight, num_supernodes
         )
         edge_weight = None
