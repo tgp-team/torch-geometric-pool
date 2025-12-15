@@ -3,9 +3,9 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
+from torch_geometric.utils import add_remaining_self_loops as arsl
 from torch_geometric.utils import (
     get_laplacian,
-    remove_isolated_nodes,
 )
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_sparse import eye as torch_sparse_eye
@@ -86,8 +86,9 @@ def connectivity_to_sparsetensor(
     elif isinstance(edge_index, Tensor):
         if edge_index.is_sparse:
             # Handle torch COO sparse tensor
-            edge_index = edge_index.indices()
-            edge_weight = edge_index.values()
+            sparse_tensor = edge_index
+            edge_index = sparse_tensor.indices()
+            edge_weight = sparse_tensor.values()
 
         adj = SparseTensor.from_edge_index(
             edge_index, edge_weight, (num_nodes, num_nodes)
@@ -151,7 +152,7 @@ def add_remaining_self_loops(
     r"""Adds remaining self loops to the adjacency matrix.
 
     This method extends the method :obj:`~torch_geometric.utils.add_remaining_self_loops`
-    by allowing to pass a :obj:`SparseTensor` as input.
+    by allowing to pass a :obj:`SparseTensor` or torch COO sparse tensor as input.
 
     Args:
         edge_index (~torch.Tensor or SparseTensor): The edge indices.
@@ -166,7 +167,21 @@ def add_remaining_self_loops(
         if num_nodes is not None and num_nodes != edge_index.size(0):
             edge_index = edge_index.sparse_resize((num_nodes, num_nodes))
         return edge_index.fill_diag(fill_value), None
-    from torch_geometric.utils import add_remaining_self_loops as arsl
+
+    if isinstance(edge_index, Tensor) and edge_index.is_sparse:
+        # Handle torch sparse COO adjacency matrices.
+        indices = edge_index.indices()
+        values = edge_index.values()
+        num_nodes = maybe_num_nodes(indices, num_nodes)
+        loop_index, loop_weight = arsl(indices, values, fill_value, num_nodes)
+        # Rebuild a sparse COO tensor to return the same input type.
+        adj = torch.sparse_coo_tensor(
+            loop_index,
+            loop_weight,
+            size=(num_nodes, num_nodes),
+            device=edge_index.device,
+        ).coalesce()
+        return adj, None
 
     return arsl(edge_index, edge_weight, fill_value, num_nodes)
 
@@ -209,8 +224,8 @@ def delta_gcn_matrix(
     different values.
 
     Args:
-        edge_index (~torch.Tensor or SparseTensor): Graph connectivity in COO format of shape :math:`(2, E)`
-            or as SparseTensor.
+        edge_index (~torch.Tensor or SparseTensor): Graph connectivity in COO format of shape :math:`(2, E)`,
+            as torch COO sparse tensor, or as SparseTensor.
         edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
             (default: :obj:`None`)
         delta (float, optional): Delta parameter for heterophilic message passing. When
@@ -222,10 +237,11 @@ def delta_gcn_matrix(
         tuple:
             - **edge_index** (*Tensor or SparseTensor*): Updated connectivity in the same format as input.
             - **edge_weight** (*Tensor or None*): Updated edge weights of shape :math:`(E',)` if input was Tensor,
-              or None if input was SparseTensor.
+              or None if input was SparseTensor or torch COO sparse tensor.
     """
     # Remember the input type to return the same format
-    input_is_sparse = isinstance(edge_index, SparseTensor)
+    input_is_sparsetensor = isinstance(edge_index, SparseTensor)
+    input_is_torch_coo = isinstance(edge_index, Tensor) and edge_index.is_sparse
 
     # Convert input to edge_index, edge_weight format for processing
     edge_index_tensor, edge_weight_tensor = connectivity_to_edge_index(
@@ -248,37 +264,33 @@ def delta_gcn_matrix(
     )
 
     # Combine to form Delta-GCN propagation matrix: P = I - delta * L_sym
-    propagation_matrix = SparseTensor(
-        row=torch.cat([edge_index_laplacian[0], eye_index[0]]),
-        col=torch.cat([edge_index_laplacian[1], eye_index[1]]),
-        value=torch.cat([edge_weight_scaled, eye_weight]),
-        sparse_sizes=(num_nodes, num_nodes),
-    ).coalesce("sum")  # Sum weights for overlapping edges (diagonal elements)
+    # Concatenate indices and values from Laplacian and identity
+    combined_indices = torch.cat([edge_index_laplacian, eye_index], dim=1)
+    combined_values = torch.cat([edge_weight_scaled, eye_weight], dim=0)
+
+    # Create torch sparse COO tensor and coalesce to sum overlapping edges (diagonal elements)
+    propagation_matrix = torch.sparse_coo_tensor(
+        combined_indices,
+        combined_values,
+        size=(num_nodes, num_nodes),
+        device=edge_index_tensor.device,
+    ).coalesce()
 
     # Return in the same format as input
-    if input_is_sparse:
+    if input_is_sparsetensor:
+        # Convert torch COO to SparseTensor
+        propagation_matrix_spt = connectivity_to_sparsetensor(
+            propagation_matrix, None, num_nodes
+        )
+        return propagation_matrix_spt, None
+    elif input_is_torch_coo:
         return propagation_matrix, None
     else:
-        # Convert back to COO format
-        row, col, edge_weight_out = propagation_matrix.coo()
-        edge_index_out = torch.stack([row, col], dim=0)
+        # Convert back to edge_index, edge_weight format
+        edge_index_out, edge_weight_out = connectivity_to_edge_index(
+            propagation_matrix, None
+        )
         return edge_index_out, edge_weight_out
-
-
-def reset_node_numbers(edge_index, edge_attr=None):
-    """Reset node indices after removing isolated nodes.
-
-    Args:
-        edge_index (Tensor): Graph connectivity in COO format
-        edge_attr (Tensor, optional): Edge attributes. Defaults to None.
-
-    Returns:
-        tuple:
-            - Tensor: Updated edge indices
-            - Tensor: Updated edge attributes
-    """
-    edge_index, edge_attr, _ = remove_isolated_nodes(edge_index, edge_attr=edge_attr)
-    return edge_index, edge_attr
 
 
 def create_one_hot_tensor(num_nodes, kept_node_tensor, device):
