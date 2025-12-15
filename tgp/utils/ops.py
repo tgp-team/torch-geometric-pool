@@ -314,56 +314,6 @@ def create_one_hot_tensor(num_nodes, kept_node_tensor, device):
     return tensor
 
 
-def get_sparse_map_mask(x, edge_index, kept_node_tensor, mask):
-    """Compute sparse assignment mapping using message passing.
-
-    Args:
-        x (Tensor): Node features/assignments
-        edge_index (Tensor): Graph connectivity
-        kept_node_tensor (Tensor): Indices of kept nodes
-        mask (Tensor): Boolean mask of already assigned nodes
-
-    Returns:
-        tuple:
-            - Tensor: Propagated features
-            - Tensor: Node assignment mapping
-            - Tensor: Updated assignment mask
-    """
-    sparse_ei = SparseTensor.from_edge_index(
-        edge_index, sparse_sizes=(x.size(0), x.size(0))
-    )
-    y = sparse_ei.matmul(x)  # propagation step
-    first_internal_mask = torch.logical_not(
-        mask
-    )  # get the mask of the nodes that have not been assigned yet
-    am = torch.argmax(y, dim=1)  # get the visited nodes
-    nonzero = torch.nonzero(am, as_tuple=True)[
-        0
-    ]  # get the visited nodes that are not zero (since the zero-th node is a fake node)
-    second_internal_mask = torch.zeros_like(
-        first_internal_mask, dtype=torch.bool
-    )  # initialize the second mask
-    second_internal_mask[nonzero] = True  # set the mask to True for the visited nodes
-    final_mask = torch.logical_and(
-        first_internal_mask, second_internal_mask
-    )  # newly visited nodes that have not been assigned yet
-    indices = torch.arange(x.size(0), device=x.device)  # inizialize the indices
-    out = kept_node_tensor[
-        am - 1
-    ]  # get the supernode indices of the visited nodes (am-1 because the zero-th node is a fake node)
-
-    indices = indices[
-        final_mask
-    ]  # get the indices of the newly visited nodes that have not been assigned yet
-
-    mappa = torch.stack([indices, out[indices]])  # create the map
-    mask[indices] = (
-        True  # set the mask to True for the newly visited nodes that have not been assigned yet
-    )
-
-    return y, mappa, mask
-
-
 def get_random_map_mask(kept_nodes, mask, batch=None):
     """Randomly assign remaining unassigned nodes.
 
@@ -402,11 +352,67 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
     return mappa
 
 
+def get_sparse_map_mask(x, edge_index, kept_node_tensor, mask):
+    """Compute sparse assignment mapping using message passing (torch COO version).
+
+    Args:
+        x (Tensor): Node features/assignments
+        edge_index (Tensor): Graph connectivity
+        kept_node_tensor (Tensor): Indices of kept nodes
+        mask (Tensor): Boolean mask of already assigned nodes
+
+    Returns:
+        tuple:
+            - Tensor: Propagated features
+            - Tensor: Node assignment mapping
+            - Tensor: Updated assignment mask
+    """
+    # Convert edge_index to torch COO sparse tensor
+    num_nodes = x.size(0)
+    edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
+    sparse_ei = torch.sparse_coo_tensor(
+        edge_index, edge_weight, size=(num_nodes, num_nodes)
+    ).coalesce()
+
+    # Use torch.sparse.mm for matrix multiplication
+    y = torch.sparse.mm(sparse_ei, x)  # propagation step
+
+    first_internal_mask = torch.logical_not(
+        mask
+    )  # get the mask of the nodes that have not been assigned yet
+    am = torch.argmax(y, dim=1)  # get the visited nodes
+    nonzero = torch.nonzero(am, as_tuple=True)[
+        0
+    ]  # get the visited nodes that are not zero (since the zero-th node is a fake node)
+    second_internal_mask = torch.zeros_like(
+        first_internal_mask, dtype=torch.bool
+    )  # initialize the second mask
+    second_internal_mask[nonzero] = True  # set the mask to True for the visited nodes
+    final_mask = torch.logical_and(
+        first_internal_mask, second_internal_mask
+    )  # newly visited nodes that have not been assigned yet
+    indices = torch.arange(x.size(0), device=x.device)  # inizialize the indices
+    out = kept_node_tensor[
+        am - 1
+    ]  # get the supernode indices of the visited nodes (am-1 because the zero-th node is a fake node)
+
+    indices = indices[
+        final_mask
+    ]  # get the indices of the newly visited nodes that have not been assigned yet
+
+    mappa = torch.stack([indices, out[indices]])  # create the map
+    mask[indices] = (
+        True  # set the mask to True for the newly visited nodes that have not been assigned yet
+    )
+
+    return y, mappa, mask
+
+
 def get_assignments(
     kept_node_indices, edge_index=None, max_iter=5, batch=None, num_nodes=None
 ):
     r"""Assigns all nodes in a graph to the closest kept nodes (supernodes) using
-    a hierarchical assignment strategy with message passing.
+    a hierarchical assignment strategy with message passing (torch COO version).
 
     This function implements a graph-aware node assignment algorithm that combines
     iterative message passing with random assignment fallback. It's designed to
@@ -452,20 +458,6 @@ def get_assignments(
             :obj:`None` (cannot determine graph size).
         ValueError: If :obj:`max_iter > 0` but :obj:`edge_index` is :obj:`None`
             (cannot perform graph-aware assignment).
-
-    Example:
-        >>> # Basic usage with graph connectivity
-        >>> kept_nodes = torch.tensor([0, 3])  # Keep nodes 0 and 3 as supernodes
-        >>> edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])  # Cycle graph
-        >>> assignments = get_assignments(kept_nodes, edge_index, max_iter=3)
-        >>> print(assignments)
-        tensor([[0, 1, 2, 3],
-                [0, 0, 1, 1]])  # Nodes 0,1 -> supernode 0; nodes 2,3 -> supernode 1
-
-        >>> # Random assignment only (no graph connectivity)
-        >>> assignments = get_assignments(kept_nodes, max_iter=0, num_nodes=4)
-        >>> print(assignments.shape)
-        torch.Size([2, 4])  # All 4 nodes randomly assigned to 2 supernodes
     """
     if isinstance(kept_node_indices, torch.Tensor):
         kept_node_tensor = torch.squeeze(kept_node_indices).to(torch.long)
