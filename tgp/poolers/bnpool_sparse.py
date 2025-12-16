@@ -8,7 +8,7 @@ from torch_geometric.typing import Adj
 from tgp.connect import DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import DPSelect, SelectOutput
+from tgp.select import DPSelectSparse, SelectOutput
 from tgp.src import PoolingOutput, SRCPooling
 from tgp.utils import (
     batched_negative_edge_sampling,
@@ -111,10 +111,10 @@ class SparseBNPool(SRCPooling):
             raise ValueError("max_k must be positive")
 
         super(SparseBNPool, self).__init__(
-            selector=DPSelect(in_channels, k, act, dropout, s_inv_op),
+            selector=DPSelectSparse(in_channels, k, act, dropout, s_inv_op),
             reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift),
-            connector=DenseConnectSPT(remove_self_loops=False, degree_norm=False),
+            connector=DenseConnectSPT(remove_self_loops=True, degree_norm=True),
         )
         self.adj_transpose = adj_transpose
         self.k = k
@@ -339,7 +339,3 @@ class SparseBNPool(SRCPooling):
         left = node_assignment[edges_list[0]]  # E x K
         right = node_assignment[edges_list[1]]  # E x K
         return torch.einsum("ei, ej, ij -> e", left, right, self.K)
-
-    @property
-    def is_dense(self) -> bool:
-        return False

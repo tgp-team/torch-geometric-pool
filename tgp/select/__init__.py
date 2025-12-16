@@ -1,6 +1,6 @@
 from .base_select import Select, SelectOutput
 from .dense_select import DenseSelect
-from .dp_select import DPSelect
+from .dp_select import DPSelect, DPSelectSparse
 from .edge_contraction_select import EdgeContractionSelect
 from .graclus_select import GraclusSelect
 from .identity_select import IdentitySelect
@@ -20,6 +20,7 @@ select_classes = [
     "SelectOutput",
     "DenseSelect",
     "DPSelect",
+    "DPSelectSparse",
     "EdgeContractionSelect",
     "GraclusSelect",
     "IdentitySelect",
