@@ -1,15 +1,14 @@
 from typing import Callable, Optional
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_sparse import SparseTensor
 
 from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import EdgeContractionSelect, SelectOutput
 from tgp.src import PoolingOutput, SRCPooling
+from tgp.utils.ops import connectivity_to_edge_index
 from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 
@@ -178,11 +177,7 @@ class EdgeContractionPooling(SRCPooling):
 
         else:
             # Select
-            if isinstance(adj, SparseTensor):
-                row, col, edge_weight = adj.coo()
-                edge_index = torch.stack([row, col])
-            else:
-                edge_index = adj
+            edge_index, edge_weight = connectivity_to_edge_index(adj, edge_weight)
             so = self.select(x=x, edge_index=edge_index, batch=batch)
 
             # Reduce
@@ -190,7 +185,7 @@ class EdgeContractionPooling(SRCPooling):
 
             # Connect
             edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj,
+                edge_index=edge_index,
                 so=so,
                 edge_weight=edge_weight,
                 batch_pooled=batch_pooled,

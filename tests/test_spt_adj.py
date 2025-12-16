@@ -62,7 +62,10 @@ def test_output_with_spt_adj(simple_graph, pooler_name):
     if pooler.is_dense:
         assert isinstance(out.edge_index, torch.Tensor)
     else:
-        assert isinstance(out.edge_index, SparseTensor)
+        # edge_index should be either SparseTensor or torch COO tensor
+        assert isinstance(out.edge_index, (SparseTensor, torch.Tensor))
+        if isinstance(out.edge_index, torch.Tensor) and not out.edge_index.is_sparse:
+            assert out.edge_index.shape[0] == 2
 
     # lift
     x_pool = out.x.clone()

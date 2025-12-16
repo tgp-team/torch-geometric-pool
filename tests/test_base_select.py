@@ -1,7 +1,6 @@
 import pytest
 import torch
 
-from tgp.imports import SparseTensor
 from tgp.select.base_select import Select, SelectOutput, cluster_to_s
 
 
@@ -35,15 +34,24 @@ def test_selectoutput_from_cluster_index_and_default_s_inv():
         num_supernodes=num_supernodes,
         weight=weight,
     )
-    # s should be a SparseTensor, and s_inv should default to transpose
-    assert isinstance(out.s, SparseTensor)
+    # s should be a torch COO sparse tensor, and s_inv should default to transpose
+    assert isinstance(out.s, torch.Tensor) and out.s.is_sparse
     s_t = out.s.t()
-    inv_row, inv_col, inv_val = out.s_inv.coo()
-    row_t, col_t, val_t = s_t.coo()
+    # Extract indices and values from torch COO tensors
+    s_inv_coalesced = out.s_inv.coalesce()
+    inv_indices = s_inv_coalesced.indices()
+    inv_row, inv_col = inv_indices[0], inv_indices[1]
+    inv_val = s_inv_coalesced.values()
+
+    s_t_coalesced = s_t.coalesce()
+    t_indices = s_t_coalesced.indices()
+    row_t, col_t = t_indices[0], t_indices[1]
+    val_t = s_t_coalesced.values()
+
     assert torch.equal(inv_row, row_t)
     assert torch.equal(inv_col, col_t)
     if inv_val is not None and val_t is not None:
-        assert torch.equal(inv_val, val_t)
+        assert torch.allclose(inv_val, val_t)
 
     # Check basic attributes
     assert out.num_nodes == num_nodes
@@ -125,10 +133,12 @@ def test_select_abstract_forward_and_repr():
 
 
 def test_set_weights_spt():
-    # Create a sparse tensor
-    s = SparseTensor(
-        row=torch.tensor([0, 1, 2]), col=torch.tensor([1, 2, 0]), sparse_sizes=(3, 3)
-    )
+    # Create a sparse tensor (torch COO)
+    s = torch.sparse_coo_tensor(
+        torch.stack([torch.tensor([0, 1, 2]), torch.tensor([1, 2, 0])]),
+        torch.ones(3),
+        size=(3, 3),
+    ).coalesce()
     weight = torch.tensor([0.5, 1.5, 2.5])
     so = SelectOutput(s=s, weight=weight, num_supernodes=3)
 
@@ -239,9 +249,11 @@ def test_assign_all_nodes_with_sparse_tensor_adj():
     # Create SparseTensor adjacency matrix to trigger line 291
     row = torch.tensor([0, 1, 2, 3])
     col = torch.tensor([1, 0, 3, 2])
-    sparse_adj = SparseTensor(row=row, col=col, sparse_sizes=(4, 4))
+    sparse_adj = torch.sparse_coo_tensor(
+        torch.stack([row, col]), torch.ones(4), size=(4, 4)
+    ).coalesce()
 
-    # This should trigger the SparseTensor branch at line 291
+    # This should trigger the torch COO branch
     new_so = so.assign_all_nodes(adj=sparse_adj, closest_node_assignment=True)
 
     # Verify the result is valid

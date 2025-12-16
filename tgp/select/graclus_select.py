@@ -3,11 +3,10 @@ from typing import Optional
 import torch
 from torch import Tensor
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from torch_sparse import SparseTensor
 
 from tgp.imports import check_torch_cluster_available, torch_cluster
 from tgp.select import Select, SelectOutput
-from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
+from tgp.utils import connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
@@ -61,11 +60,7 @@ class GraclusSelect(Select):
             :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
         """
         check_torch_cluster_available()
-        if isinstance(edge_index, SparseTensor):
-            edge_index, edge_weight = connectivity_to_edge_index(
-                edge_index, edge_weight
-            )
-        edge_weight = check_and_filter_edge_weights(edge_weight)
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
         num_nodes = maybe_num_nodes(edge_index, num_nodes)
 
         assignment = torch_cluster.graclus_cluster(

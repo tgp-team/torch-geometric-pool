@@ -5,7 +5,6 @@ from torch_geometric.nn.dense import Linear
 from torch_geometric.typing import Adj, OptTensor, PairTensor, Tensor
 from torch_geometric.utils import scatter, to_undirected
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from torch_sparse import SparseTensor
 
 from tgp.imports import HAS_TORCH_SCATTER
 
@@ -13,9 +12,7 @@ if HAS_TORCH_SCATTER:
     from torch_scatter import scatter_add, scatter_max, scatter_min
 from tgp.select import Select, SelectOutput
 from tgp.utils import (
-    check_and_filter_edge_weights,
     connectivity_to_edge_index,
-    connectivity_to_sparsetensor,
     weighted_degree,
 )
 from tgp.utils.typing import SinvType
@@ -43,7 +40,7 @@ def degree_scorer(
 
 
 def maximal_independent_set(
-    edge_index: Adj, order_k: int = 1, perm: OptTensor = None
+    edge_index: Tensor, order_k: int = 1, perm: OptTensor = None
 ) -> Tensor:
     r"""Returns a Maximal :math:`k`-Independent Set of a graph, i.e., a set of
     nodes (as a :class:`ByteTensor`) such that none of them are :math:`k`-hop
@@ -59,15 +56,14 @@ def maximal_independent_set(
     higher values of :math:`k`.
 
     Args:
-        edge_index (Tensor or SparseTensor): The graph connectivity.
+        edge_index (Tensor of shape [2, E]): The graph connectivity.
         order_k (int): The :math:`k`-th order (defaults to 1).
         perm (LongTensor, optional): Permutation vector. Must be of size
             :obj:`(n,)` (defaults to :obj:`None`).
     :rtype: :class:`ByteTensor`
     """
     n = maybe_num_nodes(edge_index)
-    ei, _ = connectivity_to_edge_index(edge_index)
-    row, col = ei[0], ei[1]
+    row, col = edge_index[0], edge_index[1]
     device = row.device
 
     if perm is None:
@@ -126,7 +122,7 @@ def maximal_independent_set(
 
 
 def maximal_independent_set_cluster(
-    edge_index: Adj, order_k: int = 1, perm: OptTensor = None
+    edge_index: Tensor, order_k: int = 1, perm: OptTensor = None
 ) -> PairTensor:
     r"""Computes the Maximal :math:`k`-Independent Set (:math:`k`-MIS)
     clustering of a graph, as defined in `"Generalizing Downsampling from
@@ -140,7 +136,7 @@ def maximal_independent_set_cluster(
     :math:`k`-MIS.
 
     Args:
-        edge_index (Tensor or SparseTensor): The graph connectivity.
+        edge_index (Tensor of shape [2, E]): The graph connectivity.
         order_k (int): The :math:`k`-th order (defaults to 1).
         perm (LongTensor, optional): Permutation vector. Must be of size
             :obj:`(n,)` (defaults to :obj:`None`).
@@ -149,8 +145,7 @@ def maximal_independent_set_cluster(
     mis = maximal_independent_set(edge_index=edge_index, order_k=order_k, perm=perm)
     n, device = mis.size(0), mis.device
 
-    ei, _ = connectivity_to_edge_index(edge_index)
-    row, col = ei[0], ei[1]
+    row, col = edge_index[0], edge_index[1]
 
     if perm is None:
         rank = torch.arange(n, dtype=torch.long, device=device)
@@ -267,12 +262,11 @@ class KMISSelect(Select):
                 in_channels=in_channels, out_channels=1, weight_initializer="uniform"
             )
 
-    def _apply_heuristic(self, x: Tensor, adj: SparseTensor) -> Tensor:
+    def _apply_heuristic(self, x: Tensor, edge_index: Tensor) -> Tensor:
         if self.score_heuristic is None:
             return x
 
-        ei, _ = connectivity_to_edge_index(adj)
-        row, col = ei[0], ei[1]
+        row, col = edge_index[0], edge_index[1]
         x = x.view(-1)
 
         k_sums = torch.ones_like(x) if self.score_heuristic == "greedy" else x.clone()
@@ -290,11 +284,12 @@ class KMISSelect(Select):
 
     def _scorer(
         self,
-        adj: SparseTensor,
+        edge_index: Adj,
+        edge_weight: Optional[Tensor] = None,
         x: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
     ) -> Tensor:
-        device = adj.device()
+        device = edge_index.device
 
         if self.scorer == "linear":
             assert x is not None, "x must be provided when scorer is 'linear'"
@@ -310,7 +305,9 @@ class KMISSelect(Select):
             return -torch.arange(num_nodes, device=device).view(-1, 1)
 
         if self.scorer == "degree":
-            return degree_scorer(edge_index=adj, num_nodes=num_nodes)
+            return degree_scorer(
+                edge_index=edge_index, edge_weight=edge_weight, num_nodes=num_nodes
+            )
         raise ValueError(f"Unrecognized `scorer` value: {self.scorer}")
 
     def forward(
@@ -355,19 +352,17 @@ class KMISSelect(Select):
             num_nodes if num_nodes is not None else maybe_num_nodes(edge_index, size_x)
         )
 
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
         if self.force_undirected:
-            if isinstance(edge_index, SparseTensor):
-                edge_index, edge_weight = connectivity_to_edge_index(edge_index)
             edge_index, edge_weight = to_undirected(
                 edge_index, edge_weight, num_nodes, reduce="max"
             )
-        edge_weight = check_and_filter_edge_weights(edge_weight)
-        adj = connectivity_to_sparsetensor(edge_index, edge_weight, num_nodes=num_nodes)
-        score = self._scorer(adj, x, num_nodes=num_nodes)
-        updated_score = self._apply_heuristic(score, adj)
+
+        score = self._scorer(edge_index, edge_weight, x, num_nodes=num_nodes)
+        updated_score = self._apply_heuristic(score, edge_index)
         perm = torch.argsort(updated_score.view(-1), 0, descending=True)
 
-        mis, cluster = maximal_independent_set_cluster(adj, self.order_k, perm)
+        mis, cluster = maximal_independent_set_cluster(edge_index, self.order_k, perm)
         mis = mis.nonzero().view(-1)
 
         so = SelectOutput(

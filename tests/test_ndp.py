@@ -21,9 +21,9 @@ def test_forward_no_batch_and_tensor_edge_index():
     out = selector(edge_index=edge_index, edge_weight=None, batch=None, num_nodes=None)
     # Ensure SelectOutput has 's', 's_inv', 'L'
     assert hasattr(out, "s") and hasattr(out, "s_inv") and hasattr(out, "L")
-    # s should be a SparseTensor of shape [3, k]
+    # s should be a torch COO sparse tensor of shape [3, k]
     s = out.s
-    assert s.sparse_sizes()[0] == 3
+    assert s.size(0) == 3
 
 
 def test_forward_with_sparse_tensor_edge_index_and_skip_empty_subgraph():
@@ -38,7 +38,7 @@ def test_forward_with_sparse_tensor_edge_index_and_skip_empty_subgraph():
     out = selector(edge_index=spt, edge_weight=edge_weight, batch=batch, num_nodes=3)
     # s should cover nodes from subgraphs 0 and 2; shape rows = 3
     s = out.s
-    assert s.sparse_sizes()[0] == 3
+    assert s.size(0) == 3
     assert len(repr(out)) > 0
 
 

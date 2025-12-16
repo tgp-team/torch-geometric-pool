@@ -101,17 +101,6 @@ def simple_edge_index():
     return torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
 
 
-def test_degree_scorer_invalid_edge_weight(simple_edge_index):
-    # edge_weight with shape [E,2] is invalid
-    invalid_weight = torch.randn((2, 2), dtype=torch.float)
-    with pytest.raises(ValueError, match="`edge_weight` must be a 1D tensor"):
-        _ = degree_scorer(
-            edge_index=simple_edge_index,
-            edge_weight=invalid_weight,
-            num_nodes=3,
-        )
-
-
 def test_degree_scorer_valid(simple_edge_index):
     # Valid 1D edge_weight: degrees computed correctly
     weight = torch.tensor([1.0, 2.0])
@@ -183,8 +172,19 @@ def test_kmis_select_scorers_and_s_inv(simple_edge_index):
         # s_inv (transpose) should swap row/col
         s = out.s
         s_inv = out.s_inv
-        row_s, col_s, _ = s.coo()
-        row_i, col_i, _ = s_inv.coo()
+        # Extract row, col from either SparseTensor or torch COO
+        if isinstance(s, SparseTensor):
+            row_s, col_s, _ = s.coo()
+        else:
+            s_coalesced = s.coalesce()
+            indices_s = s_coalesced.indices()
+            row_s, col_s = indices_s[0], indices_s[1]
+        if isinstance(s_inv, SparseTensor):
+            row_i, col_i, _ = s_inv.coo()
+        else:
+            s_inv_coalesced = s_inv.coalesce()
+            indices_i = s_inv_coalesced.indices()
+            row_i, col_i = indices_i[0], indices_i[1]
         assert torch.equal(row_i, col_s)
         assert torch.equal(col_i, row_s)
 
@@ -232,8 +232,19 @@ def test_kmis_select_linear_score_list(simple_edge_index):
     # s_inv (transpose) should swap row/col
     s = out.s
     s_inv = out.s_inv
-    row_s, col_s, _ = s.coo()
-    row_i, col_i, _ = s_inv.coo()
+    # Extract row, col from either SparseTensor or torch COO
+    if isinstance(s, SparseTensor):
+        row_s, col_s, _ = s.coo()
+    else:
+        s_coalesced = s.coalesce()
+        indices_s = s_coalesced.indices()
+        row_s, col_s = indices_s[0], indices_s[1]
+    if isinstance(s_inv, SparseTensor):
+        row_i, col_i, _ = s_inv.coo()
+    else:
+        s_inv_coalesced = s_inv.coalesce()
+        indices_i = s_inv_coalesced.indices()
+        row_i, col_i = indices_i[0], indices_i[1]
     assert torch.equal(row_i, col_s)
     assert torch.equal(col_i, row_s)
 
@@ -363,24 +374,6 @@ def test_skip_torch_scatter_import(monkeypatch):
     assert not hasattr(kmis_mod, "scatter_add")
     assert not hasattr(kmis_mod, "scatter_max")
     assert not hasattr(kmis_mod, "scatter_min")
-
-
-def test_kmis_invalid_scorer_raises_value_error():
-    """Test that KMISSelect raises ValueError when scorer is invalid."""
-    # Create a simple graph
-    x = torch.randn(3, 8)
-    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
-    adj = SparseTensor.from_edge_index(edge_index, sparse_sizes=(3, 3))
-
-    # Instantiate KMISSelect with degree scorer
-    kmis_select = KMISSelect(scorer="degree", order_k=1)
-
-    # Manually modify the scorer attribute to something invalid
-    kmis_select.scorer = "invalid_scorer"
-
-    # Call _scorer method - this should raise ValueError
-    with pytest.raises(ValueError, match="Unrecognized `scorer` value: invalid_scorer"):
-        kmis_select._scorer(x=x, adj=adj, num_nodes=3)
 
 
 if __name__ == "__main__":

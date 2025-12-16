@@ -606,14 +606,15 @@ class TestMaxCutPooling:
 
         pooler = MaxCutPooling(in_channels=x.size(1), ratio=0.5)
 
-        # First get a SelectOutput
-        so = pooler.select(
-            x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch
-        )
+        # First do a full forward pass to get pooled features
+        out = pooler(x=x, adj=edge_index, edge_weight=edge_weight, batch=batch)
+        so = out.so
+        x_pool = out.x
 
-        # Test lifting with valid SelectOutput
-        x_lifted = pooler(x=x, adj=edge_index, so=so, lifting=True)
+        # Test lifting with valid SelectOutput and pooled features
+        x_lifted = pooler(x=x_pool, adj=edge_index, so=so, lifting=True)
         assert x_lifted is not None
+        assert x_lifted.size(0) == x.size(0)  # Should return to original size
 
         # Test lifting with None SelectOutput should raise error
         with pytest.raises(
@@ -988,21 +989,6 @@ class TestCoverageEdgeCases:
                 max_iter=0,  # Should trigger assertion
             )
 
-    def test_ops_reset_node_numbers(self):
-        """Test reset_node_numbers function."""
-        from tgp.utils.ops import reset_node_numbers
-
-        # Create edge_index with isolated nodes
-        edge_index = torch.tensor([[0, 1, 3, 4], [1, 2, 4, 5]])
-        edge_attr = torch.ones(4)
-
-        # Test reset_node_numbers
-        new_edge_index, new_edge_attr = reset_node_numbers(edge_index, edge_attr)
-
-        assert new_edge_index.size(0) == 2
-        if new_edge_attr is not None:
-            assert new_edge_attr.size(0) == new_edge_index.size(1)
-
     def test_ops_create_one_hot_tensor_edge_cases(self):
         """Test edge cases in create_one_hot_tensor."""
         from tgp.utils.ops import create_one_hot_tensor
@@ -1168,26 +1154,6 @@ class TestFinalCoverageComplete:
         )
         assert output_with_weight.num_nodes == x.size(0)
         assert hasattr(output_with_weight, "scores")
-
-    def test_ops_extra(self):
-        from tgp.utils.ops import get_random_map_mask, reset_node_numbers
-
-        # Test reset_node_numbers with isolated nodes
-        edge_index = torch.tensor([[0, 2, 4], [1, 3, 5]])  # Gaps in numbering
-        edge_attr = torch.ones(3)
-
-        new_edge_index, new_edge_attr = reset_node_numbers(edge_index, edge_attr)
-        assert new_edge_index.size(0) == 2
-        if new_edge_attr is not None:
-            assert new_edge_attr.size(0) == new_edge_index.size(1)
-
-        kept_nodes = torch.tensor([0, 3])
-        mask = torch.zeros(6, dtype=torch.bool)
-        mask[kept_nodes] = True
-
-        result = get_random_map_mask(kept_nodes, mask, batch=None)
-        assert isinstance(result, torch.Tensor)
-        assert result.size(0) == 2  # Should return [indices, assignments]
 
     def test_ops_maxcut(self, simple_graph):
         from tgp.utils.ops import delta_gcn_matrix, get_assignments

@@ -10,7 +10,7 @@ from torch_geometric.utils import (
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_sparse import eye as torch_sparse_eye
 
-from tgp.imports import HAS_TORCH_SPARSE, SparseTensor
+from tgp.imports import HAS_TORCH_SPARSE, is_torch_sparse_tensor
 
 
 def rank3_trace(x):
@@ -35,8 +35,9 @@ def connectivity_to_edge_index(
             return indices, values
         else:
             # Handle regular tensor [2, E]
+            edge_weight = check_and_filter_edge_weights(edge_weight)
             return edge_index, edge_weight
-    elif isinstance(edge_index, SparseTensor):
+    elif is_torch_sparse_tensor(edge_index):
         row, col, edge_weight = edge_index.coo()
         edge_index = torch.stack([row, col], dim=0)
         return edge_index, edge_weight
@@ -49,7 +50,15 @@ def connectivity_to_torch_coo(
     edge_weight: Optional[Tensor] = None,
     num_nodes: Optional[int] = None,
 ) -> torch.Tensor:
+    # Validate input type first
+    if not isinstance(edge_index, Tensor) and not is_torch_sparse_tensor(edge_index):
+        raise ValueError(
+            f"Edge index must be of type Tensor or SparseTensor, got {type(edge_index)}"
+        )
+
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
+    edge_weight = check_and_filter_edge_weights(edge_weight)
+
     if isinstance(edge_index, Tensor):
         if edge_index.is_sparse:
             # Already a torch COO sparse tensor
@@ -60,26 +69,30 @@ def connectivity_to_torch_coo(
                 edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
             return torch.sparse_coo_tensor(
                 edge_index, edge_weight, (num_nodes, num_nodes)
-            )
-    elif isinstance(edge_index, SparseTensor):
+            ).coalesce()
+    elif is_torch_sparse_tensor(edge_index):
         row, col, value = edge_index.coo()
         indices = torch.stack([row, col], dim=0)
         if value is None:
             value = torch.ones(row.size(0), device=row.device)
-        return torch.sparse_coo_tensor(indices, value, (num_nodes, num_nodes))
+        return torch.sparse_coo_tensor(
+            indices, value, (num_nodes, num_nodes)
+        ).coalesce()
     else:
-        raise NotImplementedError()
+        raise ValueError("Edge index must be a Tensor or SparseTensor.")
 
 
 def connectivity_to_sparsetensor(
     edge_index: Adj,
     edge_weight: Optional[Tensor] = None,
     num_nodes: Optional[int] = None,
-) -> SparseTensor:
+):
     if not HAS_TORCH_SPARSE:
         raise ImportError(
             "Cannot convert connectivity to sparse tensor: torch_sparse is not installed."
         )
+    else:
+        from torch_sparse import SparseTensor
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
     if isinstance(edge_index, SparseTensor):
         return edge_index
@@ -90,6 +103,7 @@ def connectivity_to_sparsetensor(
             edge_index = sparse_tensor.indices()
             edge_weight = sparse_tensor.values()
 
+        edge_weight = check_and_filter_edge_weights(edge_weight)
         adj = SparseTensor.from_edge_index(
             edge_index, edge_weight, (num_nodes, num_nodes)
         )
@@ -163,7 +177,7 @@ def add_remaining_self_loops(
         num_nodes (int, optional): The number of nodes, *i.e.*
             :obj:`max_val + 1` of :attr:`edge_index`. (default: :obj:`None`)
     """
-    if isinstance(edge_index, SparseTensor):
+    if is_torch_sparse_tensor(edge_index):
         if num_nodes is not None and num_nodes != edge_index.size(0):
             edge_index = edge_index.sparse_resize((num_nodes, num_nodes))
         return edge_index.fill_diag(fill_value), None
@@ -240,7 +254,7 @@ def delta_gcn_matrix(
               or None if input was SparseTensor or torch COO sparse tensor.
     """
     # Remember the input type to return the same format
-    input_is_sparsetensor = isinstance(edge_index, SparseTensor)
+    input_is_sparsetensor = is_torch_sparse_tensor(edge_index)
     input_is_torch_coo = isinstance(edge_index, Tensor) and edge_index.is_sparse
 
     # Convert input to edge_index, edge_weight format for processing

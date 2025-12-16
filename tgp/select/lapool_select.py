@@ -6,10 +6,9 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import get_laplacian, to_scipy_sparse_matrix
 from torch_scatter import scatter_add, scatter_mul
-from torch_sparse import SparseTensor, spmm
 
 from tgp.select import Select, SelectOutput
-from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
+from tgp.utils import connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
@@ -144,23 +143,20 @@ class LaPoolSelect(Select):
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
         """
-        if isinstance(edge_index, SparseTensor):
-            edge_index, edge_weight = connectivity_to_edge_index(
-                edge_index, edge_weight
-            )
-        edge_weight = check_and_filter_edge_weights(edge_weight)
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
 
         # Compute Laplacian and its associated node feature norm
         lap_edge_index, lap_edge_weights = get_laplacian(
             edge_index, edge_weight=edge_weight, num_nodes=num_nodes
         )
-        v = spmm(
-            index=lap_edge_index,
-            value=lap_edge_weights,
-            m=num_nodes,
-            n=num_nodes,
-            matrix=x,
-        )  # v = Lx
+        # Create sparse Laplacian matrix and multiply with x
+        lap_sparse = torch.sparse_coo_tensor(
+            lap_edge_index,
+            lap_edge_weights,
+            size=(num_nodes, num_nodes),
+            device=x.device,
+        ).coalesce()
+        v = torch.sparse.mm(lap_sparse, x)  # v = Lx
         v = v.norm(dim=-1, keepdim=True)
 
         # Determine leader nodes: a node is a leader if its norm is >= that of its neighbors for all incident edges
@@ -210,12 +206,10 @@ class LaPoolSelect(Select):
         non_leader_mask = ~leader_mask[s_indices[0]]
         filtered_indices = s_indices[:, non_leader_mask]
         filtered_values = s_values[non_leader_mask]
-        s_non_leader = SparseTensor(
-            row=filtered_indices[0],
-            col=filtered_indices[1],
-            value=filtered_values,
-            sparse_sizes=s.shape,
-        )
+        # Create torch COO tensor for non-leader similarities
+        s_non_leader = torch.sparse_coo_tensor(
+            filtered_indices, filtered_values, size=s.shape
+        ).coalesce()
 
         # Construct a sparse identity (Kronecker delta) for leader nodes
         leader_idx = torch.nonzero(leader_mask).squeeze()
@@ -223,9 +217,10 @@ class LaPoolSelect(Select):
             leader_idx = leader_idx.unsqueeze(0)
         leader_cols = torch.arange(leader_idx.size(0), device=leader_idx.device)
         kd_values = torch.ones(leader_cols.size(0), dtype=s.dtype, device=s.device)
-        kronecker_delta_sparse = SparseTensor(
-            row=leader_idx, col=leader_cols, value=kd_values, sparse_sizes=s.shape
-        )
+        # Create torch COO tensor for leader identity matrix
+        kronecker_delta_sparse = torch.sparse_coo_tensor(
+            torch.stack([leader_idx, leader_cols]), kd_values, size=s.shape
+        ).coalesce()
 
         # Combine the non-leader similarities with the leader identity
         s = (s_non_leader + kronecker_delta_sparse).coalesce()

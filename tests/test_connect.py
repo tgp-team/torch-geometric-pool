@@ -55,7 +55,13 @@ def test_sparse_connect_raises_runtime_error():
 def test_denseconn_spt():
     """Test the behavior of DenseConnectSPT with remove_self_loops=False and degree_norm=False."""
     connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
-    s = SparseTensor.from_dense(torch.eye(3, dtype=torch.float))
+    # Create torch COO sparse tensor from identity matrix
+    eye_indices = torch.arange(3)
+    s = torch.sparse_coo_tensor(
+        torch.stack([eye_indices, eye_indices]),
+        torch.ones(3, dtype=torch.float),
+        size=(3, 3),
+    ).coalesce()
     so = SelectOutput(s=s)
     edge_index = torch.tensor([[0, 1, 1, 0], [1, 0, 1, 2]], dtype=torch.long)
     edge_weight = torch.tensor([1.0, 1.0, 1.5, 0.7], dtype=torch.float)

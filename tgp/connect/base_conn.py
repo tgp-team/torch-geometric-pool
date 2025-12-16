@@ -7,10 +7,14 @@ from torch_geometric.utils import coalesce, subgraph
 from torch_geometric.utils import remove_self_loops as rsl
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_scatter import scatter
-from torch_sparse import SparseTensor
 
+from tgp.imports import is_torch_sparse_tensor
 from tgp.select import SelectOutput
-from tgp.utils import connectivity_to_edge_index, connectivity_to_sparsetensor
+from tgp.utils import (
+    connectivity_to_edge_index,
+    connectivity_to_sparsetensor,
+    connectivity_to_torch_coo,
+)
 from tgp.utils.typing import ConnectionType
 
 
@@ -65,12 +69,13 @@ def sparse_connect(
     degree_norm: bool = False,
 ) -> Tuple[Adj, OptTensor]:
     r"""Connects the nodes in the coarsened graph."""
-    to_sparse = False
-
-    if isinstance(edge_index, SparseTensor):
-        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
-        to_sparse = True
-
+    to_sparsetensor = False
+    to_torch_coo = False
+    if is_torch_sparse_tensor(edge_index):
+        to_sparsetensor = True
+    elif isinstance(edge_index, Tensor) and edge_index.is_sparse:
+        to_torch_coo = True
+    edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
     if node_index is not None and len(node_index) < num_nodes:  # e.g. topkpooling
         edge_index, edge_weight = subgraph(
@@ -120,10 +125,13 @@ def sparse_connect(
         # Normalize edge weights by their respective graph's maximum
         edge_weight = edge_weight / max_per_graph[edge_batch]
 
-    if to_sparse:
+    if to_sparsetensor:
         edge_index = connectivity_to_sparsetensor(
             edge_index, edge_weight, num_supernodes
         )
+        edge_weight = None
+    elif to_torch_coo:
+        edge_index = connectivity_to_torch_coo(edge_index, edge_weight, num_supernodes)
         edge_weight = None
 
     return edge_index, edge_weight

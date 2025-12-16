@@ -7,6 +7,7 @@ from torch_geometric.typing import SparseTensor
 from torch_geometric.utils import scatter
 
 from tgp.connect import SparseConnect
+from tgp.imports import HAS_TORCH_SPARSE
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import SelectOutput, TopkSelect
@@ -129,6 +130,8 @@ class PANPooling(SRCPooling):
                 edge_weight_norm=edge_weight_norm,
             ),
         )
+
+        assert HAS_TORCH_SPARSE, "torch_sparse is required for PANPooling"
 
         self.in_channels = in_channels
         self.ratio = ratio

@@ -7,7 +7,8 @@ from torch_geometric.nn.inits import zeros
 from torch_geometric.nn.resolver import activation_resolver
 from torch_geometric.typing import Adj, OptTensor
 from torch_scatter import scatter_add
-from torch_sparse import SparseTensor
+
+from tgp.utils.ops import connectivity_to_edge_index
 
 
 def gtv_adj_weights(
@@ -134,11 +135,10 @@ class GTVConv(MessagePassing):
                 out = out * mask.view(B, N, 1).to(x.dtype)
 
         else:
-            if isinstance(edge_index, SparseTensor):
-                row, col, edge_weight = edge_index.coo()
-                edge_index = torch.stack((row, col), dim=0)
-            else:
-                row, col = edge_index
+            edge_index, edge_weight = connectivity_to_edge_index(
+                edge_index, edge_weight
+            )
+            row, col = edge_index[0], edge_index[1]
 
             # Absolute differences between neighbouring nodes
             abs_diff = torch.abs(x[row, :] - x[col, :])  # shape [E, in_channels]
