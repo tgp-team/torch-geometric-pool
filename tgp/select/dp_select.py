@@ -2,6 +2,7 @@ from typing import List, Optional, Union
 
 import torch
 import torch.nn.functional as F
+import torch_sparse
 from torch import Tensor
 from torch.distributions import Beta
 
@@ -121,9 +122,19 @@ class DPSelect(DenseSelect):
         return torch.exp(pi)
 
     def forward(
-        self, x: Tensor, mask: Optional[Tensor] = None, **kwargs
+        self, x: Tensor, mask: Optional[Tensor] = None, batch=None, **kwargs
     ) -> SelectOutput:
-        r"""Applies the Dirichlet Process selection operator to compute cluster assignments.
+        r"""Applies the Dirichlet Process selection operator to compute cluster assignments. This select operator works
+        with both dense and sparse graphs representations. In the former case, the input tensor :obj:`"x"` is expected to
+        be of shape :math:`\mathbb{R}^{B \times N \times F}`, while in the latter case, it is expected to be of shape
+        :math:`\mathbb{R}^{N \times F}`.
+
+        The shape of the assignment matrix :math:`\mathbf{S}` changes accordingly:
+        it has shape :math:`\mathbb{R}^{B \times N \times K}` in the dense case,
+        and :math:`\mathbb{R}^{N \times B \time K}` in the sparse case.
+
+        You can provide either a mask tensor (to indicate valid nodes for each graph) or a batch vector
+        (to indicate the graph to which each node belongs), but not both.
 
         Args:
             x (~torch.Tensor): Node feature tensor
@@ -136,10 +147,17 @@ class DPSelect(DenseSelect):
             mask (~torch.Tensor, optional): Mask matrix
                 :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
                 the valid nodes for each graph. (default: :obj:`None`)
+            batch (~torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
+                to which graph in the batch each node belongs.
+                (default: :obj:`None`)
 
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
         """
+        if mask is not None and batch is not None:
+            raise ValueError("Cannot provide both mask and batch.")
+
         out = torch.clamp(F.softplus(self.mlp(x)), min=1e-3, max=1e3)
         q_v_alpha, q_v_beta = torch.split(out, self.k - 1, dim=-1)
         q_z = Beta(q_v_alpha, q_v_beta)
@@ -147,6 +165,27 @@ class DPSelect(DenseSelect):
         s = self._compute_pi_given_sticks(z)
 
         if mask is not None:
+            # we are in the dense case
             s = s * mask.unsqueeze(-1)
 
-        return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask, q_z=q_z)
+            return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask, q_z=q_z)
+        elif batch is not None:
+            # we are in the sparse case, shas shape NxK
+            dev = x.device
+            row = (
+                torch.arange(x.size(0), device=dev)
+                .view(-1, 1)
+                .repeat(1, self.k)
+                .view(-1)
+            )
+            col = (self.k * batch.view(-1, 1) + torch.arange(self.k, device=dev)).view(
+                -1
+            )
+            # s_block = torch.sparse_coo_tensor(values=s.view(-1), indices=torch.stack([row, col], dim=0), is_coalesced=True)
+            s_block = torch_sparse.SparseTensor(row=row, col=col, value=s.view(-1))
+            return SelectOutput(
+                s=s_block, s_inv_op=self.s_inv_op, q_z=q_z, node_assignment=s
+            )
+        else:
+            # no mask neither batch provided, return only s
+            return SelectOutput(s=s, s_inv_op=self.s_inv_op, q_z=q_z)

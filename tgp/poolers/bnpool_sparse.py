@@ -5,7 +5,7 @@ from torch import Tensor
 from torch.distributions import Beta
 from torch_geometric.typing import Adj
 
-from tgp.connect import DenseConnect, postprocess_adj_pool
+from tgp.connect import DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import DPSelect, SelectOutput
@@ -13,7 +13,6 @@ from tgp.src import PoolingOutput, SRCPooling
 from tgp.utils import (
     batched_negative_edge_sampling,
     connectivity_to_edge_index,
-    connectivity_to_sparse_tensor,
     negative_edge_sampling,
 )
 from tgp.utils.losses import (
@@ -115,9 +114,7 @@ class SparseBNPool(SRCPooling):
             selector=DPSelect(in_channels, k, act, dropout, s_inv_op),
             reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift),
-            connector=DenseConnect(
-                remove_self_loops=False, degree_norm=False, adj_transpose=adj_transpose
-            ),
+            connector=DenseConnectSPT(remove_self_loops=False, degree_norm=False),
         )
         self.adj_transpose = adj_transpose
         self.k = k
@@ -157,6 +154,7 @@ class SparseBNPool(SRCPooling):
         self,
         x: Tensor,
         adj: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         batch: Optional[Tensor] = None,
         lifting: bool = False,
@@ -173,6 +171,9 @@ class SparseBNPool(SRCPooling):
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
                 If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
+                (default: :obj:`None`)
+            edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
+                containing the weights of the edges.
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
@@ -197,23 +198,21 @@ class SparseBNPool(SRCPooling):
             loss = self.compute_loss(adj, batch, so)
 
             # Reduce
-            x_pooled, _ = self.reduce(x=x, so=so)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
             # Connect
-            sparse_adj = connectivity_to_sparse_tensor(
-                edge_index=adj
-            ).to_torch_sparse_coo_tensor()
-            adj_pool, _ = self.connect(edge_index=sparse_adj, so=so)
-
-            # Normalize coarsened adjacency matrix
-            adj_pool = postprocess_adj_pool(
-                adj_pool,
-                remove_self_loops=True,
-                degree_norm=True,
-                adj_transpose=self.adj_transpose,
+            edge_index_pooled, edge_weight_pooled = self.connect(
+                edge_index=adj, so=so, edge_weight=edge_weight
             )
 
-            out = PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
+            out = PoolingOutput(
+                x=x_pooled,
+                edge_index=edge_index_pooled,
+                edge_weight=edge_weight_pooled,
+                batch=batch_pooled,
+                so=so,
+                loss=loss,
+            )
 
             return out
 
@@ -250,7 +249,7 @@ class SparseBNPool(SRCPooling):
             The total training loss is typically computed as:
             :math:`\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{rec}} + \mathcal{L}_{\text{KL}} + \mathcal{L}_{\mathbf{K}}`
         """
-        s, q_z = so.s, so.q_z
+        node_assignment, q_z = so.node_assignment, so.q_z
 
         if batch is not None:
             bs = int(batch.max()) + 1
@@ -258,7 +257,7 @@ class SparseBNPool(SRCPooling):
             bs = None
 
         # Reconstruction loss
-        rec_loss, norm_const = self.get_sparse_rec_loss(s, adj, batch, bs)
+        rec_loss, norm_const = self.get_sparse_rec_loss(node_assignment, adj, batch, bs)
 
         # KL loss
         alpha_prior = self.get_buffer("alpha_prior")
@@ -301,11 +300,10 @@ class SparseBNPool(SRCPooling):
             "k_init_value": self.K_init_val,
             "eta": self.eta,
             "rescale_loss": self.rescale_loss,
-            "balance_links": self.balance_links,
             "train_K": self.train_K,
         }
 
-    def get_sparse_rec_loss(self, s, adj, batch, bs):
+    def get_sparse_rec_loss(self, node_assignment, adj, batch, bs):
         r"""Computes the sparse weighted binary cross-entropy reconstruction loss for BN-Pool."""
         edge_index, _ = connectivity_to_edge_index(adj)
 
@@ -327,7 +325,7 @@ class SparseBNPool(SRCPooling):
         if batch is not None:
             edges_batch_id = batch[all_edges[0]]
 
-        link_prob_loigit = self.get_prob_link_logit(s, all_edges)
+        link_prob_loigit = self.get_prob_link_logit(node_assignment, all_edges)
 
         pred_y = torch.cat(
             [torch.ones(E, device=dev), torch.zeros(negE, device=dev)], dim=0
@@ -337,7 +335,11 @@ class SparseBNPool(SRCPooling):
             link_prob_loigit, pred_y, edges_batch_id=edges_batch_id, batch_size=bs
         )
 
-    def get_prob_link_logit(self, S, edges_list):
-        left = S[edges_list[0]]  # E x K
-        right = S[edges_list[1]]  # E x K
+    def get_prob_link_logit(self, node_assignment, edges_list):
+        left = node_assignment[edges_list[0]]  # E x K
+        right = node_assignment[edges_list[1]]  # E x K
         return torch.einsum("ei, ej, ij -> e", left, right, self.K)
+
+    @property
+    def is_dense(self) -> bool:
+        return False
