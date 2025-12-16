@@ -157,7 +157,8 @@ def test_sparse_bnpool_eval_mode(small_batched_sparse_graphs):
         batched_graphs.edge_index,
         batched_graphs.batch,
     )
-    batch_size, n_features = x.shape
+    batch_size = batch.max().item() + 1
+    _, n_features = x.shape
 
     k = 2
     pooler = SparseBNPool(in_channels=x.shape[-1], k=k)
@@ -166,15 +167,16 @@ def test_sparse_bnpool_eval_mode(small_batched_sparse_graphs):
     out = pooler(x=x, adj=edge_index, batch=batch)
     # TODO: how should be the size of the output?
     # Check output shapes
-    assert out.x.shape[0] == batch_size, "Batch dimension should be 1 for pooled x"
-    assert out.x.shape[1] == k, "Number of nodes should be equal to k"
-    assert out.x.shape[2] == n_features, "Feature dimension should remain unchanged"
-
-    assert out.edge_index.shape[0] == batch_size, (
-        "Batch dimension should be 1 for edge_index"
+    assert out.x.shape[0] == batch_size * k, (
+        "N nodes should be k*batch_size for pooled x"
     )
-    assert out.edge_index.shape[1] == out.edge_index.shape[2] == k, (
-        "Adjacency matrix size should match number of clusters k"
+    assert out.x.shape[1] == n_features, "Number of nodes should be equal to k"
+
+    assert out.edge_index.ndim == 2, "Edge index should be a sparse adjacency matrix"
+
+    assert out.edge_index.shape[0] == 2, "First dimension should be 2 for edge_index"
+    assert out.edge_index.shape[1] == batch_size * k, (
+        "Adjacency matrix sparse size should match batch_size * k"
     )
 
 
