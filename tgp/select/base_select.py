@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.imports import SparseTensor
+from tgp.imports import is_torch_sparse_tensor
 from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
 
 
@@ -47,6 +47,8 @@ def cluster_to_s(
     if as_edge_index:
         return torch.stack([node_index, cluster_index], dim=0), weight
     else:
+        # Sort indices for compatibility with subgraph operation in sparse_connect
+        # which requires sorted node indices for proper edge relabeling
         node_index, perm = torch.sort(node_index)
         cluster_index = cluster_index[perm]
         indices = torch.stack([node_index, cluster_index], dim=0)
@@ -178,6 +180,10 @@ class SelectOutput:
         constant and that constant is non-zero.
         """
         row_sum = self.s.sum(dim=-1)
+
+        # Convert sparse tensor to dense for comparison
+        if isinstance(row_sum, Tensor) and row_sum.is_sparse:
+            row_sum = row_sum.to_dense()
 
         if "mask" in self._extra_args:
             mask = getattr(self, "mask")
@@ -350,7 +356,9 @@ class SelectOutput:
             )
 
             # Convert adjacency to edge_index format if needed
-            if isinstance(adj, SparseTensor):
+            if is_torch_sparse_tensor(adj) or (
+                isinstance(adj, Tensor) and adj.is_sparse
+            ):
                 edge_index, _ = connectivity_to_edge_index(adj)
             elif isinstance(adj, Tensor):
                 edge_index = adj

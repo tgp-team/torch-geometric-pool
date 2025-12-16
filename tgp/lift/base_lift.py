@@ -1,3 +1,4 @@
+import torch
 import torch_sparse
 from torch import Tensor, nn
 
@@ -89,16 +90,15 @@ class BaseLift(Lift):
                 The lifted node features.
         """
         if self.matrix_op == "precomputed":
-            if isinstance(so.s, Tensor):
-                s_inv = so.s_inv.transpose(-2, -1)
+            if so.s.is_sparse:
+                s_inv = so.s_inv.transpose(-2, -1).coalesce()
             else:
-                s_inv = so.s_inv.t()
+                s_inv = so.s_inv.transpose(-2, -1)
         elif self.matrix_op == "inverse":
-            if isinstance(so.s, Tensor):
-                if not so.s.is_sparse:
-                    s_inv = pseudo_inverse(so.s).transpose(-2, -1)
-                else:
-                    s_inv = pseudo_inverse(so.s).t()
+            if so.s.is_sparse:
+                s_inv = pseudo_inverse(so.s).transpose(-2, -1).coalesce()
+            else:
+                s_inv = pseudo_inverse(so.s).transpose(-2, -1)
         elif self.matrix_op == "transpose":
             s_inv = so.s
         else:
@@ -107,7 +107,10 @@ class BaseLift(Lift):
             )
 
         if isinstance(s_inv, Tensor):
-            x_prime = s_inv.matmul(x_pool)
+            if s_inv.is_sparse:
+                x_prime = torch.sparse.mm(s_inv, x_pool)
+            else:
+                x_prime = s_inv.matmul(x_pool)
         else:
             x_prime = torch_sparse.matmul(s_inv, x_pool, reduce=self.reduce_op)
 
