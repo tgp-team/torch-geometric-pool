@@ -298,7 +298,7 @@ class BNPool(DenseSRCPooling):
         if mask is not None:
             N = mask.sum(-1)  # has shape B x 1
         else:
-            N = adj.shape[-1]  # N
+            N = torch.tensor(adj.shape[-1], device=adj.device)  # N
 
         N_squared = N**2
         # Reconstruction loss

@@ -795,8 +795,9 @@ def cluster_connectivity_prior_loss(
 
     # Normalize by the given constant
     if normalizing_const is not None:
+        bs = normalizing_const.shape[0] if normalizing_const.dim() > 0 else 1
         prior_loss = (
-            prior_loss / normalizing_const.shape[0]
+            prior_loss / bs
         )  # to take into account the replication in the next operation
         prior_loss = prior_loss / normalizing_const  # scalar / vector = vector
 
@@ -815,7 +816,7 @@ def sparse_bce_reconstruction_loss(
     )  # has size (E+NegE)
 
     if edges_batch_id is None:
-        return rec_loss.mean(), rec_loss.size(0)
+        return rec_loss.mean(), torch.tensor(rec_loss.size(0), device=rec_loss.device)
     else:
         summed_loss = _scatter_reduce_loss(rec_loss, edges_batch_id, batch_size)
         summed_count = _scatter_reduce_loss(

@@ -254,7 +254,7 @@ class SparseBNPool(SRCPooling):
         if batch is not None:
             bs = int(batch.max()) + 1
         else:
-            bs = None
+            bs = 1
 
         # Reconstruction loss
         rec_loss, norm_const = self.get_sparse_rec_loss(node_assignment, adj, batch, bs)

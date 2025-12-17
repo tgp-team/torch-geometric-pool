@@ -420,7 +420,7 @@ class TestSparseBCEReconstructionLoss:
         loss, norm_const = sparse_bce_reconstruction_loss(link_prob_loigit, true_y)
 
         assert isinstance(loss, torch.Tensor)
-        assert isinstance(norm_const, int)
+        assert isinstance(norm_const, torch.Tensor)
         assert norm_const == tot_num_edges
         assert loss.dim() == 0  # Scalar after reduction
         assert loss.item() >= 0  # BCE loss is non-negative
