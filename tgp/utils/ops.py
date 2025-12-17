@@ -30,8 +30,9 @@ def connectivity_to_edge_index(
     if isinstance(edge_index, Tensor):
         if edge_index.is_sparse:
             # Handle torch COO sparse tensor
-            indices = edge_index.indices()
-            values = edge_index.values()
+            # Clone to avoid returning views that share memory with the sparse tensor
+            indices = edge_index.indices().clone()
+            values = edge_index.values().clone()
             return indices, values
         else:
             # Handle regular tensor [2, E]
@@ -100,8 +101,8 @@ def connectivity_to_sparsetensor(
         if edge_index.is_sparse:
             # Handle torch COO sparse tensor
             sparse_tensor = edge_index
-            edge_index = sparse_tensor.indices()
-            edge_weight = sparse_tensor.values()
+            edge_index = sparse_tensor.indices().clone()
+            edge_weight = sparse_tensor.values().clone()
 
         edge_weight = check_and_filter_edge_weights(edge_weight)
         adj = SparseTensor.from_edge_index(
