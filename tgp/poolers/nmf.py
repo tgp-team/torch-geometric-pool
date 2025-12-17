@@ -169,7 +169,10 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
     ) -> PoolingOutput:
         assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
 
-        num_nodes = maybe_num_nodes(edge_index, num_nodes)
+        if batch is not None:
+            num_nodes = batch.size(0)
+        else:
+            num_nodes = maybe_num_nodes(edge_index, num_nodes)
 
         adj = to_dense_adj(
             edge_index, edge_attr=edge_weight, max_num_nodes=num_nodes

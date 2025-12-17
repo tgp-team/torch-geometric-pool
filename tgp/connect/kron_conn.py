@@ -127,11 +127,15 @@ class KronConnect(Connect):
         edge_index, edge_weight = from_scipy_sparse_matrix(A_pool)
         edge_index = edge_index.to(device)
         edge_weight = edge_weight.to(device)
+
+        num_supernodes = so.num_supernodes
         if edge_index_is_sparsetensor:
-            A_pool = connectivity_to_sparsetensor(edge_index, edge_weight)
+            A_pool = connectivity_to_sparsetensor(
+                edge_index, edge_weight, num_supernodes
+            )
             out = (A_pool, None)
         elif edge_index_is_torch_coo:
-            A_pool = connectivity_to_torch_coo(edge_index, edge_weight)
+            A_pool = connectivity_to_torch_coo(edge_index, edge_weight, num_supernodes)
             out = (A_pool, None)
         else:
             out = (edge_index, edge_weight)
