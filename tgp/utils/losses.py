@@ -795,6 +795,9 @@ def cluster_connectivity_prior_loss(
 
     # Normalize by the given constant
     if normalizing_const is not None:
+        prior_loss = (
+            prior_loss / normalizing_const.shape[0]
+        )  # to take into account the replication in the next operation
         prior_loss = prior_loss / normalizing_const  # scalar / vector = vector
 
     return _batch_reduce_loss(prior_loss, batch_reduction)
