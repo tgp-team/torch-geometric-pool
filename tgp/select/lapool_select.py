@@ -155,7 +155,7 @@ class LaPoolSelect(Select):
             lap_edge_weights,
             size=(num_nodes, num_nodes),
             device=x.device,
-        ).coalesce()
+        )
         v = torch.sparse.mm(lap_sparse, x)  # v = Lx
         v = v.norm(dim=-1, keepdim=True)
 
@@ -180,7 +180,9 @@ class LaPoolSelect(Select):
             # Compute shortest path distances and corresponding beta regularization matrix
             sp_matrix = to_scipy_sparse_matrix(edge_index).tocsr()
             shortest_path = torch.tensor(
-                csgraph.shortest_path(sp_matrix, directed=False), dtype=torch.float32
+                csgraph.shortest_path(sp_matrix, directed=False),
+                dtype=torch.float32,
+                device=x.device,
             )
             beta = torch.zeros_like(shortest_path, dtype=torch.float32)
             nonzero = shortest_path != 0
@@ -189,7 +191,7 @@ class LaPoolSelect(Select):
             # Select beta columns corresponding to leaders and match shape with cosine_similarity
             beta = (
                 beta[:, leader_mask]
-                .to(dtype=cosine_similarity.dtype)
+                .to(dtype=cosine_similarity.dtype, device=cosine_similarity.device)
                 .view_as(cosine_similarity)
             )
 
@@ -209,7 +211,7 @@ class LaPoolSelect(Select):
         # Create torch COO tensor for non-leader similarities
         s_non_leader = torch.sparse_coo_tensor(
             filtered_indices, filtered_values, size=s.shape
-        ).coalesce()
+        )
 
         # Construct a sparse identity (Kronecker delta) for leader nodes
         leader_idx = torch.nonzero(leader_mask).squeeze()
@@ -220,7 +222,7 @@ class LaPoolSelect(Select):
         # Create torch COO tensor for leader identity matrix
         kronecker_delta_sparse = torch.sparse_coo_tensor(
             torch.stack([leader_idx, leader_cols]), kd_values, size=s.shape
-        ).coalesce()
+        )
 
         # Combine the non-leader similarities with the leader identity
         s = (s_non_leader + kronecker_delta_sparse).coalesce()

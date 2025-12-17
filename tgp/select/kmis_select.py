@@ -40,7 +40,10 @@ def degree_scorer(
 
 
 def maximal_independent_set(
-    edge_index: Tensor, order_k: int = 1, perm: OptTensor = None
+    edge_index: Tensor,
+    order_k: int = 1,
+    perm: OptTensor = None,
+    num_nodes: Optional[int] = None,
 ) -> Tensor:
     r"""Returns a Maximal :math:`k`-Independent Set of a graph, i.e., a set of
     nodes (as a :class:`ByteTensor`) such that none of them are :math:`k`-hop
@@ -60,9 +63,10 @@ def maximal_independent_set(
         order_k (int): The :math:`k`-th order (defaults to 1).
         perm (LongTensor, optional): Permutation vector. Must be of size
             :obj:`(n,)` (defaults to :obj:`None`).
+        num_nodes (int, optional): The number of nodes (defaults to :obj:`None`).
     :rtype: :class:`ByteTensor`
     """
-    n = maybe_num_nodes(edge_index)
+    n = num_nodes if num_nodes is not None else maybe_num_nodes(edge_index)
     row, col = edge_index[0], edge_index[1]
     device = row.device
 
@@ -122,7 +126,10 @@ def maximal_independent_set(
 
 
 def maximal_independent_set_cluster(
-    edge_index: Tensor, order_k: int = 1, perm: OptTensor = None
+    edge_index: Tensor,
+    order_k: int = 1,
+    perm: OptTensor = None,
+    num_nodes: Optional[int] = None,
 ) -> PairTensor:
     r"""Computes the Maximal :math:`k`-Independent Set (:math:`k`-MIS)
     clustering of a graph, as defined in `"Generalizing Downsampling from
@@ -140,9 +147,12 @@ def maximal_independent_set_cluster(
         order_k (int): The :math:`k`-th order (defaults to 1).
         perm (LongTensor, optional): Permutation vector. Must be of size
             :obj:`(n,)` (defaults to :obj:`None`).
+        num_nodes (int, optional): The number of nodes (defaults to :obj:`None`).
     :rtype: (:class:`ByteTensor`, :class:`LongTensor`)
     """
-    mis = maximal_independent_set(edge_index=edge_index, order_k=order_k, perm=perm)
+    mis = maximal_independent_set(
+        edge_index=edge_index, order_k=order_k, perm=perm, num_nodes=num_nodes
+    )
     n, device = mis.size(0), mis.device
 
     row, col = edge_index[0], edge_index[1]
@@ -362,7 +372,9 @@ class KMISSelect(Select):
         updated_score = self._apply_heuristic(score, edge_index)
         perm = torch.argsort(updated_score.view(-1), 0, descending=True)
 
-        mis, cluster = maximal_independent_set_cluster(edge_index, self.order_k, perm)
+        mis, cluster = maximal_independent_set_cluster(
+            edge_index, self.order_k, perm, num_nodes=num_nodes
+        )
         mis = mis.nonzero().view(-1)
 
         so = SelectOutput(

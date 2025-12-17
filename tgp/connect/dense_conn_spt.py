@@ -91,6 +91,7 @@ class DenseConnectSPT(Connect):
             )
 
         num_supernodes = so.s.size(1)
+        num_nodes = so.s.size(0)  # Get number of nodes from assignment matrix
         to_sparsetensor = False
         to_edge_index = False
         if is_torch_sparse_tensor(edge_index):
@@ -98,7 +99,9 @@ class DenseConnectSPT(Connect):
         elif isinstance(edge_index, Tensor) and not edge_index.is_sparse:
             to_edge_index = True
 
-        edge_index_coo = connectivity_to_torch_coo(edge_index, edge_weight)
+        edge_index_coo = connectivity_to_torch_coo(
+            edge_index, edge_weight, num_nodes=num_nodes
+        )
 
         # Handle edge case: empty adjacency matrix
         if edge_index_coo._nnz() == 0:
@@ -112,10 +115,13 @@ class DenseConnectSPT(Connect):
             ).coalesce()
         else:
             # Compute: s^T @ edge_index @ s using torch.sparse.mm
-            temp = torch.sparse.mm(so.s.transpose(-2, -1), edge_index_coo)
+            s_t = so.s.transpose(-2, -1)
+            temp = torch.sparse.mm(s_t, edge_index_coo)
             adj_pooled = torch.sparse.mm(temp, so.s)
 
-        edge_index, edge_weight = connectivity_to_edge_index(adj_pooled)
+        # Extract indices and values directly without triggering extra coalesce
+        edge_index = adj_pooled._indices()
+        edge_weight = adj_pooled._values()
 
         if self.remove_self_loops:
             edge_index, edge_weight = rsl(edge_index, edge_weight)

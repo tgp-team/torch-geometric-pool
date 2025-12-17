@@ -10,6 +10,7 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput, Precoarsenable
+from tgp.utils.ops import maybe_num_nodes
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -163,11 +164,15 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         edge_weight: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
+        num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
         assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
+
+        num_nodes = maybe_num_nodes(edge_index, num_nodes)
+
         adj = to_dense_adj(
-            edge_index, edge_attr=edge_weight
+            edge_index, edge_attr=edge_weight, max_num_nodes=num_nodes
         )  # has shape [1, N, N] -- Note: we do not pass batch here.
 
         so = self.select(edge_index=adj)
