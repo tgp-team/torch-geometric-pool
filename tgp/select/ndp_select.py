@@ -200,12 +200,19 @@ class NDPSelect(Select):
             )
 
         # Build Laplacians
-        eiL, ewL = get_laplacian(sub_edge_index, sub_edge_weight, normalization=None)
+        eiL, ewL = get_laplacian(
+            sub_edge_index, sub_edge_weight, normalization=None, num_nodes=num_sub_nodes
+        )
         L = torch.sparse_coo_tensor(
             eiL, ewL, (num_sub_nodes, num_sub_nodes), dtype=torch.float32, device=device
         ).coalesce()
 
-        eiLs, ewLs = get_laplacian(sub_edge_index, sub_edge_weight, normalization="sym")
+        eiLs, ewLs = get_laplacian(
+            sub_edge_index,
+            sub_edge_weight,
+            normalization="sym",
+            num_nodes=num_sub_nodes,
+        )
         Ls = torch.sparse_coo_tensor(
             eiLs,
             ewLs,

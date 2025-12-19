@@ -34,6 +34,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "remove_self_loops": True,
             "scorer": "degree",
             "reduce": "sum",
+            "edge_weight_norm": False,
         }
 
         #### Model definition

@@ -100,8 +100,6 @@ class MaxCutPooling(SRCPooling):
         edge_weight_norm (bool, optional):
             Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
             (default: :obj:`True`)
-
-
     """
 
     def __init__(

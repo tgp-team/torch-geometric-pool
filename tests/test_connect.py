@@ -14,6 +14,7 @@ from tgp.connect import (
 )
 from tgp.reduce import BaseReduce
 from tgp.select import SelectOutput, TopkSelect
+from tgp.select.kmis_select import KMISSelect
 from tgp.src import SRCPooling
 
 
@@ -319,6 +320,103 @@ def test_sparse_connect_degree_norm_without_edge_weight():
     # Verify that the edge weights are normalized
     assert torch.all(edge_weight_pool_class >= 0.0)
     assert torch.all(edge_weight_pool_class <= 1.0)
+
+
+def test_kmis_kron_connector():
+    """Test KronConnect with KMIS pooling.
+
+    This tests the code path in KronConnect where KMIS is used (lines 93-100),
+    specifically the validation that MIS indices are within bounds.
+    """
+    # Create a simple graph
+    N = 10
+    edge_list = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 8),
+        (8, 9),
+        (0, 9),
+    ]
+    row = torch.tensor(
+        [u for u, v in edge_list] + [v for u, v in edge_list], dtype=torch.long
+    )
+    col = torch.tensor(
+        [v for u, v in edge_list] + [u for u, v in edge_list], dtype=torch.long
+    )
+    edge_index = torch.stack([row, col], dim=0)
+    x = torch.randn((N, 3))
+    batch = torch.zeros(N, dtype=torch.long)
+
+    # Create KMIS selector
+    kmis_selector = KMISSelect(in_channels=3, order_k=2, scorer="degree")
+
+    # Select nodes using KMIS
+    so = kmis_selector(x=x, edge_index=edge_index, batch=batch)
+
+    # Verify SelectOutput has the expected attributes
+    assert hasattr(so, "mis"), "SelectOutput should have 'mis' attribute from KMIS"
+    assert hasattr(so, "num_nodes")
+    assert hasattr(so, "num_supernodes")
+
+    # Verify MIS indices are within bounds (this is what line 93-100 checks)
+    assert torch.all(so.mis < so.num_nodes), "MIS indices should be within num_nodes"
+    assert torch.all(so.mis >= 0), "MIS indices should be non-negative"
+
+    # Test KronConnect with KMIS SelectOutput
+    kron_connector = KronConnect()
+    edge_index_pool, edge_weight_pool = kron_connector(
+        edge_index=edge_index,
+        so=so,
+        edge_weight=None,
+        batch_pooled=batch[: so.num_supernodes],
+    )
+
+    # Verify output is valid
+    assert isinstance(edge_index_pool, torch.Tensor)
+    assert edge_index_pool.size(0) == 2  # Should have 2 rows (source, target)
+
+    # Verify pooled edge indices are within bounds
+    if edge_index_pool.size(1) > 0:
+        assert torch.all(edge_index_pool < so.num_supernodes)
+        assert torch.all(edge_index_pool >= 0)
+
+
+def test_kmis_kron_invalid_mis_indices():
+    """Test that KronConnect raises ValueError when MIS indices are out of bounds.
+
+    This directly tests the validation on lines 93-100 in kron_conn.py.
+    """
+    # Create a graph
+    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
+    num_nodes = 3
+
+    # Create a MALFORMED SelectOutput with out-of-bounds MIS indices
+    # This should never happen in practice, but tests the defensive check
+    invalid_mis = torch.tensor([0, 5], dtype=torch.long)  # 5 is out of bounds!
+
+    so = SelectOutput(
+        num_nodes=num_nodes,
+        num_supernodes=2,
+        node_index=torch.arange(num_nodes),
+        cluster_index=torch.tensor([0, 0, 1]),
+        mis=invalid_mis,  # Invalid: 5 >= num_nodes (3)
+    )
+
+    kron_connector = KronConnect()
+
+    # This should raise ValueError due to out-of-bounds MIS indices
+    with pytest.raises(ValueError, match="MIS indices out of range"):
+        _ = kron_connector(
+            edge_index=edge_index,
+            so=so,
+            edge_weight=None,
+            batch_pooled=torch.zeros(2, dtype=torch.long),
+        )
 
 
 if __name__ == "__main__":
