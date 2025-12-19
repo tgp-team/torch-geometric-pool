@@ -179,7 +179,7 @@ the :doc:`tutorials/index`, and explore our :doc:`APIs <api/tgp>`.
 Citing
 ------
 
-If you use Torch Geometric Pool for your research, please consider citing the library and the paper:
+If you use :tgp:`tgp` for your research, please consider citing the library and the paper:
 
 **Paper:**
 
