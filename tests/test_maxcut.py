@@ -106,6 +106,47 @@ class TestMaxCutLoss:
         assert isinstance(loss, torch.Tensor)
         assert torch.isfinite(loss)
 
+    def test_maxcut_loss_with_edge_weight_shape_E_1(self, simple_graph):
+        """Test MaxCut loss with edge_weight of shape [E, 1] instead of [E].
+
+        This tests the edge_weight squeezing logic at lines 855-857 in losses.py.
+        """
+        x, edge_index, edge_weight, batch = simple_graph
+        N = x.size(0)
+        E = edge_index.size(1)
+
+        # Create edge_weight with shape [E, 1] instead of [E]
+        edge_weight_2d = torch.randn(E, 1)
+
+        scores = torch.randn(N)
+
+        # Compute loss with 2D edge_weight - should be squeezed automatically
+        loss = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight_2d,  # Shape [E, 1]
+            batch=batch,
+            batch_reduction="mean",
+        )
+
+        # Check output
+        assert isinstance(loss, torch.Tensor)
+        assert loss.dim() == 0  # Scalar
+        assert torch.isfinite(loss)
+
+        # Compare with 1D edge_weight to ensure results are equivalent
+        edge_weight_1d = edge_weight_2d.squeeze(-1)  # Shape [E]
+        loss_1d = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight_1d,
+            batch=batch,
+            batch_reduction="mean",
+        )
+
+        # Results should be identical
+        assert torch.allclose(loss, loss_1d)
+
     def test_maxcut_loss_batched(self, batched_graph):
         """Test MaxCut loss with batched graphs."""
         x, edge_index, edge_weight, batch = batched_graph

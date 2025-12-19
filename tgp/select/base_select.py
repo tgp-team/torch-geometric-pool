@@ -130,7 +130,7 @@ class SelectOutput:
                         device=s.device,
                         is_coalesced=True,
                     ).coalesce()
-            elif not s.is_sparse:  # Dense assignment
+            else:  # Dense assignment (s.is_sparse is False)
                 assert cluster_index is None, (
                     "'cluster_index' cannot be set if 's' is a dense Tensor"
                 )

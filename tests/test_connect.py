@@ -53,7 +53,7 @@ def test_sparse_connect_raises_runtime_error():
 
 
 def test_denseconn_spt():
-    """Test the behavior of DenseConnectSPT with remove_self_loops=False and degree_norm=False."""
+    """Test DenseConnectSPT with regular tensor edge_index."""
     connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
     # Create torch COO sparse tensor from identity matrix
     eye_indices = torch.arange(3)
@@ -65,10 +65,15 @@ def test_denseconn_spt():
     so = SelectOutput(s=s)
     edge_index = torch.tensor([[0, 1, 1, 0], [1, 0, 1, 2]], dtype=torch.long)
     edge_weight = torch.tensor([1.0, 1.0, 1.5, 0.7], dtype=torch.float)
-    adj_pool, _ = connector(edge_index=edge_index, edge_weight=edge_weight, so=so)
+    adj_pool, edge_weight_pool = connector(
+        edge_index=edge_index, edge_weight=edge_weight, so=so
+    )
 
-    # check if the diagonal is zero
-    assert edge_index.size(0) == adj_pool.size(0)
+    # Verify output is regular tensor (edge_index format) - confirms to_edge_index branch was taken
+    assert isinstance(adj_pool, torch.Tensor)
+    assert not adj_pool.is_sparse
+    assert adj_pool.size(0) == 2
+    assert edge_weight_pool is not None
 
 
 def test_denseconn_spt_invalid_edge_index_type():
@@ -81,6 +86,65 @@ def test_denseconn_spt_invalid_edge_index_type():
     invalid_edge_index = [[0, 1], [1, 0]]
     with pytest.raises(ValueError, match="Edge index must be of type"):
         _ = connector(edge_index=invalid_edge_index, edge_weight=None, so=so)
+
+
+def test_denseconn_spt_with_torch_coo_input():
+    """Test DenseConnectSPT with torch COO sparse tensor input.
+
+    This tests the to_torch_coo branch by using a torch COO sparse tensor as input,
+    which sets to_torch_coo=True and converts the output back to torch COO format.
+    """
+    connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
+    # Create assignment matrix s as torch COO sparse tensor
+    eye_indices = torch.arange(3)
+    s = torch.sparse_coo_tensor(
+        torch.stack([eye_indices, eye_indices]),
+        torch.ones(3, dtype=torch.float),
+        size=(3, 3),
+    ).coalesce()
+    so = SelectOutput(s=s)
+
+    # Create torch COO sparse tensor as input - this triggers to_torch_coo=True
+    edge_index = torch.tensor([[0, 1, 1, 0], [1, 0, 1, 2]], dtype=torch.long)
+    edge_weight = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=torch.float)
+    edge_index_coo = torch.sparse_coo_tensor(
+        edge_index, edge_weight, size=(3, 3)
+    ).coalesce()
+
+    adj_pool, edge_weight_pool = connector(
+        edge_index=edge_index_coo, edge_weight=None, so=so
+    )
+
+    # Verify output is torch COO sparse tensor - confirms to_torch_coo branch was taken
+    assert isinstance(adj_pool, torch.Tensor)
+    assert adj_pool.is_sparse
+    assert edge_weight_pool is None  # Edge weights are embedded in sparse tensor
+
+
+def test_denseconn_spt_degree_norm_with_empty_after_remove_self_loops():
+    """Test DenseConnectSPT with degree_norm=True and graph that becomes empty after remove_self_loops."""
+    connector = DenseConnectSPT(remove_self_loops=True, degree_norm=True)
+    # Create assignment matrix s as torch COO sparse tensor
+    eye_indices = torch.arange(2)
+    s = torch.sparse_coo_tensor(
+        torch.stack([eye_indices, eye_indices]),
+        torch.ones(2, dtype=torch.float),
+        size=(2, 2),
+    ).coalesce()
+    so = SelectOutput(s=s)
+
+    # Create graph with only self-loops - after pooling and removing self-loops, becomes empty
+    edge_index = torch.tensor([[0, 0], [0, 0]], dtype=torch.long)  # Only self-loops
+    edge_weight = torch.tensor([1.0, 1.0], dtype=torch.float)
+
+    adj_pool, edge_weight_pool = connector(
+        edge_index=edge_index, edge_weight=edge_weight, so=so
+    )
+
+    # After removing self-loops, graph should be empty or have no edges
+    # This triggers the edge_weight.numel() == 0 case at line 130
+    assert isinstance(adj_pool, torch.Tensor)
+    assert adj_pool.size(0) == 2
 
 
 @pytest.mark.torch_sparse
@@ -165,6 +229,70 @@ def test_kron_conn_without_ndp():
     assert x_pool.shape[-2] == 4
     assert batch_pool.size(0) == x_pool.size(-2)
     assert adj_pool is not None
+
+
+def test_kron_conn_with_torch_coo():
+    """Test KronConnect with torch COO sparse tensor input."""
+    N = 10
+    edge_list = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (4, 0),
+        (0, 2),
+        (1, 3),
+        (2, 4),
+        (3, 0),
+        (4, 1),
+        (5, 6),
+        (6, 7),
+        (7, 8),
+        (8, 9),
+        (9, 5),
+    ]
+    row = torch.tensor(
+        [u for u, v in edge_list] + [v for u, v in edge_list], dtype=torch.long
+    )
+    col = torch.tensor(
+        [v for u, v in edge_list] + [u for u, v in edge_list], dtype=torch.long
+    )
+    edge_index = torch.stack([row, col], dim=0)
+    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
+    x = torch.randn((N, 3))
+    batch = torch.zeros(N, dtype=torch.long)
+
+    # Convert to torch COO sparse tensor
+    edge_index_coo = torch.sparse_coo_tensor(
+        edge_index, edge_weight, size=(N, N)
+    ).coalesce()
+
+    # Create pooler with KronConnect
+    pooler = SRCPooling(
+        selector=TopkSelect(in_channels=3, ratio=4, s_inv_op="transpose"),
+        reducer=BaseReduce(),
+        connector=KronConnect(),
+    )
+
+    # Test with torch COO sparse tensor
+    so = pooler.select(
+        x=x,
+        edge_index=edge_index_coo,
+        edge_weight=None,  # Edge weights are embedded in sparse tensor
+        batch=batch,
+    )
+    x_pool, batch_pool = pooler.reduce(x=x, so=so, batch=batch)
+    adj_pool, edge_weight_pool = pooler.connect(
+        edge_index=edge_index_coo, so=so, edge_weight=None
+    )
+
+    # Verify output is torch COO sparse tensor
+    assert isinstance(adj_pool, torch.Tensor)
+    assert adj_pool.is_sparse
+    assert edge_weight_pool is None  # Edge weights are embedded in sparse tensor
+    assert x_pool.shape[-2] == 4
+    assert batch_pool.size(0) == x_pool.size(-2)
 
 
 def test_kronconnect_handles_singular_L():
@@ -327,6 +455,71 @@ def test_sparse_connect_degree_norm_without_edge_weight():
     # Verify that the edge weights are normalized
     assert torch.all(edge_weight_pool_class >= 0.0)
     assert torch.all(edge_weight_pool_class <= 1.0)
+
+
+def test_sparse_connect_with_torch_coo():
+    """Test sparse_connect with torch COO sparse tensor input.
+
+    This tests the specific case where edge_index is a torch COO sparse tensor,
+    which should trigger the to_torch_coo=True branch (line 77 in base_conn.py)
+    and return a torch COO sparse tensor with edge_weight=None.
+    """
+    # Create a simple graph with 4 nodes
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]], dtype=torch.long
+    )
+    edge_weight = torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=torch.float)
+    num_nodes = 4
+    num_supernodes = 2
+
+    # Convert to torch COO sparse tensor
+    edge_index_coo = torch.sparse_coo_tensor(
+        edge_index, edge_weight, size=(num_nodes, num_nodes)
+    ).coalesce()
+
+    # Create cluster_index for coarsening (2 nodes per supernode)
+    cluster_index = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+    # Test with torch COO sparse tensor input
+    adj_pool, edge_weight_pool = sparse_connect(
+        edge_index=edge_index_coo,
+        edge_weight=None,  # Edge weights are embedded in the sparse tensor
+        cluster_index=cluster_index,
+        num_nodes=num_nodes,
+        num_supernodes=num_supernodes,
+        degree_norm=False,
+        remove_self_loops=True,
+    )
+
+    # Verify that output is a torch COO sparse tensor
+    assert isinstance(adj_pool, torch.Tensor)
+    assert adj_pool.is_sparse
+    assert edge_weight_pool is None  # Should be None when output is torch COO
+
+    # Verify the shape of the pooled adjacency
+    assert adj_pool.shape == (num_supernodes, num_supernodes)
+
+    # Test with SparseConnect class as well
+    connector = SparseConnect()
+    so = SelectOutput(
+        cluster_index=cluster_index,
+        num_nodes=num_nodes,
+        num_supernodes=num_supernodes,
+    )
+
+    adj_pool_class, edge_weight_pool_class = connector(
+        edge_index=edge_index_coo,
+        edge_weight=None,
+        so=so,
+    )
+
+    # Verify that output is a torch COO sparse tensor
+    assert isinstance(adj_pool_class, torch.Tensor)
+    assert adj_pool_class.is_sparse
+    assert edge_weight_pool_class is None  # Should be None when output is torch COO
+
+    # Verify the shape of the pooled adjacency
+    assert adj_pool_class.shape == (num_supernodes, num_supernodes)
 
 
 def test_kmis_kron_connector():

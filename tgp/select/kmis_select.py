@@ -27,13 +27,6 @@ def degree_scorer(
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
     edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
 
-    # Check if edge_weight is a 1D tensor
-    if edge_weight is not None and edge_weight.dim() > 1 and edge_weight.size(1) > 1:
-        raise ValueError(
-            "`edge_weight` must be a 1D tensor, but got "
-            f"`edge_weight.size(1)={edge_weight.size(1)}`"
-        )
-
     neigh = edge_index[dim]
     deg = weighted_degree(neigh, edge_weight, num_nodes)
     return deg.float()

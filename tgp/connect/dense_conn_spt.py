@@ -10,7 +10,6 @@ from tgp.connect import Connect
 from tgp.imports import is_sparsetensor
 from tgp.select import SelectOutput
 from tgp.utils.ops import (
-    connectivity_to_edge_index,
     connectivity_to_sparsetensor,
     connectivity_to_torch_coo,
 )
@@ -93,11 +92,11 @@ class DenseConnectSPT(Connect):
         num_supernodes = so.s.size(1)
         num_nodes = so.s.size(0)  # Get number of nodes from assignment matrix
         to_sparsetensor = False
-        to_edge_index = False
+        to_torch_coo = False
         if is_sparsetensor(edge_index):
             to_sparsetensor = True
-        elif isinstance(edge_index, Tensor) and not edge_index.is_sparse:
-            to_edge_index = True
+        elif isinstance(edge_index, Tensor) and edge_index.is_sparse:
+            to_torch_coo = True
 
         edge_index_coo = connectivity_to_torch_coo(
             edge_index, edge_weight, num_nodes=num_nodes
@@ -127,7 +126,7 @@ class DenseConnectSPT(Connect):
             edge_index, edge_weight = rsl(edge_index, edge_weight)
 
         if self.degree_norm:
-            if edge_weight is None:
+            if edge_weight is None or edge_weight.numel() == 0:
                 edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
 
             # Compute degree normalization D^{-1/2} A D^{-1/2}
@@ -162,10 +161,11 @@ class DenseConnectSPT(Connect):
                 edge_index, edge_weight, num_supernodes
             )
             edge_weight = None
-        elif to_edge_index:
-            edge_index, edge_weight = connectivity_to_edge_index(
-                edge_index, edge_weight
+        elif to_torch_coo:
+            edge_index = connectivity_to_torch_coo(
+                edge_index, edge_weight, num_supernodes
             )
+            edge_weight = None
 
         return edge_index, edge_weight
 

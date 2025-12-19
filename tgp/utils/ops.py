@@ -70,7 +70,7 @@ def connectivity_to_torch_coo(
             return torch.sparse_coo_tensor(
                 edge_index, edge_weight, (num_nodes, num_nodes)
             ).coalesce()
-    elif is_sparsetensor(edge_index):
+    else:  # SparseTensor
         row, col, value = edge_index.coo()
         indices = torch.stack([row, col], dim=0)
         if value is None:
@@ -78,8 +78,6 @@ def connectivity_to_torch_coo(
         return torch.sparse_coo_tensor(
             indices, value, (num_nodes, num_nodes)
         ).coalesce()
-    else:
-        raise ValueError("Edge index must be a Tensor or SparseTensor.")
 
 
 def connectivity_to_sparsetensor(

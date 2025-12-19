@@ -243,5 +243,27 @@ def test_invalid_lift_op():
         BaseLift(matrix_op="invalid_op")(x, so)
 
 
+def test_lift_with_non_tensor_s_inv():
+    """Test that BaseLift raises TypeError when s_inv is not a torch.Tensor.
+
+    We use matrix_op="transpose" so that s_inv = so.s, then manually set so.s
+    to a non-Tensor value to trigger the check.
+    """
+    # Create a SelectOutput with valid s
+    s = torch.randn((3, 2))
+    so = SelectOutput(s=s)
+
+    # Manually set s to something that's not a Tensor (e.g., a list)
+    # This bypasses SelectOutput validation and simulates an edge case
+    # where s might not be a Tensor (though this shouldn't happen in practice)
+    so.s = [1, 2, 3]  # Not a Tensor
+
+    x_pool = torch.randn((2, 3))
+    lift = BaseLift(matrix_op="transpose")  # This sets s_inv = so.s
+
+    with pytest.raises(TypeError, match="Expected s_inv to be a torch.Tensor"):
+        _ = lift(x_pool, so)
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
