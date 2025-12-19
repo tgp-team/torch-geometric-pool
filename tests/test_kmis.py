@@ -381,7 +381,6 @@ def test_kmis_invalid_scorer_raises_value_error():
     # Create a simple graph
     x = torch.randn(3, 8)
     edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
-    adj = SparseTensor.from_edge_index(edge_index, sparse_sizes=(3, 3))
 
     # Instantiate KMISSelect with degree scorer
     kmis_select = KMISSelect(scorer="degree", order_k=1)
@@ -391,7 +390,7 @@ def test_kmis_invalid_scorer_raises_value_error():
 
     # Call _scorer method - this should raise ValueError
     with pytest.raises(ValueError, match="Unrecognized `scorer` value: invalid_scorer"):
-        kmis_select._scorer(x=x, adj=adj, num_nodes=3)
+        kmis_select._scorer(x=x, edge_index=edge_index, num_nodes=3)
 
 
 def test_kmis_with_kron_connect():
