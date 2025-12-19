@@ -4,7 +4,6 @@ import pytest
 import torch
 from torch import Tensor
 from torch_geometric.nn import GCNConv
-from torch_sparse import SparseTensor
 
 from tgp.poolers.asap import ASAPooling
 from tgp.src import PoolingOutput
@@ -57,10 +56,14 @@ def test_forward_with_1d_x_and_dense_adj():
     assert out.x.shape == (k, 1)
 
 
+@pytest.mark.torch_sparse
 def test_forward_with_gnn_and_sparse_adj_and_add_self_loops_and_extra_repr():
     """Cover lines where GNN is provided, adj is a SparseTensor, and add_self_loops=True.
     Also test extra_repr_args.
     """
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     x, edge_index, edge_weight, batch = make_chain_graph(N=4, F_dim=3)
     # Convert to SparseTensor
     adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
@@ -114,7 +117,11 @@ def test_lifting_branch_returns_original_x():
     assert x_lifted.shape == x.shape
 
 
+@pytest.mark.torch_sparse
 def test_graph_disconnected_case():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 0, 2]], dtype=torch.long)
     x = torch.randn(5, 3)
     edge_index = SparseTensor.from_edge_index(edge_index)

@@ -3,7 +3,6 @@ import torch
 from torch_geometric.data import Batch, Data
 from torch_geometric.nn import GCNConv
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
 from tgp.select.base_select import SelectOutput
@@ -75,7 +74,19 @@ def test_nopool_basic_functionality(simple_graph):
         use_cache=False,
     )
     assert x_pre.shape == x.shape
-    assert isinstance(adj_pre, (SparseTensor, torch.Tensor))
+    # Try to import SparseTensor for type checking, but don't require it
+    try:
+        from torch_sparse import SparseTensor
+
+        has_sparse = True
+    except ImportError:
+        SparseTensor = type(None)
+        has_sparse = False
+
+    if has_sparse:
+        assert isinstance(adj_pre, (SparseTensor, torch.Tensor))
+    else:
+        assert isinstance(adj_pre, torch.Tensor)
     assert mask is None
 
     # Test 3: Test forward pass (pooling)
@@ -104,6 +115,9 @@ def test_nopool_basic_functionality(simple_graph):
     assert out.x.shape == (N, F)
 
     # Test 6: Test with SparseTensor input
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     adj_sparse = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
     out_sparse = pooler(x=x, adj=adj_sparse, batch=batch)
     assert out_sparse.x.shape == x.shape
@@ -128,7 +142,15 @@ def test_nopool_identity_behavior(simple_graph):
     assert torch.allclose(out.x, x)
 
     # Edge structure should be identical
-    if isinstance(adj_pre, SparseTensor):
+    try:
+        from torch_sparse import SparseTensor
+
+        has_sparse = True
+    except ImportError:
+        SparseTensor = type(None)
+        has_sparse = False
+
+    if has_sparse and isinstance(adj_pre, SparseTensor):
         assert adj_pre.sparse_sizes() == out.edge_index.sparse_sizes()
     else:
         # Sort both edge indices lexicographically for comparison
@@ -229,8 +251,12 @@ def test_nopool_print_signature():
 # ============================================================================
 
 
+@pytest.mark.torch_sparse
 def test_identity_select_with_sparse_edge_index():
     """Test IdentitySelect when num_nodes is determined from SparseTensor edge_index."""
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     selector = IdentitySelect()
 
     # Create SparseTensor edge_index
@@ -301,6 +327,9 @@ def test_identity_select_with_num_nodes_not_none():
     assert torch.equal(so.cluster_index, torch.arange(explicit_num_nodes))
 
     # Test case 2: num_nodes provided with SparseTensor edge_index
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     sparse_edge_index = SparseTensor.from_edge_index(edge_index, sparse_sizes=(4, 4))
     explicit_num_nodes = 8
     # SparseTensor would normally infer 4 nodes, but explicit num_nodes=8 should be used
@@ -367,8 +396,12 @@ class TestGetDevice:
             device_cuda = get_device(None, edge_index_cuda)
             assert device_cuda.type == "cuda"
 
+    @pytest.mark.torch_sparse
     def test_get_device_from_sparse_tensor(self):
         """Test get_device returns device from SparseTensor edge_index."""
+        pytest.importorskip("torch_sparse")
+        from torch_sparse import SparseTensor
+
         # Create SparseTensor on CPU
         edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
         sparse_edge_index = SparseTensor.from_edge_index(
@@ -442,8 +475,12 @@ class TestGetDevice:
         device = get_device(None, edge_index)
         assert device == torch.device("cpu")
 
+    @pytest.mark.torch_sparse
     def test_get_device_with_sparse_tensor_priority(self):
         """Test that SparseTensor edge_index takes priority over x."""
+        pytest.importorskip("torch_sparse")
+        from torch_sparse import SparseTensor
+
         x = torch.randn(3, 2)
         edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
         sparse_edge_index = SparseTensor.from_edge_index(

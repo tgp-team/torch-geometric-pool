@@ -6,7 +6,6 @@ Tests: SparseConnect, DenseConnect, DenseConnectSPT
 import pytest
 import torch
 from torch_geometric.data import Batch, Data
-from torch_sparse import SparseTensor
 
 from tgp.connect import DenseConnect, DenseConnectSPT, SparseConnect
 from tgp.reduce import BaseReduce
@@ -345,6 +344,9 @@ class TestEdgeWeightNormalization:
         )
 
         # Check normalization
+        pytest.importorskip("torch_sparse")
+        from torch_sparse import SparseTensor
+
         if isinstance(adj_norm, SparseTensor):
             _, _, values = adj_norm.coo()
             if len(values) > 0:

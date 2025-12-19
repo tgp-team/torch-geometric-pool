@@ -3,7 +3,6 @@ import torch
 from scipy.sparse import csr_matrix
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.connect import (
     Connect,
@@ -84,7 +83,11 @@ def test_denseconn_spt_invalid_edge_index_type():
         _ = connector(edge_index=invalid_edge_index, edge_weight=None, so=so)
 
 
+@pytest.mark.torch_sparse
 def test_kron_conn_without_ndp():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     N = 10
     edge_list = [
         (0, 1),
@@ -191,11 +194,15 @@ def test_kronconnect_handles_singular_L():
     assert isinstance(adj_pool, torch.Tensor)
 
 
+@pytest.mark.torch_sparse
 def test_kronconnect_single_node_selection():
     """Test KronConnect when only 0 or 1 nodes are selected (line 88 coverage).
     This tests the early return path: Lnew = sp.csc_matrix(-np.ones((1, 1)))
     with both SparseTensor and regular tensor edge_index inputs.
     """
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     # Create a simple 3-node graph
     edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
     edge_weight = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=torch.float)

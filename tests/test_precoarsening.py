@@ -14,11 +14,16 @@ from tgp.poolers import (
     MaxCutPooling,  # Should NOT be precoarsenable
     NDPPooling,  # Should be precoarsenable
     NMFPooling,
-    PANPooling,  # Should NOT be precoarsenable
     SAGPooling,
     TopkPooling,  # Should NOT be precoarsenable
     get_pooler,
 )
+
+# PANPooling requires torch_sparse, import conditionally
+try:
+    from tgp.poolers import PANPooling
+except (ImportError, AssertionError):
+    PANPooling = None
 from tgp.src import Precoarsenable, SRCPooling
 
 
@@ -229,12 +234,21 @@ def test_is_precoarsenable_property():
     non_precoarsenable_poolers = [
         MaxCutPooling(in_channels=8, ratio=0.5),
         LaPooling(),
-        PANPooling(in_channels=8, ratio=0.5),
         ASAPooling(in_channels=8, ratio=0.5),
         SAGPooling(in_channels=8, ratio=0.5),
         TopkPooling(in_channels=8, ratio=0.5),
         EdgeContractionPooling(in_channels=8),
     ]
+
+    # PANPooling requires torch_sparse, so only add it if available
+    if PANPooling is not None:
+        try:
+            from tgp.imports import HAS_TORCH_SPARSE
+
+            if HAS_TORCH_SPARSE:
+                non_precoarsenable_poolers.append(PANPooling(in_channels=8, ratio=0.5))
+        except (ImportError, AttributeError):
+            pass
 
     for pooler in non_precoarsenable_poolers:
         assert not pooler.is_precoarsenable, (

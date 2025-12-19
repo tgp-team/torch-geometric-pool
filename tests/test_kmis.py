@@ -4,7 +4,6 @@ import sys
 import pytest
 import torch
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 import tgp.imports as imports_mod
 from tgp.poolers import get_pooler
@@ -45,6 +44,7 @@ def simple_graph():
 @pytest.mark.parametrize(
     "scorer", ["linear", "random", "constant", "canonical", "degree"]
 )
+@pytest.mark.torch_sparse
 def test_pooler_parametrized_configs(
     simple_graph,
     pooler_name,
@@ -58,6 +58,9 @@ def test_pooler_parametrized_configs(
     """Test a given pooler with various combinations of configuration parameters.
     For each config, run preprocessing and forward, and check output.x shape.
     """
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     x, edge_index, edge_weight, batch = simple_graph
     N, F = x.size()
     PARAMS = {
@@ -148,6 +151,15 @@ def test_maximal_independent_set_cluster():
 
 
 def test_kmis_select_scorers_and_s_inv(simple_edge_index):
+    # Try to import SparseTensor for type checking, but don't require it
+    try:
+        from torch_sparse import SparseTensor
+
+        has_sparse = True
+    except ImportError:
+        SparseTensor = type(None)  # Dummy type that won't match
+        has_sparse = False
+
     N = 4
     # Build undirected adjacency with self-loops for N=4
     edge_index = torch.tensor(
@@ -173,13 +185,13 @@ def test_kmis_select_scorers_and_s_inv(simple_edge_index):
         s = out.s
         s_inv = out.s_inv
         # Extract row, col from either SparseTensor or torch COO
-        if isinstance(s, SparseTensor):
+        if has_sparse and isinstance(s, SparseTensor):
             row_s, col_s, _ = s.coo()
         else:
             s_coalesced = s.coalesce()
             indices_s = s_coalesced.indices()
             row_s, col_s = indices_s[0], indices_s[1]
-        if isinstance(s_inv, SparseTensor):
+        if has_sparse and isinstance(s_inv, SparseTensor):
             row_i, col_i, _ = s_inv.coo()
         else:
             s_inv_coalesced = s_inv.coalesce()
@@ -204,12 +216,22 @@ def test_kmis_select_scorers_and_s_inv(simple_edge_index):
     assert isinstance(out2, SelectOutput)
     assert out2.mis.sum().item() == 1
 
-    ei_spt = SparseTensor.from_edge_index(directed, sparse_sizes=(N2, N2))
-    out3 = selector2.forward(x=x2, edge_index=ei_spt, batch=None)
-    assert isinstance(out3, SelectOutput)
+    if has_sparse:
+        ei_spt = SparseTensor.from_edge_index(directed, sparse_sizes=(N2, N2))
+        out3 = selector2.forward(x=x2, edge_index=ei_spt, batch=None)
+        assert isinstance(out3, SelectOutput)
 
 
 def test_kmis_select_linear_score_list(simple_edge_index):
+    # Try to import SparseTensor for type checking, but don't require it
+    try:
+        from torch_sparse import SparseTensor
+
+        has_sparse = True
+    except ImportError:
+        SparseTensor = type(None)  # Dummy type that won't match
+        has_sparse = False
+
     N = 4
     # Build undirected adjacency with self-loops for N=4
     edge_index = torch.tensor(
@@ -233,13 +255,13 @@ def test_kmis_select_linear_score_list(simple_edge_index):
     s = out.s
     s_inv = out.s_inv
     # Extract row, col from either SparseTensor or torch COO
-    if isinstance(s, SparseTensor):
+    if has_sparse and isinstance(s, SparseTensor):
         row_s, col_s, _ = s.coo()
     else:
         s_coalesced = s.coalesce()
         indices_s = s_coalesced.indices()
         row_s, col_s = indices_s[0], indices_s[1]
-    if isinstance(s_inv, SparseTensor):
+    if has_sparse and isinstance(s_inv, SparseTensor):
         row_i, col_i, _ = s_inv.coo()
     else:
         s_inv_coalesced = s_inv.coalesce()
@@ -249,7 +271,11 @@ def test_kmis_select_linear_score_list(simple_edge_index):
     assert torch.equal(col_i, row_s)
 
 
+@pytest.mark.torch_sparse
 def test_kmis_select_heuristic_inverse_s_inv(simple_edge_index):
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     N = 3
     # Triangle with self-loops
     edge_index = torch.tensor(
@@ -393,12 +419,16 @@ def test_kmis_invalid_scorer_raises_value_error():
         kmis_select._scorer(x=x, edge_index=edge_index, num_nodes=3)
 
 
+@pytest.mark.torch_sparse
 def test_kmis_with_kron_connect():
     """Test KMISPooling with KronConnect connector.
 
     This test verifies that KMIS pooling works correctly with the Kron reduction
     connector, which requires identifying supernode indices from the MIS.
     """
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     from tgp.connect import KronConnect
     from tgp.poolers import KMISPooling
 

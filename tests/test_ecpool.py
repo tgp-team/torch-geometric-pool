@@ -2,7 +2,6 @@ import pytest
 import torch
 from torch import Tensor
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.poolers import EdgeContractionPooling
 from tgp.select.edge_contraction_select import (
@@ -213,7 +212,11 @@ def make_chain_edge_index(N=3):
     return edge_index
 
 
+@pytest.mark.torch_sparse
 def test_maximal_matching_with_sparsetensor_and_perm():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     N = 3
     edge_index = make_chain_edge_index(N)
     sp = SparseTensor.from_edge_index(edge_index)
@@ -229,8 +232,12 @@ def test_maximal_matching_with_sparsetensor_and_perm():
     assert match.any().item()
 
 
+@pytest.mark.torch_sparse
 def test_maximal_matching_cluster_with_sparsetensor_and_perm():
     """Cover lines 100-102 (SparseTensor branch) and 109 (cluster labeling) in maximal_matching_cluster."""
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     # Build a 4-node cycle 0–1–2–3–0 plus self-loops
     N = 4
     row = torch.tensor([0, 1, 2, 3], dtype=torch.long)
@@ -249,8 +256,12 @@ def test_maximal_matching_cluster_with_sparsetensor_and_perm():
     assert cluster.numel() == N
 
 
+@pytest.mark.torch_sparse
 def test_maximal_matching_cluster_with_sparsetensor_no_perm():
     """Cover the default-perm branch in maximal_matching_cluster when passing a SparseTensor."""
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     # 3-node chain 0–1–2 plus self-loops
     N = 3
     edge_index = make_chain_edge_index(N)

@@ -1,7 +1,6 @@
 import pytest
 import torch
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.select.ndp_select import NDPSelect
 
@@ -26,7 +25,11 @@ def test_forward_no_batch_and_tensor_edge_index():
     assert s.size(0) == 3
 
 
+@pytest.mark.torch_sparse
 def test_forward_with_sparse_tensor_edge_index_and_skip_empty_subgraph():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     edge_index = make_chain_edge_index(N=3)
     edge_index, _ = add_self_loops(edge_index, num_nodes=3)
     edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
@@ -42,7 +45,11 @@ def test_forward_with_sparse_tensor_edge_index_and_skip_empty_subgraph():
     assert len(repr(out)) > 0
 
 
+@pytest.mark.torch_sparse
 def test_random_cut():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     n = 5
     adj = SparseTensor.from_dense(torch.ones(n, n))
     selector = NDPSelect(s_inv_op="transpose")

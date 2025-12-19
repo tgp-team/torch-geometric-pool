@@ -1,13 +1,15 @@
 import pytest
 import torch
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
 
 
 @pytest.fixture(scope="module")
 def simple_graph():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     N = 10
     F = 2
     row = torch.arange(9, dtype=torch.long)
@@ -28,7 +30,11 @@ poolers = list(pooler_map.keys())
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
+@pytest.mark.torch_sparse
 def test_output_with_spt_adj(simple_graph, pooler_name):
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     x, adj, edge_weight, batch = simple_graph
     N, F = x.size()
 

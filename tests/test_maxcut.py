@@ -11,7 +11,6 @@ import math
 
 import pytest
 import torch
-from torch_sparse import SparseTensor
 
 from tgp.poolers.maxcut import MaxCutPooling
 from tgp.select.maxcut_select import MaxCutScoreNet, MaxCutSelect
@@ -493,8 +492,12 @@ class TestMaxCutSelect:
         assert out.node_index.size(0) == N  # All nodes in assignment
         assert torch.all(out.cluster_index < expected_k)
 
+    @pytest.mark.torch_sparse
     def test_maxcut_select_sparse_tensor_input(self, simple_graph):
         """Test MaxCutSelect with SparseTensor input."""
+        pytest.importorskip("torch_sparse")
+        from torch_sparse import SparseTensor
+
         x, edge_index, edge_weight, batch = simple_graph
 
         # Convert to SparseTensor
@@ -1155,12 +1158,14 @@ class TestFinalCoverageComplete:
         assert output_with_weight.num_nodes == x.size(0)
         assert hasattr(output_with_weight, "scores")
 
+    @pytest.mark.torch_sparse
     def test_ops_maxcut(self, simple_graph):
+        pytest.importorskip("torch_sparse")
+        from torch_sparse import SparseTensor
+
         from tgp.utils.ops import delta_gcn_matrix, get_assignments
 
         x, edge_index, edge_weight, batch = simple_graph
-
-        from torch_sparse import SparseTensor
 
         sparse_adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
 
