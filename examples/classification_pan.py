@@ -1,3 +1,6 @@
+## This example requires torch_sparse to be installed
+
+
 import torch
 import torch.nn.functional as F
 from torch_geometric import seed_everything
