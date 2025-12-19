@@ -1,5 +1,4 @@
 import torch
-import torch_sparse
 from torch import Tensor, nn
 
 from tgp.select import SelectOutput
@@ -106,13 +105,16 @@ class BaseLift(Lift):
                 f"'matrix_op' must be one of {list(LiftType.__args__)} ({self.matrix_op} given)"
             )
 
-        if isinstance(s_inv, Tensor):
-            if s_inv.is_sparse:
-                x_prime = torch.sparse.mm(s_inv, x_pool)
-            else:
-                x_prime = s_inv.matmul(x_pool)
+        # s_inv must be a torch.Tensor (either sparse COO or dense)
+        if not isinstance(s_inv, Tensor):
+            raise TypeError(
+                f"Expected s_inv to be a torch.Tensor (sparse COO or dense), got {type(s_inv)}"
+            )
+
+        if s_inv.is_sparse:
+            x_prime = torch.sparse.mm(s_inv, x_pool)
         else:
-            x_prime = torch_sparse.matmul(s_inv, x_pool, reduce=self.reduce_op)
+            x_prime = s_inv.matmul(x_pool)
 
         return x_prime
 

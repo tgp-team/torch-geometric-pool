@@ -8,9 +8,8 @@ from torch_geometric.utils import (
     get_laplacian,
 )
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from torch_sparse import eye as torch_sparse_eye
 
-from tgp.imports import HAS_TORCH_SPARSE, is_torch_sparse_tensor
+from tgp.imports import HAS_TORCH_SPARSE, is_sparsetensor
 
 
 def rank3_trace(x):
@@ -38,7 +37,7 @@ def connectivity_to_edge_index(
             # Handle regular tensor [2, E]
             edge_weight = check_and_filter_edge_weights(edge_weight)
             return edge_index, edge_weight
-    elif is_torch_sparse_tensor(edge_index):
+    elif is_sparsetensor(edge_index):
         row, col, edge_weight = edge_index.coo()
         edge_index = torch.stack([row, col], dim=0)
         return edge_index, edge_weight
@@ -52,7 +51,7 @@ def connectivity_to_torch_coo(
     num_nodes: Optional[int] = None,
 ) -> torch.Tensor:
     # Validate input type first
-    if not isinstance(edge_index, Tensor) and not is_torch_sparse_tensor(edge_index):
+    if not isinstance(edge_index, Tensor) and not is_sparsetensor(edge_index):
         raise ValueError(
             f"Edge index must be of type Tensor or SparseTensor, got {type(edge_index)}"
         )
@@ -71,7 +70,7 @@ def connectivity_to_torch_coo(
             return torch.sparse_coo_tensor(
                 edge_index, edge_weight, (num_nodes, num_nodes)
             ).coalesce()
-    elif is_torch_sparse_tensor(edge_index):
+    elif is_sparsetensor(edge_index):
         row, col, value = edge_index.coo()
         indices = torch.stack([row, col], dim=0)
         if value is None:
@@ -178,7 +177,7 @@ def add_remaining_self_loops(
         num_nodes (int, optional): The number of nodes, *i.e.*
             :obj:`max_val + 1` of :attr:`edge_index`. (default: :obj:`None`)
     """
-    if is_torch_sparse_tensor(edge_index):
+    if is_sparsetensor(edge_index):
         if num_nodes is not None and num_nodes != edge_index.size(0):
             edge_index = edge_index.sparse_resize((num_nodes, num_nodes))
         return edge_index.fill_diag(fill_value), None
@@ -255,7 +254,7 @@ def delta_gcn_matrix(
               or None if input was SparseTensor or torch COO sparse tensor.
     """
     # Remember the input type to return the same format
-    input_is_sparsetensor = is_torch_sparse_tensor(edge_index)
+    input_is_sparsetensor = is_sparsetensor(edge_index)
     input_is_torch_coo = isinstance(edge_index, Tensor) and edge_index.is_sparse
 
     # Convert input to edge_index, edge_weight format for processing
@@ -274,7 +273,9 @@ def delta_gcn_matrix(
     edge_weight_scaled = -delta * edge_weight_laplacian
 
     # Create identity matrix: I
-    eye_index, eye_weight = torch_sparse_eye(
+    diag_indices = torch.arange(num_nodes, device=edge_index_tensor.device)
+    eye_index = torch.stack([diag_indices, diag_indices], dim=0)
+    eye_weight = torch.ones(
         num_nodes, device=edge_index_tensor.device, dtype=edge_weight_scaled.dtype
     )
 

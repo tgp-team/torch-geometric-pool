@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.imports import is_torch_sparse_tensor
+from tgp.imports import is_sparsetensor
 from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
 
 
@@ -356,9 +356,7 @@ class SelectOutput:
             )
 
             # Convert adjacency to edge_index format if needed
-            if is_torch_sparse_tensor(adj) or (
-                isinstance(adj, Tensor) and adj.is_sparse
-            ):
+            if is_sparsetensor(adj) or (isinstance(adj, Tensor) and adj.is_sparse):
                 edge_index, _ = connectivity_to_edge_index(adj)
             elif isinstance(adj, Tensor):
                 edge_index = adj

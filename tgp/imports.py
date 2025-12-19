@@ -57,7 +57,7 @@ def check_pygsp_available():
         )
 
 
-def is_torch_sparse_tensor(obj):
+def is_sparsetensor(obj):
     """Check if object is a torch_sparse.SparseTensor (if library is available)."""
     if not HAS_TORCH_SPARSE:
         return False

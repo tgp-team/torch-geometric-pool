@@ -8,7 +8,7 @@ from torch_geometric.utils import remove_self_loops as rsl
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_scatter import scatter
 
-from tgp.imports import is_torch_sparse_tensor
+from tgp.imports import is_sparsetensor
 from tgp.select import SelectOutput
 from tgp.utils import (
     connectivity_to_edge_index,
@@ -71,7 +71,7 @@ def sparse_connect(
     r"""Connects the nodes in the coarsened graph."""
     to_sparsetensor = False
     to_torch_coo = False
-    if is_torch_sparse_tensor(edge_index):
+    if is_sparsetensor(edge_index):
         to_sparsetensor = True
     elif isinstance(edge_index, Tensor) and edge_index.is_sparse:
         to_torch_coo = True

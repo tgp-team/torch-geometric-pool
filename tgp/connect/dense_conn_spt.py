@@ -7,7 +7,7 @@ from torch_geometric.utils import remove_self_loops as rsl
 from torch_scatter import scatter
 
 from tgp.connect import Connect
-from tgp.imports import is_torch_sparse_tensor
+from tgp.imports import is_sparsetensor
 from tgp.select import SelectOutput
 from tgp.utils.ops import (
     connectivity_to_edge_index,
@@ -94,7 +94,7 @@ class DenseConnectSPT(Connect):
         num_nodes = so.s.size(0)  # Get number of nodes from assignment matrix
         to_sparsetensor = False
         to_edge_index = False
-        if is_torch_sparse_tensor(edge_index):
+        if is_sparsetensor(edge_index):
             to_sparsetensor = True
         elif isinstance(edge_index, Tensor) and not edge_index.is_sparse:
             to_edge_index = True

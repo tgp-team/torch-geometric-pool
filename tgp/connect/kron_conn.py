@@ -13,7 +13,7 @@ from torch_geometric.utils import (
 )
 
 from tgp.connect import Connect
-from tgp.imports import is_torch_sparse_tensor
+from tgp.imports import is_sparsetensor
 from tgp.select import SelectOutput
 from tgp.utils.ops import (
     connectivity_to_edge_index,
@@ -68,7 +68,7 @@ class KronConnect(Connect):
             returns :obj:`None` as the edge weights.
         """
         # Remember the original input type to preserve output format
-        edge_index_is_sparsetensor = is_torch_sparse_tensor(edge_index)
+        edge_index_is_sparsetensor = is_sparsetensor(edge_index)
         edge_index_is_torch_coo = (
             isinstance(edge_index, Tensor) and edge_index.is_sparse
         )

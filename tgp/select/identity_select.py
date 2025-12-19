@@ -5,7 +5,7 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
-from tgp.imports import is_torch_sparse_tensor
+from tgp.imports import is_sparsetensor
 from tgp.select import Select, SelectOutput
 
 
@@ -13,7 +13,7 @@ def get_device(
     x: Optional[Tensor] = None, edge_index: Optional[Adj] = None
 ) -> torch.device:
     if edge_index is not None:
-        if is_torch_sparse_tensor(edge_index):
+        if is_sparsetensor(edge_index):
             return edge_index.device()
         else:
             return edge_index.device
