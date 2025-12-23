@@ -18,7 +18,7 @@ def simple_graph():
     E = edge_index.size(1)
 
     x = torch.randn((N, F), dtype=torch.float)
-    edge_weight = torch.ones((E, 1), dtype=torch.float)
+    edge_weight = torch.ones(E, dtype=torch.float)
     edge_index, edge_weight = add_self_loops(
         edge_index, edge_attr=edge_weight, num_nodes=N
     )

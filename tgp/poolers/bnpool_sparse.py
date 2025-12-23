@@ -202,7 +202,7 @@ class SparseBNPool(SRCPooling):
 
             # Connect
             edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj, so=so, edge_weight=edge_weight
+                edge_index=adj, so=so, edge_weight=edge_weight, batch=batch
             )
 
             out = PoolingOutput(

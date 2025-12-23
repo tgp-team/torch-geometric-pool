@@ -157,6 +157,7 @@ class LaPooling(SRCPooling):
                 edge_index=adj,
                 so=so,
                 edge_weight=edge_weight,
+                batch=batch,
                 batch_pooled=batch_pooled,
             )
 
