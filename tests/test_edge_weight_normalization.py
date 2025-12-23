@@ -336,14 +336,29 @@ class TestEdgeWeightNormalization:
 
         # Test without normalization
         connector = DenseConnectSPT(edge_weight_norm=False)
-        adj_orig, _ = connector(batch_data.edge_index, batch_data.edge_weight, so)
+        adj_orig, edge_weight_orig = connector(
+            edge_index=batch_data.edge_index,
+            edge_weight=batch_data.edge_weight,
+            batch=batch_data.batch,
+            so=so,
+        )
 
         # Test with normalization
         connector_norm = DenseConnectSPT(edge_weight_norm=True)
-        adj_norm, _ = connector_norm(
-            batch_data.edge_index, batch_data.edge_weight, so, batch_pooled=batch_pooled
+        adj_norm, edge_weight_norm = connector_norm(
+            edge_index=batch_data.edge_index,
+            edge_weight=batch_data.edge_weight,
+            batch=batch_data.batch,
+            so=so,
+            batch_pooled=batch_pooled,
         )
 
+        adj_orig = SparseTensor.from_edge_index(
+            edge_index=adj_orig, edge_attr=edge_weight_orig
+        )
+        adj_norm = SparseTensor.from_edge_index(
+            edge_index=adj_norm, edge_attr=edge_weight_norm
+        )
         # Check normalization
         if isinstance(adj_norm, SparseTensor):
             _, _, values = adj_norm.coo()

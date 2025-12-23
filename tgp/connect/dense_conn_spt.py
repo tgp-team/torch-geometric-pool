@@ -3,12 +3,13 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
+from torch_geometric.utils import unbatch, unbatch_edge_index
 from torch_scatter import scatter
 from torch_sparse import SparseTensor
 
 from tgp.connect import Connect
 from tgp.select import SelectOutput
-from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
+from tgp.utils import connectivity_to_edge_index, connectivity_to_sparse_tensor
 
 
 class DenseConnectSPT(Connect):
@@ -50,6 +51,7 @@ class DenseConnectSPT(Connect):
         self,
         edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
         so: SelectOutput = None,
         batch_pooled: Optional[Tensor] = None,
         **kwargs,
@@ -66,6 +68,9 @@ class DenseConnectSPT(Connect):
             edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
                 containing the weights of the edges.
                 (default: :obj:`None`)
+            batch (~torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
+                to which graph in the batch each node belongs. (default: :obj:`None`)
             so (~tgp.select.SelectOutput):
                 The output of the :math:`\texttt{select}` operator.
             batch_pooled (~torch.Tensor, optional):
@@ -84,14 +89,87 @@ class DenseConnectSPT(Connect):
                 "edge_weight_norm=True but batch_pooled=None. "
                 "batch_pooled parameter is required for per-graph normalization in DenseConnectSPT."
             )
-        if isinstance(edge_index, SparseTensor):
-            adj_pooled = so.s.t() @ edge_index @ so.s
-        elif isinstance(edge_index, Tensor):
-            edge_weight = check_and_filter_edge_weights(edge_weight)
-            adj_spt = SparseTensor.from_edge_index(
-                edge_index, edge_weight, sparse_sizes=(so.s.size(0), so.s.size(0))
-            )
-            adj_pooled = so.s.t() @ adj_spt @ so.s
+
+        convert_back = False
+
+        if isinstance(edge_index, (SparseTensor, Tensor)):
+            if isinstance(edge_index, Tensor):
+                convert_back = True
+
+            BS = 1 if batch is None else batch.max().item() + 1
+
+            if BS == 1:
+                # we canno use the for computation, we compute it as before
+                adj = connectivity_to_sparse_tensor(
+                    edge_index, edge_weight
+                ).to_torch_sparse_coo_tensor()
+                sos = so.s.to_torch_sparse_coo_tensor()
+                temp = torch.sparse.mm(sos.transpose(-1, -2), adj)
+                adj_pooled = torch.sparse.mm(temp, sos)
+                adj_pooled = SparseTensor.from_torch_sparse_coo_tensor(adj_pooled)
+            else:
+                # we iterate over the block diagonal structure
+
+                # transform in edge_index representation
+                edge_index, edge_weight = connectivity_to_edge_index(
+                    edge_index, edge_weight
+                )
+                E = edge_index.size(1)
+                dev = edge_index.device
+
+                if edge_weight is None:
+                    edge_weight = torch.ones(E, device=dev)
+
+                sos = (
+                    so.s.to_torch_sparse_coo_tensor()
+                )  # this is sparse and has shape N x (BS*K)
+                K = sos.size(1) // BS
+                vals = sos._values()
+                idx = sos._indices()
+                idx[1] = idx[1] % K
+                s = torch.sparse_coo_tensor(indices=idx, values=vals).to_dense()
+                # assert s.is_coalesced()
+                # s=s.to_dense()
+
+                unbatched_s = unbatch(s, batch=batch)
+                unbatched_adj = unbatch_edge_index(edge_index, batch=batch)
+
+                out_list = []
+                cont = 0
+                for i in range(len(unbatched_s)):
+                    unb_adj_i = unbatched_adj[i]
+                    E_i = unb_adj_i.shape[-1]
+                    vals = edge_weight[cont : cont + E_i]
+                    cont += E_i
+
+                    sp_unb_adj = torch.sparse_coo_tensor(
+                        indices=unb_adj_i,
+                        values=vals,
+                    )
+                    unb_s = unbatched_s[i]
+                    temp = sp_unb_adj @ unb_s
+                    out = unb_s.t() @ temp
+                    out_list.append(out)
+
+                new_vals = torch.stack(out_list, dim=0)
+                zero_mask = torch.logical_not(
+                    torch.isclose(new_vals, torch.tensor(0.0, device=dev))
+                ).view(-1)
+                new_vals = new_vals.view(-1)[zero_mask]
+                aux = (torch.arange(BS, device=dev) * K).view(-1, 1) + torch.arange(
+                    K, device=dev
+                )
+                new_rows = (
+                    aux.view(-1, K).repeat_interleave(K, dim=-1).view(-1)[zero_mask]
+                )
+                new_cols = aux.view(-1, K).repeat(1, K).view(-1)[zero_mask]
+
+                adj_pooled = torch.sparse_coo_tensor(
+                    values=new_vals,
+                    indices=torch.stack([new_rows, new_cols], dim=0),
+                ).coalesce()
+
+                adj_pooled = SparseTensor.from_torch_sparse_coo_tensor(adj_pooled)
         else:
             raise ValueError(
                 f"Edge index must be of type {Adj}, got {type(edge_index)}"
@@ -141,7 +219,7 @@ class DenseConnectSPT(Connect):
             ).coalesce()
 
         # Convert back to edge index if needed
-        if isinstance(edge_index, Tensor):
+        if convert_back:
             adj_pooled, edge_weight = connectivity_to_edge_index(
                 adj_pooled, edge_weight
             )

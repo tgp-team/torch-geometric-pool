@@ -1,8 +1,9 @@
 import pytest
 import torch
 from scipy.sparse import csr_matrix
-from torch_geometric.data import Data
-from torch_geometric.utils import add_self_loops
+from torch import Tensor
+from torch_geometric.data import Batch, Data
+from torch_geometric.utils import add_self_loops, to_undirected
 from torch_sparse import SparseTensor
 
 from tgp.connect import (
@@ -16,6 +17,7 @@ from tgp.reduce import BaseReduce
 from tgp.select import SelectOutput, TopkSelect
 from tgp.select.kmis_select import KMISSelect
 from tgp.src import SRCPooling
+from tgp.utils import connectivity_to_sparse_tensor
 
 
 def test_connect_repr():
@@ -51,6 +53,81 @@ def test_sparse_connect_raises_runtime_error():
             edge_weight=edge_weight,
             so=so,
         )
+
+
+def test_denseconn_spt_with_batch():
+    """Test the behavior of DenseConnectSPT with batch and remove_self_loops=False and degree_norm=False."""
+    K = 4
+    BS = 3
+    connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
+    a = torch.tensor([1, 0, 0, 0], dtype=torch.float)
+    b = torch.tensor([0, 1, 0, 0], dtype=torch.float)
+    c = torch.tensor([0, 0, 1, 0], dtype=torch.float)
+    d = torch.tensor([0, 0, 0, 1], dtype=torch.float)
+
+    s1 = torch.stack([a, a, a], dim=0)
+    s2 = torch.stack([b, c, b, b, c, b], dim=0)
+    s3 = torch.stack([d, d, d, d], dim=0)
+    my_batch = torch.tensor([0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2], dtype=torch.long)
+    dense_s = torch.cat([s1, s2, s3], dim=0)
+    row = torch.arange(dense_s.size(0)).view(-1, 1).repeat(1, K).view(-1)
+    col = (K * my_batch.view(-1, 1) + torch.arange(K)).view(-1)
+    s = SparseTensor(row=row, col=col, value=dense_s.view(-1))
+
+    so = SelectOutput(s=s)
+
+    e1 = to_undirected(
+        torch.tensor(data=[[0, 1, 1, 0], [1, 0, 1, 2]], dtype=torch.long)
+    )
+    e2 = to_undirected(
+        torch.tensor(
+            data=[[0, 1, 2, 2, 3, 3, 4], [1, 2, 3, 4, 4, 5, 5]], dtype=torch.long
+        )
+    )
+    e3 = to_undirected(
+        torch.tensor(data=[[0, 0, 0, 1, 1, 2], [1, 2, 3, 2, 3, 3]], dtype=torch.long)
+    )
+
+    d1 = Data(edge_index=e1, edge_weight=torch.rand(e1.size(1), dtype=torch.float))
+    d2 = Data(edge_index=e2, edge_weight=torch.rand(e2.size(1), dtype=torch.float))
+    d3 = Data(edge_index=e3, edge_weight=torch.rand(e3.size(1), dtype=torch.float))
+
+    b = Batch.from_data_list([d1, d2, d3])
+    batch = b.batch
+    assert torch.all(b.batch == my_batch)
+
+    edge_index = b.edge_index
+    edge_weight = b.edge_weight
+
+    # check with SparseTensor as Input
+    adj = connectivity_to_sparse_tensor(edge_index, edge_weight)
+    adj_pool, _ = connector(edge_index=adj, edge_weight=None, batch=batch, so=so)
+
+    # check if it is a SparseTensor
+    assert isinstance(adj_pool, SparseTensor)
+    # check if the size is correct
+    assert adj_pool.size(0) == adj_pool.size(0) == K * BS
+    # check if the sum is ok
+    adj_pool = adj_pool.to_dense()
+    assert torch.isclose(d1.edge_weight.sum(), adj_pool[0, 0].sum())
+    assert torch.isclose(d2.edge_weight.sum(), adj_pool[5:7, 5:7].sum())
+    assert torch.isclose(d3.edge_weight.sum(), adj_pool[-1, -1].sum())
+
+    # check with edge_index as Input
+    edge_index_pool, edge_weight_pool = connector(
+        edge_index=edge_index, edge_weight=edge_weight, batch=batch, so=so
+    )
+
+    # check if it is a SparseTensor
+    assert isinstance(edge_index_pool, Tensor)
+    assert isinstance(edge_weight_pool, Tensor)
+    # check the size is correct
+    assert edge_index_pool.size(1) == 5
+    # check if the sum is ok
+    assert torch.isclose(d1.edge_weight.sum(), edge_weight_pool[0].sum())
+    assert torch.isclose(d2.edge_weight.sum(), edge_weight_pool[1:-1].sum())
+    assert torch.isclose(d3.edge_weight.sum(), edge_weight_pool[-1].sum())
+    # check if the sum is ok
 
 
 def test_denseconn_spt():
