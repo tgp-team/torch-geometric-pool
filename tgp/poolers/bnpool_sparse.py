@@ -338,4 +338,6 @@ class SparseBNPool(SRCPooling):
     def get_prob_link_logit(self, node_assignment, edges_list):
         left = node_assignment[edges_list[0]]  # E x K
         right = node_assignment[edges_list[1]]  # E x K
-        return torch.einsum("ei, ej, ij -> e", left, right, self.K)
+        aux = left @ self.K  # E x K
+        return (aux * right).sum(-1)
+        # return torch.einsum("ei, ej, ij -> e", left, right, self.K)
