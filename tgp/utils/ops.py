@@ -70,7 +70,7 @@ def connectivity_to_torch_coo(
             return torch.sparse_coo_tensor(
                 edge_index, edge_weight, (num_nodes, num_nodes)
             ).coalesce()
-    else:  # SparseTensor
+    elif is_sparsetensor(edge_index):
         row, col, value = edge_index.coo()
         indices = torch.stack([row, col], dim=0)
         if value is None:
@@ -78,6 +78,8 @@ def connectivity_to_torch_coo(
         return torch.sparse_coo_tensor(
             indices, value, (num_nodes, num_nodes)
         ).coalesce()
+    else:
+        raise ValueError("Edge index must be a Tensor or SparseTensor.")
 
 
 def connectivity_to_sparsetensor(
@@ -307,7 +309,7 @@ def delta_gcn_matrix(
         return edge_index_out, edge_weight_out
 
 
-def create_one_hot_tensor(num_nodes, kept_node_tensor, device):
+def create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=None):
     """Create one-hot encoding tensor for node assignments.
 
     Args:
@@ -323,8 +325,10 @@ def create_one_hot_tensor(num_nodes, kept_node_tensor, device):
         kept_node_tensor = kept_node_tensor.unsqueeze(0)
 
     num_kept = kept_node_tensor.size(0)
-    tensor = torch.zeros(num_nodes, num_kept + 1, device=device)
-    tensor[kept_node_tensor, 1:] = torch.eye(num_kept, device=device)
+    if dtype is None:
+        dtype = torch.float32
+    tensor = torch.zeros(num_nodes, num_kept + 1, device=device, dtype=dtype)
+    tensor[kept_node_tensor, 1:] = torch.eye(num_kept, device=device, dtype=dtype)
     return tensor
 
 
@@ -366,8 +370,8 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
     return mappa
 
 
-def get_sparse_map_mask(x, edge_index, kept_node_tensor, mask):
-    """Compute sparse assignment mapping using message passing (torch COO version).
+def get_sparse_map_mask(x, sparse_adj, kept_node_tensor, mask):
+    """Compute sparse assignment mapping using message passing.
 
     Args:
         x (Tensor): Node features/assignments
@@ -381,15 +385,7 @@ def get_sparse_map_mask(x, edge_index, kept_node_tensor, mask):
             - Tensor: Node assignment mapping
             - Tensor: Updated assignment mask
     """
-    # Convert edge_index to torch COO sparse tensor
-    num_nodes = x.size(0)
-    edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
-    sparse_ei = torch.sparse_coo_tensor(
-        edge_index, edge_weight, size=(num_nodes, num_nodes)
-    ).coalesce()
-
-    # Use torch.sparse.mm for matrix multiplication
-    y = torch.sparse.mm(sparse_ei, x)  # propagation step
+    y = torch.sparse.mm(sparse_adj, x)  # propagation step
 
     first_internal_mask = torch.logical_not(
         mask
@@ -515,14 +511,30 @@ def get_assignments(
         # Clone edge_index to avoid modifying the original
         edge_index = edge_index.clone()
 
+        dtype = torch.float16 if device.type == "cuda" else torch.float32
+        sparse_adj = None
+        if isinstance(edge_index, Tensor) and edge_index.is_sparse:
+            sparse_adj = edge_index
+            if sparse_adj.dtype != dtype:
+                sparse_adj = sparse_adj.to(dtype=dtype)
+        else:
+            edge_weight = torch.ones(
+                edge_index.size(1), device=edge_index.device, dtype=dtype
+            )
+            sparse_adj = torch.sparse_coo_tensor(
+                edge_index, edge_weight, size=(num_nodes, num_nodes)
+            ).coalesce()
+        if hasattr(sparse_adj, "to_sparse_csr"):
+            sparse_adj = sparse_adj.to_sparse_csr()
+
         # Initialize one-hot tensor for propagation
-        x = create_one_hot_tensor(num_nodes, kept_node_tensor, device)
+        x = create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=dtype)
 
         # Iterative assignment through message passing
         for _ in range(max_iter):
             if mask.all():  # All nodes assigned
                 break
-            x, _map, mask = get_sparse_map_mask(x, edge_index, kept_node_tensor, mask)
+            x, _map, mask = get_sparse_map_mask(x, sparse_adj, kept_node_tensor, mask)
             maps_list.append(_map)
 
     # Randomly assign any remaining unassigned nodes
