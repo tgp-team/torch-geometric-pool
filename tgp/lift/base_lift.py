@@ -1,5 +1,5 @@
-import torch
 from torch import Tensor, nn
+from torch_geometric.utils import scatter
 
 from tgp.select import SelectOutput
 from tgp.utils import pseudo_inverse
@@ -112,7 +112,21 @@ class BaseLift(Lift):
             )
 
         if s_inv.is_sparse:
-            x_prime = torch.sparse.mm(s_inv, x_pool)
+            row, col = s_inv.indices()
+            values = s_inv.values()
+            src = x_pool[col]
+            if values is not None:
+                src = src * values.view(-1, 1)
+            reduce = "any" if self.reduce_op == "any" else self.reduce_op
+            if reduce == "any":
+                src = src.bool()
+            x_prime = scatter(
+                src,
+                row,
+                dim=0,
+                dim_size=s_inv.size(0),
+                reduce=reduce,
+            )
         else:
             x_prime = s_inv.matmul(x_pool)
 
