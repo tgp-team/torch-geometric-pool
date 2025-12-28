@@ -56,33 +56,39 @@ def test_edge_index_to_vector_and_vice_versa(set_random_seed):
     assert edge_index.tolist() == edge_index3.tolist()
 
 
-def test_negative_edge_sampling(set_random_seed):
+def test_dense_negative_edge_sampling(set_random_seed):
     edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
 
-    neg_edge_index = negative_edge_sampling(edge_index)
+    neg_edge_index = negative_edge_sampling(edge_index, method="dense")
     assert neg_edge_index.size(1) == edge_index.size(1)
     assert is_negative(edge_index, neg_edge_index, (4, 4), bipartite=False)
 
-    neg_edge_index = negative_edge_sampling(edge_index, num_neg_samples=2)
+    neg_edge_index = negative_edge_sampling(
+        edge_index, method="dense", num_neg_samples=2
+    )
     assert neg_edge_index.size(1) == 2
     assert is_negative(edge_index, neg_edge_index, (4, 4), bipartite=False)
 
     edge_index = to_undirected(edge_index)
-    neg_edge_index = negative_edge_sampling(edge_index, force_undirected=True)
+    neg_edge_index = negative_edge_sampling(
+        edge_index, method="dense", force_undirected=True
+    )
     assert neg_edge_index.size(1) == edge_index.size(1) - 1
     assert is_undirected(neg_edge_index)
     assert is_negative(edge_index, neg_edge_index, (4, 4), bipartite=False)
 
 
-def test_bipartite_negative_edge_sampling(set_random_seed):
+def test_dense_bipartite_negative_edge_sampling(set_random_seed):
     edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
 
-    neg_edge_index = negative_edge_sampling(edge_index, num_nodes=(3, 4))
+    neg_edge_index = negative_edge_sampling(
+        edge_index, method="dense", num_nodes=(3, 4)
+    )
     assert neg_edge_index.size(1) == edge_index.size(1)
     assert is_negative(edge_index, neg_edge_index, (3, 4), bipartite=True)
 
     neg_edge_index = negative_edge_sampling(
-        edge_index, num_nodes=(3, 4), num_neg_samples=2
+        edge_index, num_nodes=(3, 4), num_neg_samples=2, method="dense"
     )
     assert neg_edge_index.size(1) == 2
     assert is_negative(edge_index, neg_edge_index, (3, 4), bipartite=True)
@@ -90,7 +96,7 @@ def test_bipartite_negative_edge_sampling(set_random_seed):
 
 def test_negative_edge_sampling_with_different_edge_density(set_random_seed):
     for num_nodes in [10, 100, 1000]:
-        for p in [0.1, 0.3, 0.5, 0.8]:
+        for p in [0.1, 0.3, 0.5, 0.7, 0.9]:
             for is_directed in [False, True]:
                 edge_index = erdos_renyi_graph(num_nodes, p, is_directed)
                 neg_edge_index = negative_edge_sampling(

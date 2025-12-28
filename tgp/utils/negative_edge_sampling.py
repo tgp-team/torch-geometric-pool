@@ -11,7 +11,8 @@ from torch_geometric.utils import (
 )
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
-_MAX_NUM_EDGES = 10**4
+_MIN_PROB_EDGES = 0.5  # 50%
+_MAX_PROB_EDGES = 2 / 3  # 66%
 
 
 def negative_edge_sampling(
@@ -77,7 +78,7 @@ def negative_edge_sampling(
     num_tot_edges = size[0] * size[1]
 
     if num_neg_samples is None:
-        num_neg_samples = num_edges
+        num_neg_samples = min(num_edges, num_tot_edges - num_edges)
 
     if force_undirected:
         num_neg_samples = num_neg_samples // 2
@@ -86,28 +87,31 @@ def negative_edge_sampling(
     edge_id = edge_index_to_vector_id(edge_index, size)
     edge_id, _ = index_sort(edge_id, max_value=num_tot_edges)
 
-    method = get_method(method, size)
+    # probability to randomly pick a negative edge
+    prob_neg_edges = 1 - (num_edges / num_tot_edges)
+    method = get_method(method, prob_neg_edges)
 
     k = None
-    prob = 1 - (num_edges / num_tot_edges)
     if method == "sparse":
-        if prob >= 0.3:
+        if prob_neg_edges >= _MIN_PROB_EDGES:
             # the probability of sampling non-existing edge is high,
             # so the sparse method should be ok
-            k = max(int(1.5 * num_neg_samples), int(num_neg_samples / (prob - 0.1)))
+            if prob_neg_edges <= _MAX_PROB_EDGES:
+                k = int(1.5 * num_neg_samples)
+                warnings.warn(
+                    "The probability of sampling a negative edge is low! "
+                    "It could be that the number of sampled edges is smaller!"
+                )
+            else:
+                k = int(num_neg_samples / prob_neg_edges)
         else:
-            # the probability is too low, but the graph is too big
-            # for the exact sampling.
-            # we perform the sparse sampling but we raise a warning
-            k = int(
-                min(10 * num_neg_samples, max(num_neg_samples / (prob - 0.1), 10**-3))
-            )
-
+            # the probability is too low, but sparse has been requsted!
             warnings.warn(
-                "The probability of sampling a negative edge is too low! "
-                "It could be that the number of sampled edges is smaller "
-                "than the numbers you required!"
+                f"The probability of sampling a negative edge is too low (less than {100 * _MIN_PROB_EDGES:0.0f}%)!"
+                "Consider using dense sampling since O(E) is near to O(N^2), "
+                "and there is little/no memory advantage in using a sparse method!"
             )
+            k = int(2 * num_neg_samples)
 
     guess_edge_index, guess_edge_id = sample_almost_k_edges(
         size,
@@ -138,7 +142,7 @@ def batched_negative_edge_sampling(
     edge_index: Tensor,
     batch: Union[Tensor, Tuple[Tensor, Tensor]],
     num_neg_samples: Optional[int] = None,
-    method: str = "sparse",
+    method: str = "auto",
     force_undirected: bool = False,
 ) -> Tensor:
     r"""Samples random negative edges of multiple graphs given by
@@ -231,18 +235,10 @@ def batched_negative_edge_sampling(
 ###############################################################################
 
 
-def get_method(method: str, size: Tuple[int, int]) -> str:
-    # select the method
-    tot_num_edges = size[0] * size[1]
-    # prefer dense method if the graph is small
-    auto_method = "dense" if tot_num_edges < _MAX_NUM_EDGES else "sparse"
+def get_method(method: str, prob_neg_edges: float) -> str:
+    # prefer the dense method if the graph is small
+    auto_method = "dense" if prob_neg_edges < _MIN_PROB_EDGES else "sparse"
     method = auto_method if method == "auto" else method
-
-    if method == "dense" and tot_num_edges >= _MAX_NUM_EDGES:
-        warnings.warn(
-            f"You choose the dense method on a graph with {tot_num_edges} "
-            f"possible edges! It could require a lot of memory!"
-        )
 
     return method
 
@@ -257,17 +253,18 @@ def sample_almost_k_edges(
 ) -> Tuple[Tensor, Tensor]:
     assert method in ["sparse", "dense"]
     N1, N2 = size
-
+    tot_edges = N1 * N2
     if method == "sparse":
         assert k is not None
         k = 2 * k if force_undirected else k
-        p = torch.tensor([1.0], device=device).expand(N1 * N2)
-        if k > N1 * N2:
-            k = N1 * N2
-        new_edge_id = torch.multinomial(p, k, replacement=False)
+        if k > tot_edges:
+            k = tot_edges
 
+        new_edge_id = torch.randint(tot_edges, (k,), device=device)
+        # remove duplicates
+        new_edge_id = torch.unique(new_edge_id)
     else:
-        new_edge_id = torch.randperm(N1 * N2, device=device)
+        new_edge_id = torch.randperm(tot_edges, device=device)
 
     new_edge_index = torch.stack(vector_id_to_edge_index(new_edge_id, size), dim=0)
 
