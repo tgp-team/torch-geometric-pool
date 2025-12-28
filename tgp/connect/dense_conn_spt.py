@@ -138,15 +138,19 @@ class DenseConnectSPT(Connect):
                 cont = 0
                 for i in range(len(unbatched_s)):
                     unb_adj_i = unbatched_adj[i]
+                    unb_s = unbatched_s[i]
                     E_i = unb_adj_i.shape[-1]
+                    N_i = unb_s.shape[0]
+
                     vals = edge_weight[cont : cont + E_i]
                     cont += E_i
 
                     sp_unb_adj = torch.sparse_coo_tensor(
                         indices=unb_adj_i,
                         values=vals,
+                        size=(N_i, N_i),
                     )
-                    unb_s = unbatched_s[i]
+
                     temp = sp_unb_adj @ unb_s
                     out = unb_s.t() @ temp
                     out_list.append(out)
