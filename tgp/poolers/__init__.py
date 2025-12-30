@@ -38,7 +38,8 @@ pooler_classes = [
     "NoPool",
     "PANPooling",
     "SAGPooling",
-    "SparseBNPoolTopkPooling",
+    "SparseBNPool",
+    "TopkPooling",
 ]
 
 pooler_map = {
