@@ -15,7 +15,7 @@ dataset = Planetoid(root="data/Planetoid", name="Cora")
 data = dataset[0]
 
 for POOLER, value in pooler_map.items():  # Use all poolers
-    # for POOLER in ['mincut']:                 # Test a specific pooler
+    # for POOLER in ['bnpool']:                 # Test a specific pooler
 
     print(f"Using pooler: {POOLER}")
 
@@ -35,6 +35,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "scorer": "degree",
             "reduce": "sum",
             "edge_weight_norm": False,
+            "degree_norm": True,
         }
 
         #### Model definition
@@ -55,7 +56,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 print(self.pooler)
                 self.pooler.reset_parameters()
 
-                if self.pooler.is_dense:
+                if self.pooler.is_dense_batched:
                     self.conv_pool = DenseGCNConv(hidden_channels, hidden_channels // 2)
                     self.conv_dec = DenseGCNConv(
                         hidden_channels // 2, dataset.num_classes
@@ -82,10 +83,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                     edge_index=edge_index, x=x, batch=batch, use_cache=True
                 )
                 out = self.pooler(x=x, adj=edge_index, batch=batch, mask=mask)
-                x_pool, adj_pool = (
-                    out.x,
-                    out.edge_index,
-                )
+                x_pool, adj_pool = (out.x, out.edge_index)
 
                 # Bottleneck
                 x_pool = self.conv_pool(x_pool, adj_pool)
@@ -93,10 +91,12 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 x_pool = F.dropout(x_pool, p=self.dropout, training=self.training)
 
                 # Decoder
-                x_lift = self.pooler(x=x_pool, so=out.so, lifting=True)
+                x_lift = self.pooler(
+                    x=x_pool, so=out.so, lifting=True, batch_pooled=out.batch
+                )
                 x = self.conv_dec(x_lift, edge_index)
 
-                if self.pooler.is_dense:
+                if self.pooler.is_dense_batched:
                     x = x[0]
                 if out.loss is not None:
                     return F.log_softmax(x, dim=-1), sum(out.get_loss_value())
@@ -110,7 +110,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=5e-4)
 
-        def train():
+        def train(epoch):
             model.train()
             optimizer.zero_grad()
             out, aux_loss = model(data.x, data.edge_index, data.edge_weight, data.batch)
@@ -136,7 +136,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
         ### Training loop
         start_time = time.time()
         for epoch in range(1, 11):
-            loss = train()
+            loss = train(epoch)
             train_acc, val_acc, test_acc = test()
             print(
                 f"Epoch: {epoch:03d}, "

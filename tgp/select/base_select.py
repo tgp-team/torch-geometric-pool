@@ -75,6 +75,7 @@ class SelectOutput:
 
     s: Union[SparseTensor, Tensor]
     s_inv: Union[SparseTensor, Tensor] = None
+    batch: Optional[Tensor] = None
 
     def __init__(
         self,
@@ -86,6 +87,7 @@ class SelectOutput:
         num_supernodes: int = None,
         weight: Optional[Tensor] = None,
         s_inv_op: Optional[str] = "transpose",
+        batch: Optional[Tensor] = None,
         **extra_args,
     ):
         super().__init__()
@@ -138,6 +140,8 @@ class SelectOutput:
         if s_inv is None:
             self.set_s_inv(s_inv_op)
 
+        self.batch = batch
+
         self._extra_args = set()
         for k, v in extra_args.items():
             setattr(self, k, v)
@@ -165,6 +169,18 @@ class SelectOutput:
     @property
     def is_sparse(self) -> bool:
         return isinstance(self.s, SparseTensor)
+
+    @property
+    def is_dense(self) -> bool:
+        return isinstance(self.s, Tensor)
+
+    @property
+    def is_dense_unbatched(self) -> bool:
+        return self.is_dense and self.s.dim() == 2
+
+    @property
+    def is_dense_batched(self) -> bool:
+        return isinstance(self.s, Tensor) and self.s.dim() == 3
 
     @property
     def num_nodes(self) -> int:
@@ -223,17 +239,26 @@ class SelectOutput:
         r"""Performs tensor dtype and/or device conversion for both :obj:`s` and
         :obj:`s_inv`.
         """
-        return self.apply(lambda x: x.to(device=device, non_blocking=non_blocking))
+        self.apply(lambda x: x.to(device=device, non_blocking=non_blocking))
+        if self.batch is not None:
+            self.batch = self.batch.to(device=device, non_blocking=non_blocking)
+        return self
 
     def cpu(self) -> "SelectOutput":
         r"""Copies attributes to CPU memory for both :obj:`s` and :obj:`s_inv`."""
-        return self.apply(lambda x: x.cpu())
+        self.apply(lambda x: x.cpu())
+        if self.batch is not None:
+            self.batch = self.batch.cpu()
+        return self
 
     def cuda(
         self, device: Optional[Union[int, str]] = None, non_blocking: bool = False
     ) -> "SelectOutput":
         r"""Copies attributes to CUDA memory for both :obj:`s` and :obj:`s_inv`."""
-        return self.apply(lambda x: x.cuda(device, non_blocking=non_blocking))
+        self.apply(lambda x: x.cuda(device, non_blocking=non_blocking))
+        if self.batch is not None:
+            self.batch = self.batch.cuda(device, non_blocking=non_blocking)
+        return self
 
     def detach_(self) -> "SelectOutput":
         r"""Detaches attributes from the computation graph for both :obj:`s`
@@ -367,7 +392,7 @@ class Select(torch.nn.Module):
     supernode assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{N \times K}`.
     """
 
-    is_dense: bool = False
+    is_dense_batched: bool = False
 
     def reset_parameters(self):
         pass

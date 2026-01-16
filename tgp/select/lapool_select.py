@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import get_laplacian, to_scipy_sparse_matrix
-from torch_scatter import scatter_add, scatter_mul
+from torch_scatter import scatter_mul
 from torch_sparse import SparseTensor, spmm
 
 from tgp.select import Select, SelectOutput
@@ -13,56 +13,56 @@ from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
-def sparse_cosine_similarity(x, n_nodes, mask, batch):
-    """Compute a block-diagonal sparse cosine similarity matrix.
-    Each entry (n, k) is the cosine similarity between node n and leader k.
+def dense_cosine_similarity(x, n_nodes, mask, batch):
+    r"""Computes a dense block-diagonal cosine similarity matrix.
+
+    This method calculates the cosine similarity between each node and the identified leaders.
+    Only similarities between nodes belonging to the same graph are considered valid.
+
+    Args:
+        x (Tensor): The node feature matrix of shape :math:`[N, F]`, where :math:`N` is the number of nodes
+                    and :math:`F` is the number of features.
+        n_nodes (int): The total number of nodes in the batch.
+        mask (Tensor): A boolean mask of shape :math:`[N]` indicating which nodes are leaders.
+        batch (Tensor, optional): A vector of shape :math:`[N]` indicating the graph each node belongs to.
+
+    Returns:
+        Tensor: A dense cosine similarity matrix of shape :math:`[N, K]`, where :math:`K` is the number of leaders.
     """
     device = x.device
-    mask_int = mask.int()
+    eps = 1e-8
 
     if batch is None:
         batch = torch.zeros(n_nodes, dtype=torch.int64, device=device)
 
-    # Calculate nodes per graph and leader counts per graph
-    ones = torch.ones_like(batch, dtype=torch.int64, device=device)
-    ns = scatter_add(ones, batch, dim=0)  # number of nodes per graph
-    ks = scatter_add(mask_int, batch, dim=0)  # number of leaders per graph
-
-    # Compute starting index for each graph's nodes
-    starts = torch.cumsum(ns, dim=0) - ns
-
-    # Repeat start indices and node counts for each leader in each graph
-    starts_rep = torch.repeat_interleave(starts, ks)
-    ns_rep = torch.repeat_interleave(ns, ks)
-
-    # Create indices for nodes in each leader block using a vectorized ragged range
-    max_ns = ns_rep.max()
-    r = torch.arange(max_ns, device=device).unsqueeze(0).expand(len(ns_rep), max_ns)
-    valid = r < ns_rep.unsqueeze(1)
-    index_n = (starts_rep.unsqueeze(1) + r)[valid]
-
-    # Prepare leader block indices for the sparse tensor
-    total_leaders = int(ks.sum().item())
-    leader_ids = torch.arange(total_leaders, device=device)
-    repeats = torch.repeat_interleave(ns, ks)
-    index_k_for_s = torch.repeat_interleave(leader_ids, repeats)
-
-    # Map each leader block to its global leader index
+    # Get all leader indices
     global_leader_idx = torch.nonzero(mask, as_tuple=True)[0]
-    index_k = torch.repeat_interleave(global_leader_idx, repeats)
 
-    # Compute cosine similarities
-    x_n = x[index_n]
-    x_k = x[index_k]
-    eps = 1e-8
-    cos_vals = (x_n * x_k).sum(dim=-1) / (x_n.norm(dim=-1) * x_k.norm(dim=-1) + eps)
+    # Get leader features
+    x_leaders = x[global_leader_idx]  # [K, F]
 
-    # Build and return the sparse cosine similarity matrix
-    indices = torch.stack([index_n, index_k_for_s], dim=0)
-    sim = torch.sparse_coo_tensor(
-        indices, cos_vals, size=(n_nodes, total_leaders), device=device
-    )
-    return sim.coalesce()
+    # Compute cosine similarity between all nodes and all leaders
+    # Use broadcasting: x is [N, F], x_leaders is [K, F]
+    # We want to compute similarity for each (n, k) pair
+    dot_product = x @ x_leaders.t()  # [N, K]
+    node_norms = x.norm(dim=-1, keepdim=True)  # [N, 1]
+    leader_norms = x_leaders.norm(dim=-1, keepdim=True).t()  # [1, K]
+
+    # Compute cosine similarity
+    cosine_sim = dot_product / (node_norms * leader_norms + eps)  # [N, K]
+
+    # Zero out similarities between nodes and leaders from different graphs
+    # Create a mask where cosine_sim[i, j] is valid only if batch[i] == batch[global_leader_idx[j]]
+    batch_nodes = batch.unsqueeze(1)  # [N, 1]
+    batch_leaders = batch[global_leader_idx].unsqueeze(0)  # [1, K]
+    same_graph_mask = batch_nodes == batch_leaders  # [N, K]
+
+    # Ensure nodes are only assigned to leaders within the same graph.
+    # Using -inf guarantees that softmax produces exactly zero probability mass
+    # for leaders belonging to different graphs.
+    cosine_sim = cosine_sim.masked_fill(~same_graph_mask, float("-inf"))
+
+    return cosine_sim
 
 
 class LaPoolSelect(Select):
@@ -176,61 +176,53 @@ class LaPoolSelect(Select):
                 leader_check, row, dim=0, dim_size=num_nodes
             ).bool()
 
-        # Compute sparse cosine similarity
-        cosine_similarity = sparse_cosine_similarity(x, num_nodes, leader_mask, batch)
+        # Compute dense cosine similarity directly
+        cosine_similarity_dense = dense_cosine_similarity(
+            x, num_nodes, leader_mask, batch
+        )
 
         # Shortest path regularization
         if self.shortest_path_reg:
             # Compute shortest path distances and corresponding beta regularization matrix
             sp_matrix = to_scipy_sparse_matrix(edge_index).tocsr()
             shortest_path = torch.tensor(
-                csgraph.shortest_path(sp_matrix, directed=False), dtype=torch.float32
+                csgraph.shortest_path(sp_matrix, directed=False),
+                dtype=torch.float32,
+                device=x.device,
             )
             beta = torch.zeros_like(shortest_path, dtype=torch.float32)
             nonzero = shortest_path != 0
             beta[nonzero] = 1 / shortest_path[nonzero]
 
-            # Select beta columns corresponding to leaders and match shape with cosine_similarity
-            beta = (
-                beta[:, leader_mask]
-                .to(dtype=cosine_similarity.dtype)
-                .view_as(cosine_similarity)
-            )
-
+            # Select beta columns corresponding to leaders
+            beta = beta[:, leader_mask].to(dtype=cosine_similarity_dense.dtype)
         else:
             beta = 1.0
 
-        s = torch.sparse.softmax(cosine_similarity, dim=-1)
+        # Apply softmax and beta regularization
+        # Note: softmax is applied to all nodes (including leaders) before filtering
+        s = torch.softmax(cosine_similarity_dense, dim=-1)
         s = beta * s
 
         # Filter out entries corresponding to leader rows for the non-leader component
-        s_coalesced = s.coalesce()
-        s_indices = s_coalesced.indices()
-        s_values = s_coalesced.values()
-        non_leader_mask = ~leader_mask[s_indices[0]]
-        filtered_indices = s_indices[:, non_leader_mask]
-        filtered_values = s_values[non_leader_mask]
-        s_non_leader = SparseTensor(
-            row=filtered_indices[0],
-            col=filtered_indices[1],
-            value=filtered_values,
-            sparse_sizes=s.shape,
-        )
+        s_non_leader = s.clone()
+        s_non_leader[leader_mask] = 0.0  # Zero out leader rows
 
-        # Construct a sparse identity (Kronecker delta) for leader nodes
+        # Construct a dense identity (Kronecker delta) for leader nodes
         leader_idx = torch.nonzero(leader_mask).squeeze()
         if leader_idx.dim() == 0:  # edge case where there is only one leader
             leader_idx = leader_idx.unsqueeze(0)
         leader_cols = torch.arange(leader_idx.size(0), device=leader_idx.device)
-        kd_values = torch.ones(leader_cols.size(0), dtype=s.dtype, device=s.device)
-        kronecker_delta_sparse = SparseTensor(
-            row=leader_idx, col=leader_cols, value=kd_values, sparse_sizes=s.shape
-        )
+
+        # Create dense identity matrix for leaders
+        kronecker_delta = torch.zeros_like(s)
+        kronecker_delta[leader_idx, leader_cols] = 1.0
 
         # Combine the non-leader similarities with the leader identity
-        s = (s_non_leader + kronecker_delta_sparse).coalesce()
+        s = s_non_leader + kronecker_delta
 
-        so = SelectOutput(s=s)
+        # Return dense [N, K] tensor for efficiency
+        so = SelectOutput(s=s, s_inv_op=self.s_inv_op, batch=batch)
 
         return so
 

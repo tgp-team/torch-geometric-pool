@@ -42,7 +42,7 @@ class DenseSelect(Select):
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
-    is_dense: bool = True
+    is_dense_batched: bool = True
 
     def __init__(
         self,
