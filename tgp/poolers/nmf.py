@@ -10,7 +10,6 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput, Precoarsenable
-from tgp.utils.ops import maybe_num_nodes
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -164,18 +163,11 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         edge_weight: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
-        num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
         assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
-
-        if batch is not None:
-            num_nodes = batch.size(0)
-        else:
-            num_nodes = maybe_num_nodes(edge_index, num_nodes)
-
         adj = to_dense_adj(
-            edge_index, edge_attr=edge_weight, max_num_nodes=num_nodes
+            edge_index, edge_attr=edge_weight
         )  # has shape [1, N, N] -- Note: we do not pass batch here.
 
         so = self.select(edge_index=adj)
@@ -183,24 +175,18 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         if batch is None:  # single graph -> give all nodes the same ID
             batch = adj.new_zeros(adj.size(-1), dtype=torch.long)
 
-        # Transform the select output to a sparse tensor
+        # Use dense [N, K] representation for efficiency
         s = so.s  # has shape [1, N, K]
-        k = s.size(-1)
-        n = s.size(1)
-        num_graphs = batch.max().item() + 1 if batch.numel() > 0 else 1
-        # Compute indices for the sparse tensor
-        row = torch.arange(n, device=s.device).repeat_interleave(k)
-        col = torch.arange(k, device=s.device)
-        col = (batch.unsqueeze(-1) * k + col).view(-1)
-        # Create the sparse tensor (torch COO) and the SelectOutput
-        s = torch.sparse_coo_tensor(
-            torch.stack([row, col]), s.view(-1), size=(n, num_graphs * k)
-        ).coalesce()  # has shape (N, BK)
-        so = SelectOutput(s=s, s_inv_op=self.selector.s_inv_op)
+        s = s.squeeze(0)  # shape [N, K]
+        so = SelectOutput(s=s, s_inv_op=self.selector.s_inv_op, batch=batch)
 
         batch_pooled = self.reducer.reduce_batch(so, batch)
         edge_index_pooled, edge_weight_pooled = self.preconnector(
-            so=so, edge_index=edge_index, edge_weight=edge_weight
+            so=so,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
         )
         return PoolingOutput(
             edge_index=edge_index_pooled,

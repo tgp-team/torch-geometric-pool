@@ -105,6 +105,7 @@ class LaPooling(SRCPooling):
         edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
@@ -128,6 +129,9 @@ class LaPooling(SRCPooling):
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
+            batch_pooled (torch.Tensor, optional): The batch vector for the pooled nodes.
+                Required when lifting with dense :math:`[N, K]` SelectOutput on multi-graph
+                batches. Pass `out.batch` from the pooling call. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -136,7 +140,10 @@ class LaPooling(SRCPooling):
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            batch_orig = batch if batch is not None else so.batch
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch_orig, batch_pooled=batch_pooled
+            )
             return x_lifted
 
         else:
@@ -157,6 +164,7 @@ class LaPooling(SRCPooling):
                 edge_index=adj,
                 so=so,
                 edge_weight=edge_weight,
+                batch=batch,
                 batch_pooled=batch_pooled,
             )
 

@@ -6,7 +6,7 @@ from torch_geometric import seed_everything
 from torch_geometric.datasets import Planetoid
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
-from tgp.poolers import get_pooler
+from tgp.poolers import get_pooler, pooler_map
 from tgp.utils import connectivity_to_torch_coo
 
 seed_everything(8)
@@ -14,8 +14,8 @@ seed_everything(8)
 dataset = Planetoid(root="data/Planetoid", name="Cora")
 data = dataset[0]
 
-# for POOLER, value in pooler_map.items():  # Use all poolers
-for POOLER in ["spbnpool"]:  # Test a specific pooler
+for POOLER, value in pooler_map.items():  # Use all poolers
+    # for POOLER in ["spbnpool"]:  # Test a specific pooler
     print(f"Using pooler: {POOLER}")
 
     if POOLER == "pan":

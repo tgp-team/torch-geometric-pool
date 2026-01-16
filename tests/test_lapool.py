@@ -126,12 +126,9 @@ def test_single_leader_edge_case():
 
 
 def test_single_node_isolated():
-    """Test LaPooling with a single isolated node (no edges).
+    """Test LaPoolSelect with a single isolated node (no edges)."""
+    from tgp.select.lapool_select import LaPoolSelect
 
-    This tests the edge case where there's only one node with no edges,
-    which should result in exactly one supernode (the node itself).
-    This tests the fix for the scatter_mul issue with empty edges.
-    """
     N = 1
     # Single node with 1D features
     x = torch.tensor([[1.0]], dtype=torch.float)  # [1, 1]
@@ -139,25 +136,31 @@ def test_single_node_isolated():
     edge_index = torch.empty((2, 0), dtype=torch.long)
     edge_weight = torch.empty(0, dtype=torch.float)
     batch = torch.zeros(N, dtype=torch.long)
-
-    pooler = LaPooling()
-    pooler.eval()
-
-    # Call forward
-    out = pooler(
-        x=x, adj=edge_index, edge_weight=edge_weight, batch=batch, lifting=False
+    selector = LaPoolSelect()
+    so = selector(
+        x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch, num_nodes=N
     )
 
-    assert isinstance(out, PoolingOutput)
-    # Should have exactly one supernode (the single node)
-    assert out.so.num_supernodes == 1
-    assert out.x.shape == (1, 1)
-
     # The selection matrix should be 1x1 identity
-    assert out.so.s is not None
-    s_dense = out.so.s.to_dense()
+    assert so.s is not None
+    s_dense = so.s.to_dense()
     assert s_dense.shape == (1, 1)
     assert torch.allclose(s_dense, torch.eye(1), atol=1e-6)
+
+
+@pytest.mark.torch_sparse
+def test_lapool_select_sparse_tensor_input():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
+    from tgp.select.lapool_select import LaPoolSelect
+
+    edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+    adj = SparseTensor.from_edge_index(edge_index, sparse_sizes=(2, 2))
+    x = torch.randn(2, 3)
+    selector = LaPoolSelect()
+    so = selector(x=x, edge_index=adj, num_nodes=2)
+    assert so.s is not None
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from torch.distributions import Beta
 from tgp.utils.losses import (
     cluster_connectivity_prior_loss,
     kl_loss,
+    sparse_bce_reconstruction_loss,
     weighted_bce_reconstruction_loss,
 )
 
@@ -157,6 +158,20 @@ class TestWeightedBCEReconstructionLoss:
 
 class TestKLLoss:
     """Test cases for kl_loss function."""
+
+    def test_initialisation(self, set_random_seed):
+        with pytest.raises(ValueError) as error_info:
+            # both mask and batch specified will raise an exception
+            kl_loss(None, None, torch.tensor(1.0), torch.tensor(1.0), None)
+        assert error_info.value.args[0] == "Cannot specify both mask and batch"
+
+        with pytest.raises(ValueError) as error_info:
+            # if batch is specified but batch_size is not, will raise an exception
+            kl_loss(None, None, None, torch.tensor(1.0), None)
+        assert (
+            error_info.value.args[0]
+            == "Batch size must be specified if batch is specified"
+        )
 
     def test_basic_functionality(self, set_random_seed):
         """Test basic KL divergence computation."""
@@ -443,6 +458,100 @@ class TestClusterConnectivityPriorLoss:
 
         # Large deviation should result in higher loss
         assert loss_large.item() > loss_small.item()
+
+
+class TestSparseBCEReconstructionLoss:
+    def test_basic_functionality(self, set_random_seed):
+        """Test the SparseBCEReconstructionLoss function."""
+        tot_num_edges = 25
+        link_prob_loigit = 2 * torch.randn((tot_num_edges,))
+        true_y = torch.randint(high=2, size=(tot_num_edges,), dtype=torch.float)
+
+        loss, norm_const = sparse_bce_reconstruction_loss(link_prob_loigit, true_y)
+
+        assert isinstance(loss, torch.Tensor)
+        assert isinstance(norm_const, torch.Tensor)
+        assert norm_const == tot_num_edges
+        assert loss.dim() == 0  # Scalar after reduction
+        assert loss.item() >= 0  # BCE loss is non-negative
+
+    def test_with_batch(self, set_random_seed):
+        """Test KL loss with node masking."""
+        num_edges_per_graph = [7, 4, 5, 6, 3]
+        batch_size, tot_num_edges = len(num_edges_per_graph), sum(num_edges_per_graph)
+        link_prob_loigit = 2 * torch.randn((tot_num_edges,))
+        true_y = torch.randint(high=2, size=(tot_num_edges,), dtype=torch.float)
+        batch = torch.tensor(
+            sum([num_edges_per_graph[i] * [i] for i in range(batch_size)], [])
+        )
+
+        loss, norm_const = sparse_bce_reconstruction_loss(
+            link_prob_loigit, true_y, batch, batch_size
+        )
+
+        assert isinstance(loss, torch.Tensor)
+        assert isinstance(norm_const, torch.Tensor)
+        assert loss.dim() == 0  # Scalar after reduction
+        assert loss.item() >= 0  # BCE loss is non-negative
+        assert all(
+            [
+                int(norm_const[i].item()) == num_edges_per_graph[i]
+                for i in range(batch_size)
+            ]
+        )
+
+        loss_no_batch, _ = sparse_bce_reconstruction_loss(link_prob_loigit, true_y)
+
+        # Results should be different when masking is applied
+        assert not torch.allclose(loss, loss_no_batch, atol=1e-6)
+
+    def test_perfect_reconstruction(self, set_random_seed):
+        """Test KL loss with node masking."""
+        num_edges_per_graph = [7, 4, 5, 6, 3]
+        batch_size, tot_num_edges = len(num_edges_per_graph), sum(num_edges_per_graph)
+        true_y = torch.randint(high=2, size=(tot_num_edges,), dtype=torch.float)
+        link_prob_loigit = 10 * (2 * true_y - 1)
+        batch = torch.tensor(
+            sum([num_edges_per_graph[i] * [i] for i in range(batch_size)], [])
+        )
+
+        loss, norm_const = sparse_bce_reconstruction_loss(
+            link_prob_loigit, true_y, batch, batch_size
+        )
+
+        assert isinstance(loss, torch.Tensor)
+        assert isinstance(norm_const, torch.Tensor)
+        assert loss.dim() == 0  # Scalar after reduction
+        assert loss.item() <= 1e-3  # BCE loss is almost zero
+        assert all(
+            [
+                int(norm_const[i].item()) == num_edges_per_graph[i]
+                for i in range(batch_size)
+            ]
+        )
+
+        loss_no_batch, _ = sparse_bce_reconstruction_loss(link_prob_loigit, true_y)
+
+        # Results should be equal
+        assert torch.allclose(loss, loss_no_batch, atol=1e-6)
+
+    def test_batch_reduction_methods(self, small_batch_data):
+        """Test different batch reduction methods."""
+        x, adj, mask = small_batch_data
+        batch_size, n_nodes = adj.shape[:2]
+        rec_adj = torch.randn(batch_size, n_nodes, n_nodes)
+
+        # Test different batch reduction methods
+        loss_mean = weighted_bce_reconstruction_loss(
+            rec_adj, adj, mask, batch_reduction="mean"
+        )
+        loss_sum = weighted_bce_reconstruction_loss(
+            rec_adj, adj, mask, batch_reduction="sum"
+        )
+
+        assert isinstance(loss_mean, torch.Tensor)
+        assert isinstance(loss_sum, torch.Tensor)
+        assert loss_sum.item() >= loss_mean.item()
 
 
 class TestIntegrationWithBNPool:
