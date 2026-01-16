@@ -3,7 +3,7 @@ from typing import Optional
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.connect import DenseConnectSPT
+from tgp.connect import DenseConnectUnbatched
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import LaPoolSelect, SelectOutput
@@ -17,7 +17,7 @@ class LaPooling(SRCPooling):
 
     + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.LaPoolSelect`.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
-    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnectSPT`.
+    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnectUnbatched`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
     Args:
@@ -91,7 +91,7 @@ class LaPooling(SRCPooling):
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
-            connector=DenseConnectSPT(
+            connector=DenseConnectUnbatched(
                 remove_self_loops=remove_self_loops,
                 degree_norm=degree_norm,
                 edge_weight_norm=edge_weight_norm,
@@ -105,6 +105,7 @@ class LaPooling(SRCPooling):
         edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
@@ -128,6 +129,9 @@ class LaPooling(SRCPooling):
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
+            batch_pooled (torch.Tensor, optional): The batch vector for the pooled nodes.
+                Required when lifting with dense :math:`[N, K]` SelectOutput on multi-graph
+                batches. Pass `out.batch` from the pooling call. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -136,7 +140,10 @@ class LaPooling(SRCPooling):
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            batch_orig = batch if batch is not None else so.batch
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch_orig, batch_pooled=batch_pooled
+            )
             return x_lifted
 
         else:
@@ -148,6 +155,7 @@ class LaPooling(SRCPooling):
                 batch=batch,
                 num_nodes=x.size(0),
             )
+            # batch is now stored in SelectOutput by the selector
 
             # Reduce
             x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
@@ -157,6 +165,7 @@ class LaPooling(SRCPooling):
                 edge_index=adj,
                 so=so,
                 edge_weight=edge_weight,
+                batch=batch,
                 batch_pooled=batch_pooled,
             )
 

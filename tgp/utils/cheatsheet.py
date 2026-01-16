@@ -39,8 +39,8 @@ def supports_sparse(pooler_name: str) -> bool:
     """
     try:
         pooler = get_pooler(pooler_name, **POOLER_TEST_PARAMS)
-        # Check if pooler is dense - dense poolers have is_dense property
-        return not getattr(pooler, "is_dense", False)
+        # Check if pooler operates in dense batched mode
+        return not getattr(pooler, "is_dense_batched", False)
     except Exception:
         return False
 

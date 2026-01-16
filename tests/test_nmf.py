@@ -59,16 +59,20 @@ def test_nmf_precoarsening(sparse_batch_graph):
     assert data_batch.num_graphs == 3
     assert data_batch.num_nodes == 13
 
-    pooling_out = NMFPooling(k=3).precoarsening(
+    k = 3
+    pooling_out = NMFPooling(k=k).precoarsening(
         edge_index=data_batch.edge_index,
         edge_weight=data_batch.edge_attr,
         batch=data_batch.batch,
         num_nodes=data_batch.num_nodes,
     )
 
+    # With dense [N, K] representation:
+    # - s has shape [N, K] = [13, 3], not [N, B*K] = [13, 9]
+    # - batch_pooled has shape [B*K] = [9] (one supernode per cluster per graph)
     assert pooling_out.so.s.size(0) == 13
-    assert pooling_out.so.s.size(1) == 9
-    assert pooling_out.batch.size(0) == 9
+    assert pooling_out.so.s.size(1) == k
+    assert pooling_out.batch.size(0) == data_batch.num_graphs * k
 
 
 def test_batch_none(sparse_batch_graph):

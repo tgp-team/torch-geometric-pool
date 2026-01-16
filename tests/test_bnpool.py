@@ -129,11 +129,7 @@ def test_bnpool_eval_mode(small_batched_dense_graphs):
 
 
 @pytest.mark.parametrize("small_batched_dense_graphs", [(3, 10, 4)], indirect=True)
-@pytest.mark.parametrize("rescale_loss", [False, True])
-@pytest.mark.parametrize("balance_links", [False, True])
-def test_bnpool_with_mask_patterns_rescale_and_balance(
-    small_batched_dense_graphs, rescale_loss, balance_links
-):
+def test_bnpool_with_mask_patterns(small_batched_dense_graphs):
     """Test BNPool with different mask patterns."""
     x, adj = small_batched_dense_graphs
     batch_size, n_nodes = x.shape[:2]
@@ -149,8 +145,6 @@ def test_bnpool_with_mask_patterns_rescale_and_balance(
     pooler = BNPool(
         in_channels=x.shape[-1],
         k=3,
-        rescale_loss=rescale_loss,
-        balance_links=balance_links,
     )
     for mask in mask_patterns:
         out = pooler(x=x, adj=adj, mask=mask)

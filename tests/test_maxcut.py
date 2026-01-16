@@ -107,6 +107,21 @@ class TestMaxCutLoss:
         assert isinstance(loss, torch.Tensor)
         assert torch.isfinite(loss)
 
+    def test_maxcut_loss_edge_weight_column_vector(self, simple_graph):
+        x, edge_index, edge_weight, batch = simple_graph
+        scores = torch.randn(x.size(0))
+        edge_weight_col = edge_weight.view(-1, 1)
+
+        loss = maxcut_loss(
+            scores=scores,
+            edge_index=edge_index,
+            edge_weight=edge_weight_col,
+            batch=batch,
+        )
+
+        assert isinstance(loss, torch.Tensor)
+        assert torch.isfinite(loss)
+
     def test_maxcut_loss_batched(self, batched_graph):
         """Test MaxCut loss with batched graphs."""
         x, edge_index, edge_weight, batch = batched_graph
