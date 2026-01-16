@@ -401,7 +401,7 @@ class Select(torch.nn.Module):
     supernode assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{N \times K}`.
     """
 
-    is_dense: bool = False
+    is_dense_batched: bool = False
 
     def reset_parameters(self):
         pass

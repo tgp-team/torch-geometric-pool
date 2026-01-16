@@ -58,14 +58,14 @@ def test_output_with_spt_adj(simple_graph, pooler_name):
     x_pre, adj_pre, mask = pooler.preprocessing(
         edge_index=adj, edge_weight=edge_weight, x=x, batch=batch, use_cache=False
     )
-    if pooler.is_dense:
+    if pooler.is_dense_batched:
         assert isinstance(adj_pre, torch.Tensor) and adj_pre.ndim == 3
     else:
         assert isinstance(adj_pre, SparseTensor)
 
     # Pooling operation
     out = pooler(x=x_pre, adj=adj_pre, batch=batch, mask=mask)
-    if pooler.is_dense:
+    if pooler.is_dense_batched:
         assert isinstance(out.edge_index, torch.Tensor)
     else:
         # edge_index should be either SparseTensor or torch COO tensor

@@ -5,7 +5,7 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import to_dense_adj
 
-from tgp.connect import DenseConnect, DenseConnectSPT
+from tgp.connect import DenseConnect, DenseConnectUnbatched
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
@@ -104,7 +104,7 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         self.cached = cached
 
         # Connector used in the precoarsening step
-        self.preconnector = DenseConnectSPT(
+        self.preconnector = DenseConnectUnbatched(
             remove_self_loops=remove_self_loops,
             degree_norm=degree_norm,
             edge_weight_norm=edge_weight_norm,

@@ -224,10 +224,10 @@ class SRCPooling(torch.nn.Module):
         return global_reduce(x, reduce_op, batch, size, self.node_dim)
 
     @property
-    def is_dense(self) -> bool:
+    def is_dense_batched(self) -> bool:
         """Returns :obj:`True` if the pooler is a dense pooling method."""
         if self.selector is not None:
-            return self.selector.is_dense
+            return self.selector.is_dense_batched
         raise NotImplementedError
 
     @property

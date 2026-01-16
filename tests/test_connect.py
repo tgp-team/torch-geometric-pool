@@ -6,7 +6,7 @@ from torch_geometric.utils import add_self_loops
 
 from tgp.connect import (
     Connect,
-    DenseConnectSPT,
+    DenseConnectUnbatched,
     KronConnect,
     SparseConnect,
     sparse_connect,
@@ -53,8 +53,8 @@ def test_sparse_connect_raises_runtime_error():
 
 
 def test_denseconn_spt():
-    """Test DenseConnectSPT with regular tensor edge_index."""
-    connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
+    """Test DenseConnectUnbatched with regular tensor edge_index."""
+    connector = DenseConnectUnbatched(remove_self_loops=False, degree_norm=False)
     # Create torch COO sparse tensor from identity matrix
     eye_indices = torch.arange(3)
     s = torch.sparse_coo_tensor(
@@ -77,10 +77,10 @@ def test_denseconn_spt():
 
 
 def test_denseconn_spt_invalid_edge_index_type():
-    """Passing an unsupported edge_index type (e.g., a Python list) into DenseConnectSPT.forward
+    """Passing an unsupported edge_index type (e.g., a Python list) into DenseConnectUnbatched.forward
     should raise a ValueError.
     """
-    connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
+    connector = DenseConnectUnbatched(remove_self_loops=False, degree_norm=False)
     s = torch.eye(2).unsqueeze(0)
     so = SelectOutput(s=s)
     invalid_edge_index = [[0, 1], [1, 0]]
@@ -89,12 +89,12 @@ def test_denseconn_spt_invalid_edge_index_type():
 
 
 def test_denseconn_spt_with_torch_coo_input():
-    """Test DenseConnectSPT with torch COO sparse tensor input.
+    """Test DenseConnectUnbatched with torch COO sparse tensor input.
 
     This tests the to_torch_coo branch by using a torch COO sparse tensor as input,
     which sets to_torch_coo=True and converts the output back to torch COO format.
     """
-    connector = DenseConnectSPT(remove_self_loops=False, degree_norm=False)
+    connector = DenseConnectUnbatched(remove_self_loops=False, degree_norm=False)
     # Create assignment matrix s as torch COO sparse tensor
     eye_indices = torch.arange(3)
     s = torch.sparse_coo_tensor(
@@ -122,8 +122,8 @@ def test_denseconn_spt_with_torch_coo_input():
 
 
 def test_denseconn_spt_degree_norm_with_empty_after_remove_self_loops():
-    """Test DenseConnectSPT with degree_norm=True and graph that becomes empty after remove_self_loops."""
-    connector = DenseConnectSPT(remove_self_loops=True, degree_norm=True)
+    """Test DenseConnectUnbatched with degree_norm=True and graph that becomes empty after remove_self_loops."""
+    connector = DenseConnectUnbatched(remove_self_loops=True, degree_norm=True)
     # Create assignment matrix s as torch COO sparse tensor
     eye_indices = torch.arange(2)
     s = torch.sparse_coo_tensor(

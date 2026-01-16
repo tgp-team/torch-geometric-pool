@@ -65,7 +65,7 @@ def test_poolers_forward_and_lifting(simple_graph, pooler_name):
         batch=batch,
         use_cache=False,
     )
-    if pooler.is_dense:
+    if pooler.is_dense_batched:
         assert isinstance(adj_pre, torch.Tensor) and adj_pre.ndim == 3
     if mask is not None:
         assert isinstance(mask, torch.Tensor) and mask.dtype == torch.bool
@@ -89,7 +89,7 @@ def test_poolers_forward_and_lifting(simple_graph, pooler_name):
         assert ew.numel() == ei.size(1)
 
     # Apply message passing to ensure output is correct type
-    conv = GCNConv(F, F) if not pooler.is_dense else DenseGCNConv(F, F)
+    conv = GCNConv(F, F) if not pooler.is_dense_batched else DenseGCNConv(F, F)
     out.x = conv(out.x, out.edge_index)
     assert isinstance(out.x, torch.Tensor)
 

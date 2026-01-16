@@ -3,7 +3,7 @@ from typing import Optional
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.connect import DenseConnectSPT
+from tgp.connect import DenseConnectUnbatched
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import LaPoolSelect, SelectOutput
@@ -17,7 +17,7 @@ class LaPooling(SRCPooling):
 
     + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.LaPoolSelect`.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
-    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnectSPT`.
+    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnectUnbatched`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
     Args:
@@ -91,7 +91,7 @@ class LaPooling(SRCPooling):
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
-            connector=DenseConnectSPT(
+            connector=DenseConnectUnbatched(
                 remove_self_loops=remove_self_loops,
                 degree_norm=degree_norm,
                 edge_weight_norm=edge_weight_norm,

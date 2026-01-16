@@ -73,7 +73,7 @@ def test_poolers_forward_and_lifting(simple_graph):
     adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
 
     # Choose edge input based on pooler type
-    edge_input = edge_index if pooler.is_dense else adj
+    edge_input = edge_index if pooler.is_dense_batched else adj
 
     # 1) Preprocessing: must use 'edge_index=edge_input' to match signature
     x_pre, adj_pre, mask = pooler.preprocessing(

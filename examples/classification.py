@@ -67,7 +67,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 print(self.pooler)
 
                 # Second MP layer
-                if self.pooler.is_dense:
+                if self.pooler.is_dense_batched:
                     self.conv2 = DenseGCNConv(
                         in_channels=hidden_channels, out_channels=hidden_channels
                     )
