@@ -1,7 +1,6 @@
 from .asap import ASAPooling
 from .asym_cheeger_cut import AsymCheegerCutPooling
 from .bnpool import BNPool
-from .bnpool_sparse import SparseBNPool
 from .diffpool import DiffPool
 from .dmon import DMoNPooling
 from .edge_contraction import EdgeContractionPooling
@@ -38,7 +37,6 @@ pooler_classes = [
     "NoPool",
     "PANPooling",
     "SAGPooling",
-    "SparseBNPool",
     "TopkPooling",
 ]
 
@@ -61,7 +59,6 @@ pooler_map = {
     "nopool": NoPool,
     "pan": PANPooling,
     "sag": SAGPooling,
-    "spbnpool": SparseBNPool,
     "topk": TopkPooling,
 }
 
@@ -78,6 +75,16 @@ def get_pooler(pooler_name: str, **kwargs):
         A pooling layer instance corresponding to `pooler_name`.
     """
     pooler_name = pooler_name.lower()
+    if pooler_name.endswith("_u"):
+        base_name = pooler_name[:-2]
+        if base_name not in pooler_map:
+            raise ValueError(
+                f"Unknown pooler_name='{pooler_name}'. "
+                f"Available poolers: {list(pooler_map.keys())}"
+            )
+        pooler_name = base_name
+        kwargs.setdefault("batched", False)
+
     if pooler_name not in pooler_map:
         raise ValueError(
             f"Unknown pooler_name='{pooler_name}'. "

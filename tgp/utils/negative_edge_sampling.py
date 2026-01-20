@@ -15,6 +15,7 @@ _MIN_PROB_EDGES = 0.5  # 50%
 _MAX_PROB_EDGES = 2 / 3  # 66%
 
 
+# TODO: move these functions to ops
 def negative_edge_sampling(
     edge_index: Tensor,
     num_nodes: Optional[Union[int, Tuple[int, int]]] = None,

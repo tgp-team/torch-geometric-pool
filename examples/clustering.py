@@ -33,6 +33,7 @@ for POOLER in poolers:
         "k": dataset.num_classes,
         "normalize_loss": True,
         "adj_transpose": True,
+        "cache_preprocessing": True,
         "in_channels": [16],
         "act": "ReLU",
     }
@@ -76,11 +77,7 @@ for POOLER in poolers:
                 else:
                     x = self.mp[i](x)
 
-            _, adj, _ = self.pooler.preprocessing(
-                x=x, edge_index=edge_index, edge_attr=edge_weight, use_cache=True
-            )
-
-            out = self.pooler(x=x, adj=adj)
+            out = self.pooler(x=x, adj=edge_index, edge_weight=edge_weight)
             s_out = out.so.s
             # check if s_out has batch dimension
             if s_out.dim() == 3:

@@ -3,7 +3,7 @@ from typing import Optional
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.connect import DenseConnectUnbatched
+from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import LaPoolSelect, SelectOutput
@@ -11,13 +11,13 @@ from tgp.src import PoolingOutput, SRCPooling
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
-class LaPooling(SRCPooling):
+class LaPooling(SRCPooling):  # TODO:should this inherint from DensePooling?
     r"""The LaPool pooling operator from the paper `Towards Interpretable Sparse Graph Representation Learning
     with Laplacian Pooling <https://arxiv.org/abs/1905.11577>`_ (Noutahi et al., 2019).
 
     + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.LaPoolSelect`.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
-    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnectUnbatched`.
+    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
     Args:
@@ -72,6 +72,12 @@ class LaPooling(SRCPooling):
             :obj:`~torch_geometric.utils.scatter`,
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
+        batched (bool, optional):
+            If :obj:`True`, uses the batched dense path (not implemented yet).
+            (default: :obj:`False`)
+        block_diags_output (bool, optional):
+            If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
+            returns batched dense outputs. (default: :obj:`True`)
     """
 
     def __init__(
@@ -84,6 +90,8 @@ class LaPooling(SRCPooling):
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
+        batched: bool = False,
+        block_diags_output: bool = True,
     ):
         super().__init__(
             selector=LaPoolSelect(
@@ -91,11 +99,14 @@ class LaPooling(SRCPooling):
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
-            connector=DenseConnectUnbatched(
+            connector=DenseConnect(
                 remove_self_loops=remove_self_loops,
                 degree_norm=degree_norm,
                 edge_weight_norm=edge_weight_norm,
+                unbatched_output="block" if block_diags_output else "batch",
             ),
+            batched=batched,
+            block_diags_output=block_diags_output,
         )
 
     def forward(
@@ -146,33 +157,38 @@ class LaPooling(SRCPooling):
             )
             return x_lifted
 
-        else:
-            # Select
-            so = self.select(
-                x=x,
-                edge_index=adj,
-                edge_weight=edge_weight,
-                batch=batch,
-                num_nodes=x.size(0),
-            )
+        if self.batched:
+            raise NotImplementedError("LaPool batched mode is not implemented yet.")
 
-            # Reduce
-            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+        # Select
+        so = self.select(
+            x=x,
+            edge_index=adj,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=x.size(0),
+        )
 
-            # Connect
-            edge_index_pooled, edge_weight_pooled = self.connect(
-                edge_index=adj,
-                so=so,
-                edge_weight=edge_weight,
-                batch=batch,
-                batch_pooled=batch_pooled,
-            )
+        # Reduce
+        return_batched = not self.block_diags_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
 
-            out = PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-            )
-            return out
+        # Connect
+        edge_index_pooled, edge_weight_pooled = self.connect(
+            edge_index=adj,
+            so=so,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
+        )
+
+        out = PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+        )
+        return out

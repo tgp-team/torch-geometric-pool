@@ -5,11 +5,11 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Beta
 
-from tgp.select import DenseSelect, SelectOutput
+from tgp.select import MLPSelect, SelectOutput
 from tgp.utils.typing import SinvType
 
 
-class DPSelect(DenseSelect):
+class DPSelect(MLPSelect):
     r"""The Dirichlet Process selection operator for the :class:`~tgp.poolers.BNPool` operator,
     as proposed in the paper `"BN-Pool: Bayesian Nonparametric Graph Pooling" <https://arxiv.org/abs/2501.09821>`_
     (Castellana & Bianchi, 2025).
@@ -78,7 +78,7 @@ class DPSelect(DenseSelect):
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
 
     Note:
-        This class extends :class:`~tgp.select.DenseSelect` but replaces the softmax assignment with the
+        This class extends :class:`~tgp.select.MLPSelect` but replaces the softmax assignment with the
         stick-breaking construction. The :class:`~tgp.select.SelectOutput` returned includes both the assignment matrix
         :math:`\mathbf{S}` and the posterior distributions :math:`q(v_{ik})` for computing KL divergence losses.
     """
@@ -102,10 +102,6 @@ class DPSelect(DenseSelect):
         )
         self.k = k
         self.batched_representation = batched_representation
-
-    @property
-    def is_dense_batched(self) -> bool:
-        return self.batched_representation
 
     @staticmethod
     def _compute_pi_given_sticks(stick_fractions):

@@ -8,6 +8,8 @@ from .ops import (
     connectivity_to_edge_index,
     connectivity_to_sparsetensor,
     connectivity_to_torch_coo,
+    dense_to_block_diag,
+    is_dense_adj,
     pseudo_inverse,
     rank3_diag,
     rank3_trace,

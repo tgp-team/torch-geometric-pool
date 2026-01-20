@@ -5,11 +5,12 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import to_dense_adj
 
-from tgp.connect import DenseConnect, DenseConnectUnbatched
+from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput, Precoarsenable
+from tgp.utils.ops import connectivity_to_edge_index
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -38,6 +39,10 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         cached (bool, optional):
             If set to :obj:`True`, the output of the :math:`\texttt{select}` and :math:`\texttt{select}`
             operations will be cached, so that they do not need to be recomputed.
+            (default: :obj:`False`)
+        cache_preprocessing (bool, optional):
+            If :obj:`True`, caches the dense adjacency produced during preprocessing.
+            This should only be enabled when the same graph is reused across iterations.
             (default: :obj:`False`)
         remove_self_loops (bool, optional):
             Whether to remove self-loops from the graph after coarsening.
@@ -85,6 +90,9 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
+        batched: bool = True,
+        block_diags_output: bool = False,
+        cache_preprocessing: bool = False,
     ):
         super().__init__(
             selector=NMFSelect(k=k, s_inv_op=s_inv_op),
@@ -95,26 +103,34 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
+                unbatched_output="block" if block_diags_output else "batch",
             ),
             cached=cached,
+            cache_preprocessing=cache_preprocessing,
             adj_transpose=adj_transpose,
+            batched=batched,
+            block_diags_output=block_diags_output,
         )
 
         self.cached = cached
 
         # Connector used in the precoarsening step
-        self.preconnector = DenseConnectUnbatched(
+        self.preconnector = DenseConnect(
             remove_self_loops=remove_self_loops,
             degree_norm=degree_norm,
             edge_weight_norm=edge_weight_norm,
+            unbatched_output="block",
         )
 
     def forward(
         self,
         x: Tensor,
         adj: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         mask: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> Union[PoolingOutput, Tensor]:
@@ -140,22 +156,56 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch, batch_pooled=batch_pooled
+            )
             return x_lifted
 
-        else:
-            # Select
-            so = self.select(edge_index=adj, mask=mask)
+        if not self.batched:
+            raise NotImplementedError("NMF unbatched mode is not implemented yet.")
 
-            # Reduce
-            x_pooled, _ = self.reduce(x=x, so=so)
+        x, adj, mask = self._ensure_batched_inputs(
+            x=x,
+            edge_index=adj,
+            edge_weight=edge_weight,
+            batch=batch,
+            mask=mask,
+        )
 
-            # Connect
-            adj_pooled, _ = self.connect(edge_index=adj, so=so)
+        # Select
+        so = self.select(edge_index=adj, mask=mask)
 
-            out = PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so)
+        # Reduce
+        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
-            return out
+        # Connect
+        adj_pooled, _ = self.connect(
+            edge_index=adj,
+            so=so,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
+        )
+
+        if self.block_diags_output:
+            x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                self._finalize_block_diags_output(
+                    x_pool=x_pooled,
+                    adj_pool=adj_pooled,
+                    batch=batch,
+                    batch_pooled=batch_pooled,
+                    so=so,
+                )
+            )
+            return PoolingOutput(
+                x=x_pooled,
+                edge_index=edge_index_pooled,
+                edge_weight=edge_weight_pooled,
+                batch=batch_pooled,
+                so=so,
+            )
+
+        return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so)
 
     def precoarsening(
         self,
@@ -165,7 +215,9 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         batch: Optional[Tensor] = None,
         **kwargs,
     ) -> PoolingOutput:
-        assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
+        if edge_index is None:
+            raise ValueError("edge_index cannot be None for precoarsening.")
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
         adj = to_dense_adj(
             edge_index, edge_attr=edge_weight
         )  # has shape [1, N, N] -- Note: we do not pass batch here.

@@ -9,7 +9,10 @@ from torch_geometric.utils import (
 )
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
+from tgp import eps
 from tgp.imports import HAS_TORCH_SPARSE, is_sparsetensor
+
+# TODO: add docstrings and put these functions in the API documentation
 
 
 def rank3_trace(x):
@@ -18,6 +21,38 @@ def rank3_trace(x):
 
 def rank3_diag(x):
     return torch.diag_embed(x)
+
+
+def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
+    """Convert dense adjacency matrices to a block-diagonal sparse format."""
+    if adj_pool.dim() == 2:
+        adj_pool = adj_pool.unsqueeze(0)
+    if adj_pool.dim() != 3:
+        raise ValueError("adj_pool must have shape [B, K, K] or [K, K].")
+
+    batch_size, num_clusters, _ = adj_pool.size()
+    mask = adj_pool.abs() > eps
+    if not mask.any():
+        edge_index = torch.empty((2, 0), dtype=torch.long, device=adj_pool.device)
+        edge_weight = torch.empty((0,), dtype=adj_pool.dtype, device=adj_pool.device)
+        return edge_index, edge_weight
+
+    batch_idx, row_idx, col_idx = mask.nonzero(as_tuple=True)
+    offset = batch_idx * num_clusters
+    edge_index = torch.stack([row_idx + offset, col_idx + offset], dim=0)
+    edge_weight = adj_pool[batch_idx, row_idx, col_idx]
+    return edge_index, edge_weight
+
+
+def is_dense_adj(edge_index: Adj) -> bool:
+    """Return True if edge_index looks like a dense adjacency matrix."""
+    if not isinstance(edge_index, Tensor) or edge_index.is_sparse:
+        return False
+    if edge_index.dim() == 3:
+        return True
+    if edge_index.dim() == 2 and edge_index.size(0) == edge_index.size(1):
+        return edge_index.is_floating_point()
+    return False
 
 
 ####### EXTERNAL FUNCTIONS - INPUT CAN BE EDGE INDEX, TORCH COO SPARSE TENSOR OR SPARSE TENSOR ###########

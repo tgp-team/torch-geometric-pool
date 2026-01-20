@@ -12,6 +12,7 @@ from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
+# TODO: should this be a static method?
 def dense_cosine_similarity(x, n_nodes, mask, batch):
     r"""Computes a dense block-diagonal cosine similarity matrix.
 
@@ -65,6 +66,7 @@ def dense_cosine_similarity(x, n_nodes, mask, batch):
 
 
 class LaPoolSelect(Select):
+    is_dense: bool = True
     r"""The select operator for the LaPool operator (:class:`~tgp.pooler.LaPoolPooling`)
     as proposed in the paper `Towards Interpretable Sparse Graph Representation Learning
     with Laplacian Pooling <https://arxiv.org/abs/1905.11577>`_. (Emmanuel Noutahi et al., 2019).

@@ -1,5 +1,4 @@
 from .base_select import Select, SelectOutput
-from .dense_select import DenseSelect
 from .dp_select import DPSelect
 from .edge_contraction_select import EdgeContractionSelect
 from .graclus_select import GraclusSelect
@@ -7,6 +6,7 @@ from .identity_select import IdentitySelect
 from .kmis_select import KMISSelect, degree_scorer
 from .lapool_select import LaPoolSelect
 from .maxcut_select import MaxCutScoreNet, MaxCutSelect
+from .mlp_select import MLPSelect
 from .ndp_select import NDPSelect
 from .nmf_select import NMFSelect
 from .topk_select import TopkSelect
@@ -18,7 +18,7 @@ select_functions = [
 select_classes = [
     "Select",
     "SelectOutput",
-    "DenseSelect",
+    "MLPSelect",
     "DPSelect",
     "EdgeContractionSelect",
     "GraclusSelect",

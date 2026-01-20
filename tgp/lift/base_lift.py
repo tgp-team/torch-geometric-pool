@@ -197,6 +197,48 @@ class BaseLift(Lift):
                         "Unexpected pooled feature shape for dense [N, K] lifting with a multi-graph batch: "
                         f"got x_pool.size(0)={x_pool.size(0)}, expected {K} or {expected_nodes}."
                     )
+            elif s_inv.dim() == 2 and x_pool.dim() == 3:
+                if not is_multi_graph:
+                    x_prime = s_inv.matmul(x_pool.squeeze(0))
+                else:
+                    batch_size = x_pool.size(0)
+                    expected_nodes = batch_size * K
+
+                    if batch_pooled is None:
+                        batch_pooled = torch.arange(
+                            batch_size, dtype=batch.dtype, device=batch.device
+                        ).repeat_interleave(K)
+
+                    if batch_pooled.size(0) != expected_nodes:
+                        raise ValueError(
+                            "batch_pooled has an unexpected length for dense [N, K] lifting "
+                            f"(got {batch_pooled.size(0)}, expected {expected_nodes})."
+                        )
+
+                    x_pool_flat = x_pool.reshape(expected_nodes, x_pool.size(-1))
+                    unbatched_s_inv = unbatch(s_inv, batch)  # list of [N_i, K] tensors
+                    unbatched_x_pool = unbatch(
+                        x_pool_flat, batch_pooled
+                    )  # list of [K, F] tensors
+
+                    x_lifted_list = []
+                    for s_inv_i, x_pool_i in zip(unbatched_s_inv, unbatched_x_pool):
+                        x_lifted_list.append(s_inv_i.matmul(x_pool_i))
+
+                    x_prime = torch.cat(x_lifted_list, dim=0)  # [N, F]
+            elif s_inv.dim() == 3 and x_pool.dim() == 2:
+                batch_size = s_inv.size(0)
+                num_clusters = s_inv.size(-1)
+                expected_nodes = batch_size * num_clusters
+
+                if x_pool.size(0) != expected_nodes:
+                    raise ValueError(
+                        "Unexpected pooled feature shape for dense [B, N, K] lifting: "
+                        f"got x_pool.size(0)={x_pool.size(0)}, expected {expected_nodes}."
+                    )
+
+                x_pool = x_pool.view(batch_size, num_clusters, x_pool.size(-1))
+                x_prime = s_inv.matmul(x_pool)
             else:
                 x_prime = s_inv.matmul(x_pool)
 

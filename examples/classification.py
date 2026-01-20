@@ -6,7 +6,6 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
 from tgp.poolers import get_pooler, pooler_map
-from tgp.utils import connectivity_to_torch_coo
 
 seed_everything(8)  # Reproducibility
 
@@ -67,12 +66,12 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 print(self.pooler)
 
                 # Second MP layer
-                if self.pooler.is_dense_batched:
-                    self.conv2 = DenseGCNConv(
+                if self.pooler.block_diags_output:
+                    self.conv2 = GCNConv(
                         in_channels=hidden_channels, out_channels=hidden_channels
                     )
                 else:
-                    self.conv2 = GCNConv(
+                    self.conv2 = DenseGCNConv(
                         in_channels=hidden_channels, out_channels=hidden_channels
                     )
 
@@ -80,30 +79,21 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 self.lin = torch.nn.Linear(hidden_channels, num_classes)
 
             def forward(self, x, edge_index, edge_weight, batch=None):
-                num_nodes = x.size(0)
-                edge_index = connectivity_to_torch_coo(
-                    edge_index, edge_weight, num_nodes
-                )
-
                 # First MP layer
                 x = self.conv1(x, edge_index, edge_weight)
                 x = F.relu(x)
 
                 # Pooling
-                x, edge_index, mask = self.pooler.preprocessing(
-                    x=x,
-                    edge_index=edge_index,
-                    edge_weight=edge_weight,
-                    batch=batch,
-                    use_cache=False,
-                )
                 out = self.pooler(
-                    x=x, adj=edge_index, edge_weight=edge_weight, batch=batch, mask=mask
+                    x=x, adj=edge_index, edge_weight=edge_weight, batch=batch
                 )
                 x_pool, adj_pool = out.x, out.edge_index
 
                 # Second MP layer
-                x = self.conv2(x_pool, adj_pool)
+                if self.pooler.block_diags_output:
+                    x = self.conv2(x_pool, adj_pool, out.edge_weight)
+                else:
+                    x = self.conv2(x_pool, adj_pool)
                 x = F.relu(x)
 
                 # Global pooling

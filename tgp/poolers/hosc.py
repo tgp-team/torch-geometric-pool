@@ -2,11 +2,12 @@ from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
+from torch_geometric.typing import Adj
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import DenseSelect, SelectOutput
+from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
 from tgp.utils.losses import hosc_orthogonality_loss, mincut_loss, orthogonality_loss
 from tgp.utils.typing import LiftType, SinvType
@@ -17,7 +18,7 @@ class HOSCPooling(DenseSRCPooling):
     `"Higher-order clustering and pooling for Graph Neural Networks"
     <http://arxiv.org/abs/2209.03473>`_ (Duval & Malliaros, CIKM 2022)..
 
-    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.DenseSelect`.
+    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.MLPSelect`.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
@@ -67,6 +68,10 @@ class HOSCPooling(DenseSRCPooling):
             adjacency matrices, so that they could be passed "as is" to the dense
             message-passing layers.
             (default: :obj:`True`)
+        cache_preprocessing (bool, optional):
+            If :obj:`True`, caches the dense adjacency produced during preprocessing.
+            This should only be enabled when the same graph is reused across iterations.
+            (default: :obj:`False`)
         lift (~tgp.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
@@ -102,9 +107,12 @@ class HOSCPooling(DenseSRCPooling):
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
+        batched: bool = True,
+        block_diags_output: bool = False,
+        cache_preprocessing: bool = False,
     ):
         super().__init__(
-            selector=DenseSelect(
+            selector=MLPSelect(
                 in_channels=in_channels,
                 k=k,
                 act=act,
@@ -118,8 +126,12 @@ class HOSCPooling(DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
+                unbatched_output="block" if block_diags_output else "batch",
             ),
             adj_transpose=adj_transpose,
+            cache_preprocessing=cache_preprocessing,
+            batched=batched,
+            block_diags_output=block_diags_output,
         )
 
         self.k = k
@@ -130,9 +142,12 @@ class HOSCPooling(DenseSRCPooling):
     def forward(
         self,
         x: Tensor,
-        adj: Optional[Tensor] = None,
+        adj: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         mask: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
@@ -158,33 +173,62 @@ class HOSCPooling(DenseSRCPooling):
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch, batch_pooled=batch_pooled
+            )
             return x_lifted
 
-        else:
-            # Select
-            so = self.select(x=x, mask=mask)
+        if not self.batched:
+            raise NotImplementedError("HOSC unbatched mode is not implemented yet.")
 
-            # Reduce
-            x_pooled, _ = self.reduce(x=x, so=so)
+        x, adj, mask = self._ensure_batched_inputs(
+            x=x,
+            edge_index=adj,
+            edge_weight=edge_weight,
+            batch=batch,
+            mask=mask,
+        )
 
-            # Connect
-            adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
+        # Select
+        so = self.select(x=x, mask=mask)
 
-            loss = self.compute_loss(adj, so.s, adj_pool, mask)
+        # Reduce
+        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
-            # Normalize coarsened adjacency matrix
-            adj_pool = self.connector.postprocess_adj_pool(
-                adj_pool,
-                remove_self_loops=self.connector.remove_self_loops,
-                degree_norm=self.connector.degree_norm,
-                adj_transpose=self.connector.adj_transpose,
-                edge_weight_norm=self.connector.edge_weight_norm,
+        # Connect
+        adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
+
+        loss = self.compute_loss(adj, so.s, adj_pool, mask)
+
+        # Normalize coarsened adjacency matrix
+        adj_pool = self.connector.postprocess_adj_pool(
+            adj_pool,
+            remove_self_loops=self.connector.remove_self_loops,
+            degree_norm=self.connector.degree_norm,
+            adj_transpose=self.connector.adj_transpose,
+            edge_weight_norm=self.connector.edge_weight_norm,
+        )
+
+        if self.block_diags_output:
+            x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                self._finalize_block_diags_output(
+                    x_pool=x_pooled,
+                    adj_pool=adj_pool,
+                    batch=batch,
+                    batch_pooled=batch_pooled,
+                    so=so,
+                )
+            )
+            return PoolingOutput(
+                x=x_pooled,
+                edge_index=edge_index_pooled,
+                edge_weight=edge_weight_pooled,
+                batch=batch_pooled,
+                so=so,
+                loss=loss,
             )
 
-            out = PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
-
-            return out
+        return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
     def compute_loss(
         self, adj: Tensor, S: Tensor, adj_pool: Tensor, mask: Optional[Tensor] = None

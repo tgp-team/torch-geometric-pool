@@ -205,6 +205,10 @@ class SelectOutput:
         return isinstance(self.s, Tensor) and self.s.is_sparse
 
     @property
+    def is_dense(self) -> bool:
+        return isinstance(self.s, Tensor) and not self.s.is_sparse
+
+    @property
     def num_nodes(self) -> int:
         return self.s.size(-2)
 
@@ -414,7 +418,7 @@ class Select(torch.nn.Module):
     supernode assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{N \times K}`.
     """
 
-    is_dense_batched: bool = False
+    is_dense: bool = False
 
     def reset_parameters(self):
         pass

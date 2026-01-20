@@ -22,6 +22,8 @@ poolers = {
 for _pool, args in poolers.items():
     pooler = get_pooler(_pool, **args)
 
+    print(f"=== Using pooler: {_pool} ===")
+
     ### Get the data
     dataset = TUDataset(
         root="../data/TUDataset",

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor, nn
@@ -69,7 +69,7 @@ class Reduce(nn.Module):
         *,
         batch: Optional[Tensor] = None,
         **kwargs,
-    ) -> Tensor:
+    ) -> Tuple[Tensor, Optional[Tensor]]:
         r"""Forward pass.
 
         Args:
@@ -117,8 +117,11 @@ class BaseReduce(Reduce):
         self,
         x: Tensor,
         so: SelectOutput,
+        *,
         batch: Optional[Tensor] = None,
-    ) -> Tensor:
+        return_batched: bool = False,
+        **kwargs,
+    ) -> Tuple[Tensor, Optional[Tensor]]:
         r"""Forward pass.
 
         Args:
@@ -130,6 +133,10 @@ class BaseReduce(Reduce):
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
+            return_batched (bool, optional):
+                If :obj:`True`, returns a batched output of shape :math:`[B, K, F]`
+                when using a dense :math:`[N, K]` assignment matrix on multi-graph
+                batches. (default: :obj:`False`)
         """
         # If batch is not provided, try to retrieve it from SelectOutput
         # This is necessary for multi-graph batches with dense [N, K] tensors,
@@ -138,6 +145,10 @@ class BaseReduce(Reduce):
             batch = so.batch
 
         if so.s.is_sparse:
+            if return_batched:
+                raise ValueError(
+                    "return_batched=True is only supported for dense assignment matrices."
+                )
             src = x[so.node_index]
             values = so.s.values()
             if values is not None and self.operation != "any":
@@ -162,7 +173,7 @@ class BaseReduce(Reduce):
                 batch_max = int(batch.max().item())
                 if batch_min != batch_max:
                     # Multi-graph batch with dense [N, K] tensor
-                    # Process each graph separately and concatenate
+                    # Process each graph separately and concatenate or stack
                     unbatched_s = unbatch(so.s, batch)  # list of [N_i, K] tensors
                     unbatched_x = unbatch(x, batch)  # list of [N_i, F] tensors
 
@@ -172,13 +183,18 @@ class BaseReduce(Reduce):
                         x_pool_i = s_i.t().matmul(x_i)
                         x_pool_list.append(x_pool_i)
 
-                    x_pool = torch.cat(x_pool_list, dim=0)  # [B*K, F]
+                    if return_batched:
+                        x_pool = torch.stack(x_pool_list, dim=0)  # [B, K, F]
+                    else:
+                        x_pool = torch.cat(x_pool_list, dim=0)  # [B*K, F]
                 else:
                     # Single-graph batch: simple matmul
                     x_pool = so.s.transpose(-2, -1).matmul(x)
             else:
                 # Single graph without batch: simple matmul
                 x_pool = so.s.transpose(-2, -1).matmul(x)
+            if return_batched and x_pool.dim() == 2:
+                x_pool = x_pool.unsqueeze(0)
 
         batch_pool = self.reduce_batch(so, batch)
         return x_pool, batch_pool

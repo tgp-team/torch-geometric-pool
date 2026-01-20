@@ -8,7 +8,7 @@ from tgp.select import Select, SelectOutput
 from tgp.utils.typing import SinvType
 
 
-class DenseSelect(Select):
+class MLPSelect(Select):
     r"""The :math:`\texttt{select}` operator used by most of the dense pooling methods.
 
     It computes a dense assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
@@ -42,7 +42,7 @@ class DenseSelect(Select):
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
-    is_dense_batched: bool = True
+    is_dense: bool = True
 
     def __init__(
         self,
