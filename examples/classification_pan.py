@@ -51,7 +51,7 @@ class Net(torch.nn.Module):
         )
 
         # Pooling
-        self.pooler = pooler_kwargs.update({"in_channels": hidden_channels})
+        pooler_kwargs["in_channels"] = hidden_channels
         self.pooler = get_pooler(pooler_type, **pooler_kwargs)
         print(self.pooler)
 

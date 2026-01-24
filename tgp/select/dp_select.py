@@ -5,7 +5,8 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Beta
 
-from tgp.select import MLPSelect, SelectOutput
+from tgp.select import SelectOutput
+from tgp.select.mlp_select import MLPSelect
 from tgp.utils.typing import SinvType
 
 

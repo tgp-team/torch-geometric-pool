@@ -51,7 +51,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
                 self.conv_enc = GCNConv(dataset.num_features, hidden_channels)
 
-                pooler_kwargs.update({"in_channels": hidden_channels})
+                pooler_kwargs["in_channels"] = hidden_channels
                 self.pooler = get_pooler(pooler_type, **pooler_kwargs)
                 print(self.pooler)
                 self.pooler.reset_parameters()
