@@ -13,8 +13,7 @@ from tgp.lift import Lift
 from tgp.reduce import Reduce, dense_global_reduce, global_reduce
 from tgp.select import Select, SelectOutput
 from tgp.utils import Signature, connectivity_to_edge_index, foo_signature
-from tgp.utils.ops import dense_to_block_diag as ops_dense_to_block_diag
-from tgp.utils.ops import is_dense_adj as ops_is_dense_adj
+from tgp.utils.ops import dense_to_block_diag, is_dense_adj
 from tgp.utils.typing import ReduceType
 
 
@@ -132,8 +131,6 @@ class SRCPooling(torch.nn.Module):
         connector: Connect = None,
         cached: bool = False,
         node_dim: int = -2,
-        batched: bool = False,
-        block_diags_output: bool = True,
     ):
         super().__init__()
         self.selector = selector
@@ -142,8 +139,6 @@ class SRCPooling(torch.nn.Module):
         self.connector = connector
         self.node_dim = node_dim
         self.cached = cached
-        self.batched = batched
-        self.block_diags_output = block_diags_output
         self._so_cached = None
         self._pooled_edge_index = None
         self._pooled_edge_weight = None
@@ -233,16 +228,8 @@ class SRCPooling(torch.nn.Module):
     ) -> Tensor:
         r"""Global pooling operation.
 
-        It is just a wrapper for :func:`~tgp.reduce.global_reduce`, but it also
-        supports dense batched inputs by delegating to
-        :func:`~tgp.reduce.dense_global_reduce`.
+        It is just a wrapper for :func:`~tgp.reduce.global_reduce`.
         """
-        if (
-            not self.block_diags_output
-        ):  # TODO: is this currently only needed for lapool?
-            if x.dim() == 2:
-                x = x.unsqueeze(0)
-            return dense_global_reduce(x, reduce_op, self.node_dim)
         return global_reduce(x, reduce_op, batch, size, self.node_dim)
 
     @property
@@ -379,9 +366,9 @@ class DenseSRCPooling(SRCPooling):
             connector=connector,
             cached=cached,
             node_dim=node_dim,
-            batched=batched,
-            block_diags_output=block_diags_output,
         )
+        self.batched = batched
+        self.block_diags_output = block_diags_output
         self.adj_transpose = adj_transpose
         self.cache_preprocessing = cache_preprocessing
         self.preprocessing_cache = None
@@ -468,14 +455,6 @@ class DenseSRCPooling(SRCPooling):
 
         return x, adj, mask
 
-    @staticmethod
-    def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
-        return ops_dense_to_block_diag(adj_pool)
-
-    @staticmethod
-    def is_dense_adj(edge_index: Adj) -> bool:
-        return ops_is_dense_adj(edge_index)
-
     def _ensure_batched_inputs(
         self,
         x: Tensor,
@@ -492,11 +471,12 @@ class DenseSRCPooling(SRCPooling):
             use_cache = self.cache_preprocessing
 
         if use_cache and batch is not None and batch.numel() > 0:
+            # Disable cache for multiple graphs in the batch
             batch_min = int(batch.min().item())
             batch_max = int(batch.max().item())
             use_cache = batch_min == batch_max
 
-        if self.is_dense_adj(edge_index):
+        if is_dense_adj(edge_index):
             x = x.unsqueeze(0) if x.dim() == 2 else x
             if mask is None:
                 mask = x.new_ones(x.size(0), x.size(1), dtype=torch.bool)
@@ -515,6 +495,9 @@ class DenseSRCPooling(SRCPooling):
         return x, adj, mask
 
     def clear_cache(self):
+        r"""Clear the caching done by :math:`\texttt{select}` and :math:`\texttt{connect}`
+        and the preprocessing cache.
+        """
         super().clear_cache()
         self.preprocessing_cache = None
 
@@ -526,7 +509,8 @@ class DenseSRCPooling(SRCPooling):
         batch_pooled: Optional[Tensor],
         so: SelectOutput,
     ) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor]]:
-        edge_index, edge_weight = self.dense_to_block_diag(adj_pool)
+        """Convert batched dense outputs to block-diagonal sparse representation."""
+        edge_index, edge_weight = dense_to_block_diag(adj_pool)
         x_pool = x_pool.reshape(-1, x_pool.size(-1))
 
         if batch_pooled is None and batch is not None:
@@ -547,7 +531,11 @@ class DenseSRCPooling(SRCPooling):
         size: Optional[int] = None,
     ) -> Tensor:
         r"""Global pooling operation for dense pooling methods."""
-        return super().global_pool(x, reduce_op, batch, size)
+        if not self.block_diags_output:
+            if x.dim() == 2:
+                x = x.unsqueeze(0)
+            return dense_global_reduce(x, reduce_op, self.node_dim)
+        return global_reduce(x, reduce_op, batch, size, self.node_dim)
 
 
 class Precoarsenable:

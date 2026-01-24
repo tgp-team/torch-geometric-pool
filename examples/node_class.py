@@ -64,7 +64,8 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 else:
                     self.conv_pool = GCNConv(hidden_channels, hidden_channels // 2)
 
-                self.use_dense_input_adj = self.pooler.batched and getattr(
+                self.pooler_batched = getattr(self.pooler, "batched", False)
+                self.use_dense_input_adj = self.pooler_batched and getattr(
                     self.pooler, "cache_preprocessing", False
                 )
                 if self.use_dense_input_adj:
@@ -123,7 +124,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                         x_lift = x_lift[0]
                     x = self.conv_dec(x_lift, edge_index, edge_weight)
 
-                if self.pooler.batched and x.dim() == 3:
+                if self.pooler_batched and x.dim() == 3:
                     x = x[0]
                 if out.loss is not None:
                     return F.log_softmax(x, dim=-1), sum(out.get_loss_value())

@@ -6,6 +6,7 @@ Tests the DenseConnect class for dense pooling methods.
 import pytest
 import torch
 
+from tests.test_utils import make_dense_assignment
 from tgp.connect import DenseConnect
 from tgp.select import SelectOutput
 
@@ -170,6 +171,18 @@ class TestDenseConnect:
         with pytest.raises(ValueError, match="SelectOutput is required"):
             connector(adj, so=None)
 
+    def test_dense_connect_rejects_sparse_assignment(self, pooler_test_graph_dense):
+        """DenseConnect should reject sparse assignment matrices."""
+        _, adj = pooler_test_graph_dense
+        s_sparse = torch.sparse_coo_tensor(
+            torch.tensor([[0, 1], [0, 1]]),
+            torch.ones(2),
+            size=(2, 2),
+        ).coalesce()
+
+        with pytest.raises(ValueError, match="dense assignment matrix"):
+            DenseConnect()(adj, SelectOutput(s=s_sparse))
+
     def test_dense_connect_prepare_dense_inputs(self):
         """Test DenseConnect._prepare_dense_inputs static method."""
         # Test with 2D inputs (should add batch dimension)
@@ -193,6 +206,24 @@ class TestDenseConnect:
         adj_mismatch = torch.randn(3, 4, 4)
         with pytest.raises(ValueError, match="batch sizes do not match"):
             DenseConnect._prepare_dense_inputs(s_mismatch, adj_mismatch)
+
+    def test_dense_connect_prepare_dense_inputs_invalid_dims(self):
+        """Test DenseConnect._prepare_dense_inputs with invalid dimensions."""
+        s_invalid = torch.randn(4)
+        adj = torch.randn(4, 4)
+        with pytest.raises(ValueError, match="Expected dense inputs with 3 dimensions"):
+            DenseConnect._prepare_dense_inputs(s_invalid, adj)
+
+    def test_dense_connect_rejects_non_tensor_assignment(self):
+        """DenseConnect should reject non-tensor assignments."""
+        adj = torch.randn(1, 2, 2)
+
+        class Dummy:
+            def __init__(self, s):
+                self.s = s
+
+        with pytest.raises(TypeError, match="SelectOutput.s must be a torch.Tensor"):
+            DenseConnect()(adj, Dummy([[1.0, 0.0], [0.0, 1.0]]))
 
 
 class TestDenseConnectUnbatched:
@@ -220,16 +251,9 @@ class TestDenseConnectUnbatched:
         x, edge_index, edge_weight, batch = pooler_test_graph_sparse
         num_nodes = x.size(0)
 
-        # Create sparse assignment matrix (COO format)
+        # Create dense assignment matrix
         k = num_nodes // 2
-        eye_indices = torch.arange(k, dtype=torch.long)
-        s = torch.sparse_coo_tensor(
-            torch.stack([eye_indices, eye_indices]),
-            torch.ones(k, dtype=torch.float),
-            size=(num_nodes, k),
-        ).coalesce()
-
-        so = SelectOutput(s=s)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
 
         connector = DenseConnect(
             remove_self_loops=False, degree_norm=False, unbatched_output="block"
@@ -244,26 +268,16 @@ class TestDenseConnectUnbatched:
         assert adj_pool.size(0) == 2
         assert edge_weight_pool is not None
 
-    @pytest.mark.torch_sparse
     def test_dense_connect_unbatched_with_torch_coo_input(
         self, pooler_test_graph_sparse
     ):
         """Test DenseConnect with torch COO sparse tensor input."""
-        pytest.importorskip("torch_sparse")
-
         x, edge_index, edge_weight, batch = pooler_test_graph_sparse
         num_nodes = x.size(0)
 
-        # Create sparse assignment matrix
+        # Create dense assignment matrix
         k = num_nodes // 2
-        eye_indices = torch.arange(k, dtype=torch.long)
-        s = torch.sparse_coo_tensor(
-            torch.stack([eye_indices, eye_indices]),
-            torch.ones(k, dtype=torch.float),
-            size=(num_nodes, k),
-        ).coalesce()
-
-        so = SelectOutput(s=s)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
 
         # Convert edge_index to torch COO sparse tensor
         edge_index_coo = torch.sparse_coo_tensor(
@@ -282,6 +296,32 @@ class TestDenseConnectUnbatched:
         assert adj_pool.is_sparse
         assert edge_weight_pool is None  # Edge weights are embedded in sparse tensor
 
+    @pytest.mark.torch_sparse
+    def test_dense_connect_unbatched_sparse_tensor_edge_weight_view(
+        self, sparse_tensor_class
+    ):
+        """Test SparseTensor input with 2D edge weights in multi-graph path."""
+        num_nodes = 6
+        edge_index = torch.tensor([[0, 1, 3, 4], [1, 0, 4, 3]], dtype=torch.long)
+        edge_weight = torch.tensor([[1.0], [2.0], [3.0], [4.0]], dtype=torch.float)
+        adj_spt = sparse_tensor_class(
+            row=edge_index[0],
+            col=edge_index[1],
+            value=edge_weight,
+            sparse_sizes=(num_nodes, num_nodes),
+        )
+        batch = torch.tensor([0, 0, 0, 1, 1, 1], dtype=torch.long)
+        k = 2
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
+
+        connector = DenseConnect(unbatched_output="batch", remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(
+            edge_index=adj_spt, edge_weight=None, so=so, batch=batch
+        )
+
+        assert adj_pool.shape == (2, k, k)
+        assert edge_weight_pool is None
+
     def test_dense_connect_unbatched_degree_norm_empty_after_remove_self_loops(self):
         """Test DenseConnect with degree_norm=True and graph that becomes empty after remove_self_loops."""
         connector = DenseConnect(remove_self_loops=True, degree_norm=True)
@@ -289,14 +329,7 @@ class TestDenseConnectUnbatched:
         # Create assignment matrix
         num_nodes = 2
         k = 2
-        eye_indices = torch.arange(k, dtype=torch.long)
-        s = torch.sparse_coo_tensor(
-            torch.stack([eye_indices, eye_indices]),
-            torch.ones(k, dtype=torch.float),
-            size=(num_nodes, k),
-        ).coalesce()
-
-        so = SelectOutput(s=s)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
 
         # Create graph with only self-loops - after pooling and removing self-loops, becomes empty
         edge_index = torch.tensor([[0, 0], [0, 0]], dtype=torch.long)  # Only self-loops
@@ -317,16 +350,9 @@ class TestDenseConnectUnbatched:
         x, edge_index, edge_weight, batch = pooler_test_graph_sparse
         num_nodes = x.size(0)
 
-        # Create sparse assignment matrix
+        # Create dense assignment matrix
         k = num_nodes // 2
-        eye_indices = torch.arange(k, dtype=torch.long)
-        s = torch.sparse_coo_tensor(
-            torch.stack([eye_indices, eye_indices]),
-            torch.ones(k, dtype=torch.float),
-            size=(num_nodes, k),
-        ).coalesce()
-
-        so = SelectOutput(s=s)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
 
         connector = DenseConnect(edge_weight_norm=True)
 
@@ -350,6 +376,22 @@ class TestDenseConnectUnbatched:
         with pytest.raises(ValueError, match="Edge index must be of type"):
             connector(edge_index=invalid_edge_index, edge_weight=None, so=so)
 
+    def test_dense_connect_unbatched_invalid_assignment_shape(self):
+        """Test that DenseConnect rejects invalid dense assignment shapes."""
+        connector = DenseConnect(unbatched_output="block")
+        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+        s = torch.randn(2, 4, 2)  # invalid unbatched: batch dimension > 1
+        with pytest.raises(ValueError, match="SelectOutput.s must have shape"):
+            connector(edge_index=edge_index, edge_weight=None, so=SelectOutput(s=s))
+
+    def test_dense_connect_unbatched_invalid_assignment_dim(self):
+        """Test that DenseConnect rejects assignments with invalid dimensions."""
+        connector = DenseConnect(unbatched_output="block")
+        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+        s = torch.randn(1, 2, 2, 2)
+        with pytest.raises(ValueError, match="SelectOutput.s must have shape"):
+            connector(edge_index=edge_index, edge_weight=None, so=SelectOutput(s=s))
+
     def test_dense_connect_unbatched_unbatched_output_block(
         self, pooler_test_graph_sparse
     ):
@@ -359,13 +401,7 @@ class TestDenseConnectUnbatched:
 
         # Create dense assignment matrix
         k = num_nodes // 2
-        s = torch.zeros(num_nodes, k)
-        for i in range(num_nodes):
-            cluster = i // 2
-            if cluster < k:
-                s[i, cluster] = 1.0
-
-        so = SelectOutput(s=s)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
 
         connector = DenseConnect(unbatched_output="block", remove_self_loops=True)
         adj_pool, edge_weight_pool = connector(
@@ -377,6 +413,27 @@ class TestDenseConnectUnbatched:
         assert adj_pool.size(0) == 2  # edge_index format
         assert edge_weight_pool is not None
 
+    def test_dense_connect_unbatched_filters_small_edges(self, monkeypatch):
+        """Test dropping near-zero edges in block output."""
+        import tgp.connect.dense_conn as dense_conn
+
+        num_nodes = 3
+        edge_index = torch.tensor([[0, 1, 1], [1, 0, 2]], dtype=torch.long)
+        edge_weight = torch.tensor([0.5, 0.5, 2.0], dtype=torch.float)
+        so = SelectOutput(s=torch.eye(num_nodes))
+        connector = DenseConnect(
+            unbatched_output="block", remove_self_loops=False, degree_norm=False
+        )
+
+        monkeypatch.setattr(dense_conn, "eps", 1.0)
+        adj_pool, edge_weight_pool = connector(
+            edge_index=edge_index, edge_weight=edge_weight, so=so
+        )
+
+        assert adj_pool.size(0) == 2
+        assert edge_weight_pool.numel() == 1
+        assert torch.all(edge_weight_pool > 1.0)
+
     def test_dense_connect_unbatched_unbatched_output_batch(
         self, pooler_test_graph_sparse
     ):
@@ -386,13 +443,7 @@ class TestDenseConnectUnbatched:
 
         # Create dense assignment matrix
         k = num_nodes // 2
-        s = torch.zeros(num_nodes, k)
-        for i in range(num_nodes):
-            cluster = i // 2
-            if cluster < k:
-                s[i, cluster] = 1.0
-
-        so = SelectOutput(s=s)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
 
         connector = DenseConnect(unbatched_output="batch", remove_self_loops=True)
         adj_pool, edge_weight_pool = connector(
@@ -406,3 +457,92 @@ class TestDenseConnectUnbatched:
         assert adj_pool.size(1) == k
         assert adj_pool.size(2) == k
         assert edge_weight_pool is None
+
+    def test_dense_connect_unbatched_multi_graph_batch_output(
+        self, pooler_test_graph_sparse_batch_tuple
+    ):
+        """Test unbatched multi-graph path with batch output."""
+        x, edge_index, edge_weight, batch = pooler_test_graph_sparse_batch_tuple
+        batch_size = int(batch.max().item()) + 1
+        k = 2
+        so = SelectOutput(s=make_dense_assignment(x.size(0), k))
+
+        connector = DenseConnect(unbatched_output="batch", remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(
+            edge_index=edge_index, edge_weight=None, so=so, batch=batch
+        )
+
+        assert adj_pool.shape == (batch_size, k, k)
+        assert edge_weight_pool is None
+
+    def test_dense_connect_unbatched_empty_single_graph(self):
+        """Test unbatched single-graph path with no edges."""
+        num_nodes = 4
+        k = 2
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
+
+        connector = DenseConnect(unbatched_output="batch", remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(
+            edge_index=edge_index, edge_weight=None, so=so, batch=None
+        )
+
+        assert edge_weight_pool is None
+        assert torch.allclose(adj_pool, torch.zeros_like(adj_pool))
+
+    def test_dense_connect_unbatched_empty_multi_graph(self):
+        """Test unbatched multi-graph path with no edges."""
+        num_nodes = 4
+        k = 2
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+        so = SelectOutput(s=make_dense_assignment(num_nodes, k))
+
+        connector = DenseConnect(unbatched_output="batch", remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(
+            edge_index=edge_index, edge_weight=None, so=so, batch=batch
+        )
+
+        assert edge_weight_pool is None
+        assert torch.allclose(adj_pool, torch.zeros_like(adj_pool))
+
+    def test_dense_connect_unbatched_edge_weight_norm_with_batch_pooled(
+        self, pooler_test_graph_sparse_batch_tuple
+    ):
+        """Test edge_weight_norm with provided batch_pooled in block output."""
+        x, edge_index, edge_weight, batch = pooler_test_graph_sparse_batch_tuple
+        batch_size = int(batch.max().item()) + 1
+        k = 2
+        so = SelectOutput(s=make_dense_assignment(x.size(0), k))
+        batch_pooled = torch.arange(batch_size).repeat_interleave(k)
+
+        connector = DenseConnect(
+            edge_weight_norm=True, unbatched_output="block", remove_self_loops=False
+        )
+        adj_pool, edge_weight_pool = connector(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            so=so,
+            batch=batch,
+            batch_pooled=batch_pooled,
+        )
+
+        assert isinstance(adj_pool, torch.Tensor)
+        assert edge_weight_pool is not None
+        assert not torch.isnan(edge_weight_pool).any()
+        assert not torch.isinf(edge_weight_pool).any()
+
+    @pytest.mark.torch_sparse
+    def test_dense_connect_unbatched_sparse_tensor_input(
+        self, pooler_test_graph_sparse_spt, sparse_tensor_class
+    ):
+        """Test DenseConnect with SparseTensor input (returns SparseTensor)."""
+        x, adj_spt, edge_weight, batch = pooler_test_graph_sparse_spt
+        k = x.size(0) // 2
+        so = SelectOutput(s=make_dense_assignment(x.size(0), k))
+
+        connector = DenseConnect(unbatched_output="block", remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(edge_index=adj_spt, so=so, batch=batch)
+
+        assert edge_weight_pool is None
+        assert isinstance(adj_pool, sparse_tensor_class)

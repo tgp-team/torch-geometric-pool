@@ -66,12 +66,15 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 print(self.pooler)
 
                 # Second MP layer
-                if self.pooler.block_diags_output:
-                    self.conv2 = GCNConv(
+                self.use_dense_pool_adj = (
+                    self.pooler.is_dense and not self.pooler.block_diags_output
+                )
+                if self.use_dense_pool_adj:
+                    self.conv2 = DenseGCNConv(
                         in_channels=hidden_channels, out_channels=hidden_channels
                     )
                 else:
-                    self.conv2 = DenseGCNConv(
+                    self.conv2 = GCNConv(
                         in_channels=hidden_channels, out_channels=hidden_channels
                     )
 
@@ -90,10 +93,10 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 x_pool, adj_pool = out.x, out.edge_index
 
                 # Second MP layer
-                if self.pooler.block_diags_output:
-                    x = self.conv2(x_pool, adj_pool, out.edge_weight)
-                else:
+                if self.use_dense_pool_adj:
                     x = self.conv2(x_pool, adj_pool)
+                else:
+                    x = self.conv2(x_pool, adj_pool, out.edge_weight)
                 x = F.relu(x)
 
                 # Global pooling

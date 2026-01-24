@@ -21,8 +21,12 @@ import torch
 from torch import Tensor
 from torch_geometric.data import Batch, Data
 from torch_geometric.utils import (
+    add_self_loops as pyg_add_self_loops,
+)
+from torch_geometric.utils import (
     barabasi_albert_graph,
     erdos_renyi_graph,
+    to_undirected,
 )
 
 
@@ -40,6 +44,14 @@ def set_test_seed(seed: int = 42) -> None:
 def set_random_seed(seed: int = 42) -> None:
     """Convenience alias for set_test_seed(42). Use in fixtures for reproducible tests."""
     set_test_seed(seed)
+
+
+def make_dense_assignment(num_nodes: int, num_clusters: int) -> Tensor:
+    """Create a simple dense [N, K] hard assignment matrix."""
+    s = torch.zeros(num_nodes, num_clusters)
+    for i in range(num_nodes):
+        s[i, i % num_clusters] = 1.0
+    return s
 
 
 # ============================================================================
@@ -147,7 +159,7 @@ def make_chain_graph_sparse(
     edge_weight = torch.ones(E, dtype=torch.float)
 
     if add_self_loops:
-        edge_index, edge_weight = add_self_loops(
+        edge_index, edge_weight = pyg_add_self_loops(
             edge_index, edge_attr=edge_weight, num_nodes=N
         )
 
@@ -335,7 +347,8 @@ def make_barabasi_albert_sparse(
         torch.manual_seed(seed)
 
     # Generate BA graph
-    edge_index = barabasi_albert_graph(N, m, directed=False)
+    edge_index = barabasi_albert_graph(N, m)
+    edge_index = to_undirected(edge_index)
 
     E = edge_index.size(1)
     x = torch.randn((N, F_dim), dtype=torch.float)
@@ -367,7 +380,8 @@ def make_barabasi_albert_dense(
     x = torch.randn((N, F_dim), dtype=torch.float)
 
     # Generate BA graph as sparse first, then convert to dense
-    edge_index = barabasi_albert_graph(N, m, directed=False)
+    edge_index = barabasi_albert_graph(N, m)
+    edge_index = to_undirected(edge_index)
 
     # Create dense adjacency
     adj = torch.zeros((N, N), dtype=torch.float)

@@ -15,12 +15,8 @@ from tgp.utils.ops import (
     connectivity_to_edge_index,
     connectivity_to_sparsetensor,
     connectivity_to_torch_coo,
-)
-from tgp.utils.ops import (
-    dense_to_block_diag as ops_dense_to_block_diag,
-)
-from tgp.utils.ops import (
-    is_dense_adj as ops_is_dense_adj,
+    dense_to_block_diag,
+    is_dense_adj,
 )
 
 
@@ -37,7 +33,7 @@ class DenseConnect(Connect):
 
     .. math::
         \mathbf{A}_{\mathrm{pool}} =
-        \mathbf{S}^{\top}\mathbf{A}\mathbf{S}_{\mathrm{inv}}^{\top}
+        \mathbf{S}^{\top}\mathbf{A}\mathbf{S}
 
     Args:
         remove_self_loops (bool, optional):
@@ -48,7 +44,7 @@ class DenseConnect(Connect):
             (default: :obj:`True`)
         adj_transpose (bool, optional):
             If :obj:`True`, it returns a transposed pooled adjacency matrix for
-            dense outputs, so that it can be passed "as is" to the dense
+            batched dense outputs, so that it can be passed "as is" to the dense
             message passing layers.
             (default: :obj:`True`)
         edge_weight_norm (bool, optional):
@@ -83,10 +79,6 @@ class DenseConnect(Connect):
         self.unbatched_output = unbatched_output
 
     @staticmethod
-    def _is_dense_adj(edge_index: Adj) -> bool:
-        return ops_is_dense_adj(edge_index)
-
-    @staticmethod
     def _prepare_dense_inputs(s: Tensor, adj: Tensor) -> Tuple[Tensor, Tensor]:
         if s.dim() == 2:
             s = s.unsqueeze(0)
@@ -100,6 +92,17 @@ class DenseConnect(Connect):
                 f"got s.size(0)={s.size(0)} and adj.size(0)={adj.size(0)}."
             )
         return s, adj
+
+    @staticmethod
+    def _validate_select_output(so: SelectOutput) -> Tensor:
+        if so is None:
+            raise ValueError("SelectOutput is required for DenseConnect.")
+        s = so.s
+        if not isinstance(s, Tensor):
+            raise TypeError("SelectOutput.s must be a torch.Tensor.")
+        if s.is_sparse:
+            raise ValueError("DenseConnect expects a dense assignment matrix.")
+        return s
 
     @staticmethod
     def dense_connect(
@@ -123,6 +126,7 @@ class DenseConnect(Connect):
         if remove_self_loops:
             torch.diagonal(adj_pool, dim1=-2, dim2=-1)[:] = 0
 
+        # Apply degree normalization D^{-1/2} A D^{-1/2}
         if degree_norm:
             if adj_transpose:
                 # For the transposed output the "row" sum is along axis -2
@@ -133,9 +137,8 @@ class DenseConnect(Connect):
             d = torch.sqrt(d.clamp(min=eps))
             adj_pool = (adj_pool / d) / d.transpose(-2, -1)
 
+        # Normalize edge weights by maximum absolute value per graph
         if edge_weight_norm:
-            # Per-graph normalization for dense adjacency matrices
-            # adj_pool has shape [batch_size, num_supernodes, num_supernodes]
             batch_size = adj_pool.size(0)
             # Find max absolute value per graph: [batch_size, 1, 1]
             max_per_graph = (
@@ -151,10 +154,6 @@ class DenseConnect(Connect):
             adj_pool = adj_pool / max_per_graph
 
         return adj_pool
-
-    @staticmethod
-    def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
-        return ops_dense_to_block_diag(adj_pool)
 
     def forward(
         self,
@@ -174,7 +173,8 @@ class DenseConnect(Connect):
                 For unbatched pooling, a sparse connectivity matrix in one of the
                 formats supported by :class:`~torch_geometric.typing.Adj`.
             so (~tgp.select.SelectOutput):
-                The output of the :math:`\texttt{select}` operator.
+                The output of the :math:`\texttt{select}` operator. The assignment
+                matrix :attr:`so.s` must be a **dense** tensor.
             edge_weight (~torch.Tensor, optional):
                 A vector of shape :math:`[E]` or :math:`[E, 1]` containing the
                 weights of the edges for unbatched inputs. (default: :obj:`None`)
@@ -189,24 +189,20 @@ class DenseConnect(Connect):
             The pooled adjacency matrix and the edge weights. If the pooled
             adjacency is dense, returns :obj:`None` for the edge weights.
         """
-        if so is None:
-            raise ValueError("SelectOutput is required for DenseConnect.")
-
-        if self._is_dense_adj(edge_index):
-            return self._forward_dense(edge_index, so)
+        s = self._validate_select_output(so)
+        if is_dense_adj(edge_index):
+            return self._forward_dense(edge_index, s)
 
         return self._forward_unbatched(
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            so=so,
+            s=s,
             batch_pooled=batch_pooled,
         )
 
-    def _forward_dense(self, adj: Tensor, so: SelectOutput) -> Tuple[Tensor, None]:
-        if not isinstance(so.s, Tensor):
-            raise TypeError("SelectOutput.s must be a tensor")
-        s, adj = self._prepare_dense_inputs(so.s, adj)
+    def _forward_dense(self, adj: Tensor, s: Tensor) -> Tuple[Tensor, None]:
+        s, adj = self._prepare_dense_inputs(s, adj)
 
         adj_pool = self.dense_connect(s, adj)
 
@@ -230,15 +226,14 @@ class DenseConnect(Connect):
         num_clusters: int,
         batch_size: int,
     ) -> Tensor:
-        if s.is_sparse:
-            raise ValueError("DenseConnect expects a dense assignment matrix.")
-
+        """Compute a dense pooled adjacency tensor of shape [B, K, K]."""
+        # Single graph case
         if batch_size == 1:
             edge_index_coo = connectivity_to_torch_coo(
                 edge_index, edge_weight, num_nodes=num_nodes
             )
 
-            if edge_index_coo._nnz() == 0:
+            if edge_index_coo._nnz() == 0:  # No edges
                 adj_pooled_dense = s.new_zeros((num_clusters, num_clusters))
             else:
                 temp = torch.sparse.mm(edge_index_coo, s)
@@ -246,12 +241,14 @@ class DenseConnect(Connect):
 
             return adj_pooled_dense.unsqueeze(0)
 
+        # Multi-graph case
         edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
             edge_index, edge_weight
         )
         E = edge_index_conv.size(1)
         dev = edge_index_conv.device
 
+        # Make sure edge weights are 1D
         if edge_weight_conv is None:
             edge_weight_conv = torch.ones(E, device=dev)
         elif edge_weight_conv.dim() > 1:
@@ -260,7 +257,7 @@ class DenseConnect(Connect):
         unbatched_s = unbatch(s, batch=batch)  # list of B elements, each Ni x K
 
         out_list = []
-        if E == 0:
+        if E == 0:  # No edges in the entire batch
             for unb_s in unbatched_s:
                 out_list.append(unb_s.new_zeros((num_clusters, num_clusters)))
         else:
@@ -281,36 +278,37 @@ class DenseConnect(Connect):
                 out = unb_s.t().matmul(temp)
                 out_list.append(out)
 
-        return torch.stack(out_list, dim=0)
+        return torch.stack(out_list, dim=0)  # has shape [B, K, K]
 
     def _forward_unbatched(
         self,
         edge_index: Adj,
         edge_weight: Optional[Tensor],
         batch: Optional[Tensor],
-        so: SelectOutput,
+        s: Tensor,
         batch_pooled: Optional[Tensor],
     ) -> Tuple[Adj, Optional[Tensor]]:
+        """Connect unbatched inputs with dense assignments."""
         # Determine batch size
         batch_size = 1 if batch is None else int(batch.max().item()) + 1
 
-        if not isinstance(so.s, Tensor):
-            raise TypeError("DenseConnect expects SelectOutput.s to be a tensor.")
-
-        s = so.s
         if s.dim() == 3:
             if s.size(0) != 1:
                 raise ValueError(
-                    "DenseConnect expects a 2D assignment matrix for multi-graph batches."
+                    "[DenseConnect - unbatched]: SelectOutput.s must have shape "
+                    f"[N, K] or [1, N, K], but got {s.size()}."
                 )
             s = s.squeeze(0)
-
-        if s.is_sparse:
-            raise ValueError("DenseConnect expects a dense assignment matrix.")
+        elif s.dim() != 2:
+            raise ValueError(
+                "[DenseConnect - unbatched]: SelectOutput.s must have shape "
+                f"[N, K] or [1, N, K], but got {s.size()}."
+            )
 
         num_nodes = s.size(0)
         num_clusters = s.size(1)
 
+        # Compute pooled adjacency in dense format [B, K, K]
         adj_pool_dense = self._dense_unbatched_output(
             edge_index=edge_index,
             edge_weight=edge_weight,
@@ -321,6 +319,7 @@ class DenseConnect(Connect):
             batch_size=batch_size,
         )
 
+        # Return dense adjacency [B, K, K]
         if self.unbatched_output == "batch":
             adj_pool = self.postprocess_adj_pool(
                 adj_pool_dense,
@@ -346,7 +345,7 @@ class DenseConnect(Connect):
         elif isinstance(edge_index, Tensor) and edge_index.is_sparse:
             to_torch_coo = True
 
-        edge_index_out, edge_weight_out = self.dense_to_block_diag(adj_pool_dense)
+        edge_index_out, edge_weight_out = dense_to_block_diag(adj_pool_dense)
         num_supernodes = batch_size * num_clusters
 
         if self.remove_self_loops:
@@ -359,13 +358,14 @@ class DenseConnect(Connect):
                 edge_index_out = edge_index_out[:, mask]
                 edge_weight_out = edge_weight_out[mask]
 
+        # Apply degree normalization D^{-1/2} A D^{-1/2}
         if self.degree_norm:
             if edge_weight_out is None or edge_weight_out.numel() == 0:
                 edge_weight_out = torch.ones(
                     edge_index_out.size(1), device=edge_index_out.device
                 )
 
-            # Compute degree normalization D^{-1/2} A D^{-1/2}
+            # Compute degree
             deg = scatter(
                 edge_weight_out,
                 edge_index_out[0],
@@ -383,6 +383,7 @@ class DenseConnect(Connect):
                 * deg_inv_sqrt[edge_index_out[1]]
             )
 
+        # Normalize edge weights by maximum absolute value per graph
         if self.edge_weight_norm and edge_weight_out is not None:
             # Per-graph normalization using batch_pooled
             edge_batch = batch_pooled[edge_index_out[0]]
@@ -400,6 +401,7 @@ class DenseConnect(Connect):
             # Normalize edge weights by their respective graph's maximum
             edge_weight_out = edge_weight_out / max_per_graph[edge_batch]
 
+        # Convert back to the original format
         if to_sparsetensor:
             edge_index_out = connectivity_to_sparsetensor(
                 edge_index_out, edge_weight_out, num_supernodes

@@ -28,6 +28,7 @@ if spec is None or spec.loader is None:
 
 test_utils = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(test_utils)
+sys.modules["tests.test_utils"] = test_utils
 
 # Extract the functions we need
 make_pooler_test_graph_dense = test_utils.make_pooler_test_graph_dense
@@ -127,9 +128,13 @@ def pooler_test_graph_sparse_batch_tuple():
     import torch
 
     b = make_pooler_test_graph_sparse_batch(seed=42)
-    ew = getattr(b, "edge_attr", None) or getattr(
-        b, "edge_weight", torch.ones(b.edge_index.size(1))
-    )
+    ew = getattr(b, "edge_attr", None)
+    if ew is None:
+        ew = getattr(b, "edge_weight", None)
+    if ew is None:
+        ew = torch.ones(
+            b.edge_index.size(1), device=b.edge_index.device, dtype=torch.float
+        )
     return b.x, b.edge_index, ew, b.batch
 
 
