@@ -1,6 +1,6 @@
 import pytest
 import torch
-from torch_geometric.data import Batch, Data
+from torch_geometric.data import Data
 from torch_geometric.utils import to_dense_adj
 
 from tgp.data.loaders import PoolCollater, PoolDataLoader, PooledBatch
@@ -18,64 +18,37 @@ from tgp.poolers import (
     TopkPooling,  # Should NOT be precoarsenable
     get_pooler,
 )
+from tgp.src import Precoarsenable, SRCPooling
 
 # PANPooling requires torch_sparse, import conditionally
 try:
     from tgp.poolers import PANPooling
 except (ImportError, AssertionError):
     PANPooling = None
-from tgp.src import Precoarsenable, SRCPooling
-
-
-@pytest.fixture(scope="module")
-def sparse_batch_graph():
-    edge_index_1 = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long)
-    edge_weight_1 = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=torch.float)
-    x_1 = torch.randn((4, 3), dtype=torch.float)
-
-    edge_index_2 = torch.tensor(
-        [[1, 2, 3, 4, 2, 0], [0, 1, 2, 2, 3, 3]], dtype=torch.long
-    )
-    edge_weight_2 = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float)
-    x_2 = torch.randn((5, 3), dtype=torch.float)
-
-    edge_index_3 = torch.tensor([[0, 1, 3, 3, 2], [1, 0, 1, 2, 3]], dtype=torch.long)
-    edge_weight_3 = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5], dtype=torch.float)
-    x_3 = torch.randn((4, 3), dtype=torch.float)
-
-    data_batch = Batch.from_data_list(
-        [
-            Data(edge_index=edge_index_1, edge_attr=edge_weight_1, x=x_1),
-            Data(edge_index=edge_index_2, edge_attr=edge_weight_2, x=x_2),
-            Data(edge_index=edge_index_3, edge_attr=edge_weight_3, x=x_3),
-        ]
-    )
-    return data_batch
 
 
 poolers = ["ndp", "kmis", "graclus"]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
-def test_nmf_precoarsening(sparse_batch_graph, pooler_name):
+def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name):
     PARAMS = {
         "scorer": "degree",
     }
     pooler = get_pooler(pooler_name, **PARAMS)
 
-    data_batch = sparse_batch_graph
-    assert data_batch.num_graphs == 3
-    assert data_batch.num_nodes == 13
+    data_batch = pooler_test_graph_sparse_batch
+    num_nodes = data_batch.num_nodes
 
     pooling_out = pooler.precoarsening(
         x=data_batch.x,
         edge_index=data_batch.edge_index,
         edge_weight=data_batch.edge_attr,
         batch=data_batch.batch,
-        num_nodes=data_batch.num_nodes,
+        num_nodes=num_nodes,
     )
 
-    assert pooling_out.so.s.size(0) == 13
+    assert pooling_out.so.s.size(0) == num_nodes
     assert pooling_out.batch is not None
 
 
