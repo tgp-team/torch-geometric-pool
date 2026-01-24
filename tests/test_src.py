@@ -1,22 +1,8 @@
 import pytest
-import torch
 
+from tests.test_utils import make_chain_graph_sparse
 from tgp.poolers import MinCutPooling
 from tgp.src import SRCPooling
-
-
-@pytest.fixture(scope="module")
-def make_chain_graph(N=4, F_dim=5):
-    row = torch.arange(N - 1, dtype=torch.long)
-    col = row + 1
-    edge_index = torch.stack(
-        [torch.cat([row, col]), torch.cat([col, row])], dim=0
-    )  # undirected chain
-    E = edge_index.size(1)
-    x = torch.randn((N, F_dim), dtype=torch.float)
-    edge_weight = torch.ones(E, dtype=torch.float)
-    batch = torch.zeros(N, dtype=torch.long)
-    return x, edge_index, edge_weight, batch
 
 
 def test_compute_loss_none():
@@ -24,8 +10,8 @@ def test_compute_loss_none():
     assert pooler.compute_loss() is None
 
 
-def test_preprocessing(make_chain_graph):
-    x, edge_index, edge_weight, batch = make_chain_graph
+def test_preprocessing():
+    x, edge_index, edge_weight, batch = make_chain_graph_sparse(N=4, F_dim=5)
 
     # add a trailing dimension to edge_weight to simulate a feature dimension
     edge_weight = edge_weight.unsqueeze(-1)
