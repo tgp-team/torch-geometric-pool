@@ -1,79 +1,9 @@
 import pytest
 import torch
 from torch_geometric.nn import DenseGCNConv, GCNConv
-from torch_geometric.utils import add_self_loops, erdos_renyi_graph
 
 from tgp.poolers import get_pooler, pooler_map
 from tgp.select.base_select import SelectOutput
-
-
-@pytest.fixture(scope="module")
-def simple_graph():
-    F = 3
-    torch.manual_seed(42)  # For reproducibility
-
-    # Graph 1: Chain graph (directed) - 10 nodes
-    N1 = 10
-    row1 = torch.arange(N1 - 1, dtype=torch.long)
-    col1 = row1 + 1
-    edge_index1 = torch.stack([row1, col1], dim=0)  # Directed, no reverse edges
-    E1 = edge_index1.size(1)
-    x1 = torch.randn((N1, F), dtype=torch.float)
-    edge_weight1 = torch.ones(E1, dtype=torch.float)
-    edge_index1, edge_weight1 = add_self_loops(
-        edge_index1, edge_attr=edge_weight1, num_nodes=N1
-    )
-    batch1 = torch.zeros(N1, dtype=torch.long)
-
-    # Graph 2: Grid graph (undirected) - 3x3 grid = 9 nodes
-    N2 = 9
-    rows, cols = 3, 3
-    edge_list2 = []
-    # Horizontal edges
-    for i in range(rows):
-        for j in range(cols - 1):
-            node = i * cols + j
-            edge_list2.append([node, node + 1])
-            edge_list2.append([node + 1, node])  # Undirected
-    # Vertical edges
-    for i in range(rows - 1):
-        for j in range(cols):
-            node = i * cols + j
-            edge_list2.append([node, node + cols])
-            edge_list2.append([node + cols, node])  # Undirected
-    edge_index2 = torch.tensor(edge_list2, dtype=torch.long).t().contiguous()
-    E2 = edge_index2.size(1)
-    x2 = torch.randn((N2, F), dtype=torch.float)
-    edge_weight2 = torch.ones(E2, dtype=torch.float)
-    edge_index2, edge_weight2 = add_self_loops(
-        edge_index2, edge_attr=edge_weight2, num_nodes=N2
-    )
-    batch2 = torch.ones(N2, dtype=torch.long)
-
-    # Graph 3: Random graph (undirected, some nodes might be disconnected) - 20 nodes
-    N3 = 20
-    edge_index3 = erdos_renyi_graph(N3, edge_prob=0.3, directed=False)
-    E3 = edge_index3.size(1)
-    x3 = torch.randn((N3, F), dtype=torch.float)
-    edge_weight3 = torch.ones(E3, dtype=torch.float)
-    edge_index3, edge_weight3 = add_self_loops(
-        edge_index3, edge_attr=edge_weight3, num_nodes=N3
-    )
-    batch3 = torch.full((N3,), 2, dtype=torch.long)
-
-    # Combine graphs into mini-batch
-    # Offset node indices for graphs 2 and 3
-    edge_index2_offset = edge_index2 + N1
-    edge_index3_offset = edge_index3 + N1 + N2
-
-    # Concatenate everything
-    x = torch.cat([x1, x2, x3], dim=0)
-    edge_index = torch.cat([edge_index1, edge_index2_offset, edge_index3_offset], dim=1)
-    edge_weight = torch.cat([edge_weight1, edge_weight2, edge_weight3], dim=0)
-    batch = torch.cat([batch1, batch2, batch3], dim=0)
-
-    return x, edge_index, edge_weight, batch
-
 
 poolers = list(pooler_map.keys())
 excluded_poolers = ["pan"]
@@ -81,8 +11,8 @@ poolers = [p for p in poolers if p not in excluded_poolers]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
-def test_poolers_forward_and_lifting(simple_graph, pooler_name):
-    x, edge_index, edge_weight, batch = simple_graph
+def test_poolers_forward_and_lifting(pooler_test_graph_sparse_batch_tuple, pooler_name):
+    x, edge_index, edge_weight, batch = pooler_test_graph_sparse_batch_tuple
     N, F = x.size()
 
     # Common parameters for all poolers (some may ignore irrelevant keys):
