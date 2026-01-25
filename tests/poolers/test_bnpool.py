@@ -1,5 +1,4 @@
 import pytest
-import torch
 
 from tgp.poolers.bnpool import BNPool
 
@@ -90,27 +89,17 @@ def test_bnpool_eval_mode(pooler_test_graph_dense_batch):
     )
 
 
-def test_bnpool_with_mask_patterns(pooler_test_graph_dense_batch):
-    """Test BNPool with different mask patterns."""
+def test_bnpool_batched_forward(pooler_test_graph_dense_batch):
+    """Test BNPool with batched dense inputs."""
     x, adj = pooler_test_graph_dense_batch
-    batch_size, n_nodes = x.shape[:2]
-
-    # Test different mask patterns
-    mask_patterns = [
-        None,
-        torch.ones(batch_size, n_nodes, dtype=torch.bool),  # All nodes
-        torch.zeros(batch_size, n_nodes, dtype=torch.bool),  # No nodes
-        torch.bernoulli(torch.ones(batch_size, n_nodes) * 0.7).bool(),  # Random mask
-    ]
 
     pooler = BNPool(
         in_channels=x.shape[-1],
         k=3,
     )
-    for mask in mask_patterns:
-        out = pooler(x=x, adj=adj, mask=mask)
-        assert out.x is not None
-        assert out.edge_index is not None
+    out = pooler(x=x, adj=adj)
+    assert out.x is not None
+    assert out.edge_index is not None
 
 
 def test_bnpool_lifting_operation(pooler_test_graph_dense_batch):

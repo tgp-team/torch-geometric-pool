@@ -83,7 +83,7 @@ def test_single_leader_edge_case():
     batch = torch.zeros(N, dtype=torch.long)
 
     # Test the selector directly
-    selector = LaPoolSelect()
+    selector = LaPoolSelect(batched_representation=False)
     so = selector(
         x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch, num_nodes=N
     )
@@ -120,7 +120,7 @@ def test_single_node_isolated():
     edge_index = torch.empty((2, 0), dtype=torch.long)
     edge_weight = torch.empty(0, dtype=torch.float)
     batch = torch.zeros(N, dtype=torch.long)
-    selector = LaPoolSelect()
+    selector = LaPoolSelect(batched_representation=False)
     so = selector(
         x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch, num_nodes=N
     )
@@ -142,7 +142,7 @@ def test_lapool_select_sparse_tensor_input():
     edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
     adj = SparseTensor.from_edge_index(edge_index, sparse_sizes=(2, 2))
     x = torch.randn(2, 3)
-    selector = LaPoolSelect()
+    selector = LaPoolSelect(batched_representation=False)
     so = selector(x=x, edge_index=adj, num_nodes=2)
     assert so.s is not None
 

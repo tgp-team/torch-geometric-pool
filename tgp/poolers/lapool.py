@@ -73,11 +73,11 @@ class LaPooling(DenseSRCPooling):
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
         batched (bool, optional):
-            If :obj:`True`, uses the batched dense path (not implemented yet).
-            (default: :obj:`False`)
+            If :obj:`True`, uses the batched dense path.
+            (default: :obj:`True`)
         block_diags_output (bool, optional):
             If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
-            returns batched dense outputs. (default: :obj:`True`)
+            returns batched dense outputs. (default: :obj:`False`)
     """
 
     def __init__(
@@ -90,12 +90,14 @@ class LaPooling(DenseSRCPooling):
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
-        batched: bool = False,
-        block_diags_output: bool = True,
+        batched: bool = True,
+        block_diags_output: bool = False,
     ):
         super().__init__(
             selector=LaPoolSelect(
-                shortest_path_reg=shortest_path_reg, s_inv_op=s_inv_op
+                shortest_path_reg=shortest_path_reg,
+                batched_representation=batched,
+                s_inv_op=s_inv_op,
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
@@ -123,17 +125,18 @@ class LaPooling(DenseSRCPooling):
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor): The node feature matrix of shape :math:`[N, F]`,
-                where :math:`N` is the number of nodes in the batch and
-                :math:`F` is the number of node features.
+            x (~torch.Tensor): The node feature matrix of shape :math:`[N, F]` (unbatched)
+                or :math:`[B, N, F]` (batched), where :math:`N` is the number of nodes,
+                :math:`B` is the batch size, and :math:`F` is the number of node features.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                For unbatched mode: It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
+                For batched mode: A dense tensor of shape :math:`[B, N, N]`.
                 If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
-                containing the weights of the edges.
+                containing the weights of the edges (unbatched mode only).
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
@@ -158,7 +161,52 @@ class LaPooling(DenseSRCPooling):
             return x_lifted
 
         if self.batched:
-            raise NotImplementedError("LaPool batched mode is not implemented yet.")
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=None,
+            )
+
+            # Select
+            so = self.select(x=x, edge_index=adj, mask=mask)
+
+            # Reduce
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+
+            # Connect
+            adj_pool, _ = self.connect(
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch=batch,
+                batch_pooled=batch_pooled,
+            )
+
+            if self.block_diags_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_block_diags_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pool,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                )
+
+            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so)
+
+        # Unbatched mode
+        if adj is None:
+            raise ValueError("adj cannot be None when batched=False.")
 
         # Select
         so = self.select(
