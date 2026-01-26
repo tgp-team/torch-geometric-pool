@@ -7,7 +7,11 @@ from torch_geometric.utils import add_remaining_self_loops as arsl
 from torch_geometric.utils import (
     get_laplacian,
 )
+from torch_geometric.utils import (
+    remove_self_loops as rsl,
+)
 from torch_geometric.utils.num_nodes import maybe_num_nodes
+from torch_scatter import scatter
 
 from tgp import eps
 from tgp.imports import HAS_TORCH_SPARSE, is_sparsetensor
@@ -53,6 +57,107 @@ def is_dense_adj(edge_index: Adj) -> bool:
     if edge_index.dim() == 2 and edge_index.size(0) == edge_index.size(1):
         return edge_index.is_floating_point()
     return False
+
+
+def postprocess_adj_pool_dense(
+    adj_pool: Tensor,
+    remove_self_loops: bool = False,
+    degree_norm: bool = False,
+    adj_transpose: bool = False,
+    edge_weight_norm: bool = False,
+) -> Tensor:
+    """Postprocess a batched dense pooled adjacency tensor."""
+    if remove_self_loops:
+        torch.diagonal(adj_pool, dim1=-2, dim2=-1)[:] = 0
+
+    # Apply degree normalization D^{-1/2} A D^{-1/2}
+    if degree_norm:
+        if adj_transpose:
+            # For the transposed output the "row" sum is along axis -2
+            d = adj_pool.sum(-2, keepdim=True)
+        else:
+            # Compute row sums along the last dimension.
+            d = adj_pool.sum(-1, keepdim=True)
+        d = torch.sqrt(d.clamp(min=eps))
+        adj_pool = (adj_pool / d) / d.transpose(-2, -1)
+
+    # Normalize edge weights by maximum absolute value per graph
+    if edge_weight_norm:
+        batch_size = adj_pool.size(0)
+        # Find max absolute value per graph: [batch_size, 1, 1]
+        max_per_graph = adj_pool.view(batch_size, -1).abs().max(dim=1, keepdim=True)[0]
+        max_per_graph = max_per_graph.unsqueeze(-1)  # [batch_size, 1, 1]
+
+        # Avoid division by zero
+        max_per_graph = torch.where(
+            max_per_graph == 0, torch.ones_like(max_per_graph), max_per_graph
+        )
+
+        adj_pool = adj_pool / max_per_graph
+
+    return adj_pool
+
+
+def postprocess_adj_pool_sparse(
+    edge_index: Tensor,
+    edge_weight: Optional[Tensor],
+    num_nodes: int,
+    remove_self_loops: bool = False,
+    degree_norm: bool = False,
+    edge_weight_norm: bool = False,
+    batch_pooled: Optional[Tensor] = None,
+) -> Tuple[Tensor, Optional[Tensor]]:
+    """Postprocess a sparse pooled adjacency in edge_index format."""
+    if remove_self_loops:
+        edge_index, edge_weight = rsl(edge_index, edge_weight)
+
+    # Filter out edges with tiny weights.
+    if edge_weight is not None:
+        edge_weight = edge_weight.view(-1)
+        if edge_weight.numel() > 0:
+            mask = edge_weight.abs() > eps
+            if not torch.all(mask):
+                edge_index = edge_index[:, mask]
+                edge_weight = edge_weight[mask]
+
+    # Apply degree normalization D^{-1/2} A D^{-1/2}
+    if degree_norm:
+        if edge_weight is None:
+            edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
+
+        # Compute degree
+        deg = scatter(
+            edge_weight,
+            edge_index[0],
+            dim=0,
+            dim_size=num_nodes,
+            reduce="sum",
+        )
+        deg = deg.clamp(min=eps)  # Avoid tiny degrees that explode gradients
+        deg_inv_sqrt = deg.pow(-0.5)
+
+        # Apply symmetric normalization to edge weights
+        edge_weight = (
+            edge_weight * deg_inv_sqrt[edge_index[0]] * deg_inv_sqrt[edge_index[1]]
+        )
+
+    # Normalize edge weights by maximum absolute value per graph
+    if edge_weight_norm and edge_weight is not None:
+        # Per-graph normalization using batch_pooled
+        edge_batch = batch_pooled[edge_index[0]]
+
+        # Find maximum absolute edge weight per graph
+        max_per_graph = scatter(edge_weight.abs(), edge_batch, dim=0, reduce="max")
+
+        # Avoid division by zero
+        max_per_graph = torch.where(
+            max_per_graph == 0, torch.ones_like(max_per_graph), max_per_graph
+        )
+
+        # Normalize edge weights by their respective graph's maximum
+        edge_weight = edge_weight / max_per_graph[edge_batch]
+
+    return edge_index, edge_weight
 
 
 ####### EXTERNAL FUNCTIONS - INPUT CAN BE EDGE INDEX, TORCH COO SPARSE TENSOR OR SPARSE TENSOR ###########

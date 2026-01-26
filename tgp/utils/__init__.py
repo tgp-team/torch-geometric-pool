@@ -10,6 +10,8 @@ from .ops import (
     connectivity_to_torch_coo,
     dense_to_block_diag,
     is_dense_adj,
+    postprocess_adj_pool_dense,
+    postprocess_adj_pool_sparse,
     pseudo_inverse,
     rank3_diag,
     rank3_trace,

@@ -99,7 +99,7 @@ class MinCutPooling(DenseSRCPooling):
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         batched: bool = True,
-        block_diags_output: bool = False,
+        sparse_output: bool = False,
         cache_preprocessing: bool = False,
     ):
         super().__init__(
@@ -117,12 +117,12 @@ class MinCutPooling(DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
-                unbatched_output="block" if block_diags_output else "batch",
+                sparse_output=sparse_output,
             ),
             adj_transpose=adj_transpose,
             cache_preprocessing=cache_preprocessing,
             batched=batched,
-            block_diags_output=block_diags_output,
+            sparse_output=sparse_output,
         )
 
         self.cut_loss_coeff = cut_loss_coeff
@@ -134,7 +134,9 @@ class MinCutPooling(DenseSRCPooling):
         adj: Optional[Adj] = None,
         edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
-        mask: Optional[Tensor] = None,
+        mask: Optional[
+            Tensor
+        ] = None,  # TODO: this is no longer used becase masks for the batched version are now created by _ensure_batched_inputs. consider removing this argument.
         batch: Optional[Tensor] = None,
         batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
@@ -198,9 +200,9 @@ class MinCutPooling(DenseSRCPooling):
             edge_weight_norm=self.connector.edge_weight_norm,
         )
 
-        if self.block_diags_output:
+        if self.sparse_output:
             x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_block_diags_output(
+                self._finalize_sparse_output(
                     x_pool=x_pooled,
                     adj_pool=adj_pool,
                     batch=batch,

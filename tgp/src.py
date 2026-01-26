@@ -340,7 +340,7 @@ class DenseSRCPooling(SRCPooling):
             If :obj:`True`, sparse inputs are converted to batched dense tensors
             internally. If :obj:`False`, the pooler expects unbatched dense
             assignments without padding. (default: :obj:`True`)
-        block_diags_output (bool, optional):
+        sparse_output (bool, optional):
             If :obj:`True`, the pooled outputs are returned as block-diagonal
             sparse representations. If :obj:`False`, outputs are returned in
             batched dense form. (default: :obj:`False`)
@@ -356,7 +356,7 @@ class DenseSRCPooling(SRCPooling):
         node_dim: int = -2,
         adj_transpose: bool = False,
         batched: bool = True,
-        block_diags_output: bool = False,
+        sparse_output: bool = False,
         cache_preprocessing: bool = False,
     ):
         super().__init__(
@@ -368,7 +368,7 @@ class DenseSRCPooling(SRCPooling):
             node_dim=node_dim,
         )
         self.batched = batched
-        self.block_diags_output = block_diags_output
+        self.sparse_output = sparse_output
         self.adj_transpose = adj_transpose
         self.cache_preprocessing = cache_preprocessing
         self.preprocessing_cache = None
@@ -461,7 +461,7 @@ class DenseSRCPooling(SRCPooling):
         edge_index: Optional[Adj],
         edge_weight: Optional[Tensor],
         batch: Optional[Tensor],
-        mask: Optional[Tensor],
+        mask: Optional[Tensor],  # TODO: should we keep this argument?
         use_cache: Optional[bool] = None,
     ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
         if edge_index is None:
@@ -501,7 +501,7 @@ class DenseSRCPooling(SRCPooling):
         super().clear_cache()
         self.preprocessing_cache = None
 
-    def _finalize_block_diags_output(
+    def _finalize_sparse_output(
         self,
         x_pool: Tensor,
         adj_pool: Tensor,
@@ -531,7 +531,7 @@ class DenseSRCPooling(SRCPooling):
         size: Optional[int] = None,
     ) -> Tensor:
         r"""Global pooling operation for dense pooling methods."""
-        if not self.block_diags_output:
+        if not self.sparse_output:
             if x.dim() == 2:
                 x = x.unsqueeze(0)
             return dense_global_reduce(x, reduce_op, self.node_dim)

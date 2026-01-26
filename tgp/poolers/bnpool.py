@@ -129,7 +129,7 @@ class BNPool(DenseSRCPooling):
             If :obj:`True`, uses the batched dense representation of the input.
             If :obj:`False`, uses an unbatched representation without padding.
             (default: :obj:`True`)
-        block_diags_output (bool, optional):
+        sparse_output (bool, optional):
             If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
             returns batched dense outputs. (default: :obj:`False`)
     """
@@ -153,7 +153,7 @@ class BNPool(DenseSRCPooling):
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         batched: bool = True,
-        block_diags_output: bool = False,
+        sparse_output: bool = False,
         cache_preprocessing: bool = False,
     ):
         if alpha_DP <= 0:
@@ -184,12 +184,12 @@ class BNPool(DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
-                unbatched_output="block" if block_diags_output else "batch",
+                sparse_output=sparse_output,
             ),
             adj_transpose=adj_transpose,
             cache_preprocessing=cache_preprocessing,
             batched=batched,
-            block_diags_output=block_diags_output,
+            sparse_output=sparse_output,
         )
 
         self.k = k
@@ -230,7 +230,6 @@ class BNPool(DenseSRCPooling):
         adj: Optional[Adj] = None,
         edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
-        mask: Optional[Tensor] = None,
         batch: Optional[Tensor] = None,
         batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
@@ -247,9 +246,6 @@ class BNPool(DenseSRCPooling):
                 :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
-            mask (~torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -269,7 +265,7 @@ class BNPool(DenseSRCPooling):
                 edge_index=adj,
                 edge_weight=edge_weight,
                 batch=batch,
-                mask=mask,
+                mask=None,
             )
 
             # Select
@@ -292,9 +288,9 @@ class BNPool(DenseSRCPooling):
                 edge_weight_norm=self.connector.edge_weight_norm,
             )
 
-            if self.block_diags_output:
+            if self.sparse_output:
                 x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                    self._finalize_block_diags_output(
+                    self._finalize_sparse_output(
                         x_pool=x_pooled,
                         adj_pool=adj_pool,
                         batch=batch,
@@ -322,7 +318,7 @@ class BNPool(DenseSRCPooling):
         loss = self.compute_sparse_loss(adj, batch, so)
 
         # Reduce
-        return_batched = not self.block_diags_output
+        return_batched = not self.sparse_output
         x_pooled, batch_pooled = self.reduce(
             x=x, so=so, batch=batch, return_batched=return_batched
         )

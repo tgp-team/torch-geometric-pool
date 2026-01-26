@@ -91,7 +91,7 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         batched: bool = True,
-        block_diags_output: bool = False,
+        sparse_output: bool = False,
         cache_preprocessing: bool = False,
     ):
         super().__init__(
@@ -103,13 +103,13 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
-                unbatched_output="block" if block_diags_output else "batch",
+                sparse_output=sparse_output,
             ),
             cached=cached,
             cache_preprocessing=cache_preprocessing,
             adj_transpose=adj_transpose,
             batched=batched,
-            block_diags_output=block_diags_output,
+            sparse_output=sparse_output,
         )
 
         self.cached = cached
@@ -119,7 +119,7 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
             remove_self_loops=remove_self_loops,
             degree_norm=degree_norm,
             edge_weight_norm=edge_weight_norm,
-            unbatched_output="block",
+            sparse_output=True,
         )
 
     def forward(
@@ -187,9 +187,9 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
             batch_pooled=batch_pooled,
         )
 
-        if self.block_diags_output:
+        if self.sparse_output:
             x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_block_diags_output(
+                self._finalize_sparse_output(
                     x_pool=x_pooled,
                     adj_pool=adj_pooled,
                     batch=batch,

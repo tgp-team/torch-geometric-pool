@@ -75,7 +75,7 @@ class LaPooling(DenseSRCPooling):
         batched (bool, optional):
             If :obj:`True`, uses the batched dense path.
             (default: :obj:`True`)
-        block_diags_output (bool, optional):
+        sparse_output (bool, optional):
             If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
             returns batched dense outputs. (default: :obj:`False`)
     """
@@ -91,7 +91,7 @@ class LaPooling(DenseSRCPooling):
         reduce_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
         batched: bool = True,
-        block_diags_output: bool = False,
+        sparse_output: bool = False,
     ):
         super().__init__(
             selector=LaPoolSelect(
@@ -105,10 +105,10 @@ class LaPooling(DenseSRCPooling):
                 remove_self_loops=remove_self_loops,
                 degree_norm=degree_norm,
                 edge_weight_norm=edge_weight_norm,
-                unbatched_output="block" if block_diags_output else "batch",
+                sparse_output=sparse_output,
             ),
             batched=batched,
-            block_diags_output=block_diags_output,
+            sparse_output=sparse_output,
         )
 
     def forward(
@@ -184,9 +184,9 @@ class LaPooling(DenseSRCPooling):
                 batch_pooled=batch_pooled,
             )
 
-            if self.block_diags_output:
+            if self.sparse_output:
                 x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                    self._finalize_block_diags_output(
+                    self._finalize_sparse_output(
                         x_pool=x_pooled,
                         adj_pool=adj_pool,
                         batch=batch,
@@ -218,7 +218,7 @@ class LaPooling(DenseSRCPooling):
         )
 
         # Reduce
-        return_batched = not self.block_diags_output
+        return_batched = not self.sparse_output
         x_pooled, batch_pooled = self.reduce(
             x=x, so=so, batch=batch, return_batched=return_batched
         )

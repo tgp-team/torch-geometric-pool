@@ -44,14 +44,14 @@ warnings.filterwarnings(
 
 NUM_GRAPHS = 4  # Number of graphs in batch
 MIN_SIZE = 50  # Minimum nodes per graph
-MAX_SIZE = 2000  # Maximum nodes per graph
+MAX_SIZE = 10000  # Maximum nodes per graph
 NUM_ITERATIONS = 10  # Number of iterations to average
 F_DIM = 16  # Feature dimension
 POOLERS_TO_TEST = [
-    "bnpool",
-    "bnpool_u",
-    "mincut",
-    "lap",
+    # "bnpool",
+    # "bnpool_u",
+    # "mincut",
+    # "lap",
     "lap_u",
 ]  # None  # None = all poolers, or specify list like ['topk', 'sag', 'diff']
 
@@ -68,7 +68,7 @@ PARAMS = {
     "remove_self_loops": True,
     "scorer": "degree",
     "reduce": "sum",
-    "block_diags_output": False,
+    "sparse_output": False,
 }
 
 # ============================================================================
@@ -477,6 +477,13 @@ def main():
     seed_everything(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+
+    if device.type == "cpu" and psutil is None:
+        warnings.warn(
+            "If you run on CPU and want accurate memory, install psutil so RSS is used instead of tracemalloc",
+            UserWarning,
+        )
+
     print(f"Number of graphs per batch: {NUM_GRAPHS}")
     print(f"Graph size range: {MIN_SIZE} - {MAX_SIZE} nodes")
     print(f"Iterations per test: {NUM_ITERATIONS}")

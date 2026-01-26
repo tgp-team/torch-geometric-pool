@@ -105,7 +105,7 @@ class DiffPool(DenseSRCPooling):
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
         batched: bool = True,
-        block_diags_output: bool = False,
+        sparse_output: bool = False,
         cache_preprocessing: bool = False,
     ):
         super().__init__(
@@ -123,12 +123,12 @@ class DiffPool(DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
-                unbatched_output="block" if block_diags_output else "batch",
+                sparse_output=sparse_output,
             ),
             adj_transpose=adj_transpose,
             cache_preprocessing=cache_preprocessing,
             batched=batched,
-            block_diags_output=block_diags_output,
+            sparse_output=sparse_output,
         )
 
         self.link_loss_coeff = link_loss_coeff
@@ -202,9 +202,9 @@ class DiffPool(DenseSRCPooling):
 
         loss = self.compute_loss(adj=adj, S=so.s)
 
-        if self.block_diags_output:
+        if self.sparse_output:
             x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_block_diags_output(
+                self._finalize_sparse_output(
                     x_pool=x_pooled,
                     adj_pool=adj_pooled,
                     batch=batch,
