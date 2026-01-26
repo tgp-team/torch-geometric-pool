@@ -31,19 +31,21 @@ def test_output_with_spt_adj(pooler_test_graph_sparse_spt, pooler_name):
     pooler = get_pooler(pooler_name, **PARAMS)
     pooler.eval()
 
-    # Preprocessing data
-    x_pre, adj_pre, mask = pooler.preprocessing(
-        edge_index=adj, edge_weight=edge_weight, x=x, batch=batch, use_cache=False
-    )
-    if pooler.is_dense_batched:
+    use_batched_dense = pooler.is_dense and getattr(pooler, "batched", False)
+    if use_batched_dense:
+        x_pre, adj_pre, mask = pooler.preprocessing(
+            edge_index=adj, edge_weight=edge_weight, x=x, batch=batch, use_cache=False
+        )
         assert isinstance(adj_pre, torch.Tensor) and adj_pre.ndim == 3
     else:
+        x_pre, adj_pre, mask = x, adj, None
         assert isinstance(adj_pre, SparseTensor)
 
     # Pooling operation
     out = pooler(x=x_pre, adj=adj_pre, batch=batch, mask=mask)
-    if pooler.is_dense_batched:
-        assert isinstance(out.edge_index, torch.Tensor)
+    use_dense_output = pooler.is_dense and not getattr(pooler, "sparse_output", False)
+    if use_dense_output:
+        assert isinstance(out.edge_index, torch.Tensor) and out.edge_index.ndim == 3
     else:
         # edge_index should be either SparseTensor or torch COO tensor
         assert isinstance(out.edge_index, (SparseTensor, torch.Tensor))

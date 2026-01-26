@@ -18,7 +18,7 @@ def test_nopool_basic_functionality(pooler_test_graph_sparse):
     # Test 1: Get pooler using get_pooler function
     pooler = get_pooler("nopool")
     assert pooler is not None
-    assert not pooler.is_dense_batched
+    assert not pooler.is_dense
 
     # Test 2: Test preprocessing
     x_pre, adj_pre, mask = pooler.preprocessing(

@@ -610,21 +610,22 @@ def weighted_bce_reconstruction_loss(
     loss = F.binary_cross_entropy_with_logits(rec_adj, adj, reduction="none")
 
     if balance_links:
+        edge_mask = adj.bool()
         if mask is not None:
-            N = mask.sum(-1)  # has shape B x 1 x 1
+            N = mask.sum(-1)
+            valid = mask.unsqueeze(-1) & mask.unsqueeze(-2)
+            edge_mask = edge_mask & valid
         else:
-            N = adj.shape[-1]  # N
+            N = adj.shape[-1]
 
         N2 = N**2
-        n_edges = torch.clamp(
-            adj.sum([-1, -2]), min=1
-        ).int()  # this is a vector of size B
-        n_not_edges = torch.clamp(N2 - n_edges, min=1)  # this is a vector of size B
-        balance_const = n_not_edges / n_edges  # this is a vector of size B
+        n_edges = edge_mask.sum((-1, -2))
+        n_not_edges = torch.clamp(N2 - n_edges, min=1)
+        balance_const = n_not_edges / torch.clamp(n_edges, min=1)
         v = torch.repeat_interleave(
             balance_const.view(-1), repeats=n_edges.view(-1), dim=0
         )
-        loss[adj.bool()] *= v.view(-1)
+        loss[edge_mask] *= v
 
     # Apply mask if provided (create edge mask for adjacency matrices)
     if mask is not None and not torch.all(mask):

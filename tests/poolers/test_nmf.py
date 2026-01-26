@@ -10,8 +10,9 @@ def test_nmf_select(pooler_test_graph_dense):
     k = 2
     selector = NMFSelect(k=k)
     out = selector.forward(edge_index=adj.float())
-    assert out.s.size(0) == N
-    assert out.s.size(1) == k
+    assert out.s.size(0) == B
+    assert out.s.size(1) == N
+    assert out.s.size(2) == k
 
 
 def test_nmf_precoarsening(pooler_test_graph_sparse_batch):
@@ -34,14 +35,14 @@ def test_nmf_precoarsening(pooler_test_graph_sparse_batch):
 
 def test_batch_none(pooler_test_graph_sparse_batch):
     data_batch = pooler_test_graph_sparse_batch
-    num_graphs = data_batch.num_graphs
 
     pooling_out = NMFPooling(k=3).precoarsening(
         edge_index=data_batch.edge_index,
         edge_weight=data_batch.edge_attr,
     )
 
-    assert pooling_out.batch.size(0) == num_graphs
+    # Without an explicit batch vector, precoarsening treats the input as a single graph.
+    assert pooling_out.batch.size(0) == pooling_out.so.num_supernodes
 
 
 if __name__ == "__main__":

@@ -26,7 +26,10 @@ def test_forward():
     assert isinstance(out, PoolingOutput)
     # out.x should have shape [k, 1]
     k = out.so.num_supernodes
-    assert out.x.shape == (k, 1)
+    if getattr(pooler, "batched", False):
+        assert out.x.shape == (1, k, 1)
+    else:
+        assert out.x.shape == (k, 1)
 
 
 def test_shortest_path():
@@ -50,7 +53,10 @@ def test_shortest_path():
     assert isinstance(out, PoolingOutput)
     # out.x should have shape [k, 1]
     k = out.so.num_supernodes
-    assert out.x.shape == (k, 1)
+    if getattr(pooler, "batched", False):
+        assert out.x.shape == (1, k, 1)
+    else:
+        assert out.x.shape == (k, 1)
 
 
 def test_single_leader_edge_case():

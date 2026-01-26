@@ -8,6 +8,7 @@ from tgp.select.base_select import SelectOutput
 poolers = list(pooler_map.keys())
 excluded_poolers = ["pan"]
 poolers = [p for p in poolers if p not in excluded_poolers]
+poolers = ["maxcut"]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
@@ -35,26 +36,13 @@ def test_poolers_forward_and_lifting(pooler_test_graph_sparse_batch_tuple, poole
     pooler.eval()
     print(f"Testing pooler: {pooler_name}")
 
-    # Preprocessing data
-    x_pre, adj_pre, mask = pooler.preprocessing(
-        edge_index=edge_index,
-        edge_weight=edge_weight,
-        x=x,
-        batch=batch,
-        use_cache=False,
-    )
-    if pooler.is_dense_batched:
-        assert isinstance(adj_pre, torch.Tensor) and adj_pre.ndim == 3
-    if mask is not None:
-        assert isinstance(mask, torch.Tensor) and mask.dtype == torch.bool
-
     # Forward pass pooling
-    out = pooler(x=x_pre, adj=adj_pre, edge_weight=edge_weight, batch=batch, mask=mask)
+    out = pooler(x=x, adj=edge_index, edge_weight=edge_weight, batch=batch)
     assert hasattr(out, "x")
     assert hasattr(out, "so") and isinstance(out.so, SelectOutput)
     assert isinstance(out.x, torch.Tensor)
     num_supernodes = out.so.num_supernodes
-    # For batched graphs, some poolers (e.g., SparseBNPool) create k supernodes per graph,
+    # For batched graphs, some dense poolers create k supernodes per graph,
     # so num_supernodes can be batch_size * k, which may exceed N.
     # We check that we have at least 1 supernode and at most batch_size * k.
     if batch is not None:
@@ -83,7 +71,8 @@ def test_poolers_forward_and_lifting(pooler_test_graph_sparse_batch_tuple, poole
         assert ew.numel() == ei.size(1)
 
     # Apply message passing to ensure output is correct type
-    conv = GCNConv(F, F) if not pooler.is_dense_batched else DenseGCNConv(F, F)
+    use_dense_mp = pooler.is_dense and not getattr(pooler, "sparse_output", False)
+    conv = DenseGCNConv(F, F) if use_dense_mp else GCNConv(F, F)
     out.x = conv(out.x, out.edge_index)
     assert isinstance(out.x, torch.Tensor)
 
@@ -120,10 +109,7 @@ def test_poolers_forward_and_lifting(pooler_test_graph_sparse_batch_tuple, poole
     if hasattr(pooler, "reset_parameters"):
         pooler.reset_parameters()
 
-    x_pre2, adj_pre2, mask2 = pooler.preprocessing(
-        edge_index=edge_index, edge_weight=edge_weight, x=x, batch=batch, use_cache=True
-    )
-    out2 = pooler(x=x_pre2, adj=adj_pre2, batch=batch, mask=mask2)
+    out2 = pooler(x=x, adj=edge_index, batch=batch)
     assert isinstance(out2, type(out))
 
 

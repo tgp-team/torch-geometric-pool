@@ -91,7 +91,7 @@ def simple_edge_index():
 
 def test_degree_scorer_valid(simple_edge_index):
     # Valid 1D edge_weight: degrees computed correctly
-    weight = torch.tensor([1.0, 2.0])
+    weight = torch.tensor([1.0, 0.0, 2.0, 0.0])
     deg = degree_scorer(
         edge_index=simple_edge_index,
         edge_weight=weight,

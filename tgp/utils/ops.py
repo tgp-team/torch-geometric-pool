@@ -491,7 +491,8 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
 
     if batch is not None:
         s_batch = batch[kept_nodes]
-        s_counts = torch.bincount(s_batch)
+        num_graphs = int(batch.max().item()) + 1 if batch.numel() > 0 else 0
+        s_counts = torch.bincount(s_batch, minlength=num_graphs)
 
         cumsum = torch.zeros(s_counts.size(0), device=batch.device).to(torch.long)
         cumsum[1:] = s_counts.cumsum(dim=0)[:-1]
@@ -502,7 +503,24 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
         count_tensor = count_tensor[neg_mask]
         sum_tensor = sum_tensor[neg_mask]
 
-        one = one % count_tensor + sum_tensor
+        zero_counts = count_tensor == 0
+        if zero_counts.any():
+            # Fallback to global assignments when a graph has no kept nodes.
+            one_fallback = torch.randint(
+                0,
+                kept_nodes.size(0),
+                (int(zero_counts.sum().item()),),
+                device=kept_nodes.device,
+            )
+            one = one.clone()
+            one[zero_counts] = one_fallback
+            non_zero = ~zero_counts
+            if non_zero.any():
+                one[non_zero] = (
+                    one[non_zero] % count_tensor[non_zero] + sum_tensor[non_zero]
+                )
+        else:
+            one = one % count_tensor + sum_tensor
 
         one = kept_nodes[one]
 

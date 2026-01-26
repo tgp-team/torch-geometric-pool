@@ -34,8 +34,10 @@ class TestKronConnect:
         # Create SelectOutput without Laplacian (will trigger warning and conversion)
         k = num_nodes // 2
         node_index = torch.arange(k, dtype=torch.long)
+        cluster_index = torch.arange(k, dtype=torch.long)
         so = SelectOutput(
             node_index=node_index,
+            cluster_index=cluster_index,
             num_nodes=num_nodes,
             num_supernodes=k,
         )
@@ -76,8 +78,10 @@ class TestKronConnect:
         # Create SelectOutput
         k = num_nodes // 2
         node_index = torch.arange(k, dtype=torch.long)
+        cluster_index = torch.arange(k, dtype=torch.long)
         so = SelectOutput(
             node_index=node_index,
+            cluster_index=cluster_index,
             num_nodes=num_nodes,
             num_supernodes=k,
         )
@@ -259,8 +263,10 @@ class TestKronConnect:
         # Create SelectOutput
         k = num_nodes // 2
         node_index = torch.arange(k, dtype=torch.long)
+        cluster_index = torch.arange(k, dtype=torch.long)
         so = SelectOutput(
             node_index=node_index,
+            cluster_index=cluster_index,
             num_nodes=num_nodes,
             num_supernodes=k,
         )

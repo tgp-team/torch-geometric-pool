@@ -14,7 +14,7 @@ dataset = Planetoid(root="data/Planetoid", name="Cora")
 data = dataset[0]
 
 for POOLER, value in pooler_map.items():  # Use all poolers
-    # for POOLER in ["bnpool_u"]:  # Test a specific pooler
+    # for POOLER in ["bnpool"]:  # Test a specific pooler
     print(f"Using pooler: {POOLER}")
 
     if POOLER == "pan":
@@ -35,7 +35,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "reduce": "sum",
             "edge_weight_norm": False,
             "degree_norm": True,
-            "block_diags_output": False,
+            "sparse_output": False,
         }
 
         #### Model definition
@@ -57,7 +57,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 self.pooler.reset_parameters()
 
                 self.use_dense_pool_adj = (
-                    self.pooler.is_dense and not self.pooler.block_diags_output
+                    self.pooler.is_dense and not self.pooler.sparse_output
                 )
                 if self.use_dense_pool_adj:
                     self.conv_pool = DenseGCNConv(hidden_channels, hidden_channels // 2)

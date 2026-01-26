@@ -84,7 +84,13 @@ class TestSparseConnect:
             assert edge_weight_pool.size(0) == adj_pool.size(1)
 
         # Test SparseConnect class
-        so = SelectOutput(node_index=node_index, num_nodes=num_nodes, num_supernodes=k)
+        cluster_index = torch.arange(k, dtype=torch.long)
+        so = SelectOutput(
+            node_index=node_index,
+            cluster_index=cluster_index,
+            num_nodes=num_nodes,
+            num_supernodes=k,
+        )
         connector = SparseConnect(remove_self_loops=True)
         adj_pool_class, edge_weight_pool_class = connector(
             edge_index=edge_index,
@@ -272,8 +278,10 @@ class TestSparseConnect:
         """Test that SparseConnect raises AssertionError when edge_weight_norm=True but batch_pooled=None."""
         edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
         edge_weight = torch.tensor([1.0, 1.0], dtype=torch.float)
+        node_index = torch.tensor([0, 1], dtype=torch.long)
         so = SelectOutput(
-            node_index=torch.tensor([0, 1], dtype=torch.long),
+            node_index=node_index,
+            cluster_index=torch.arange(node_index.numel(), dtype=torch.long),
             num_nodes=2,
             num_supernodes=2,
         )

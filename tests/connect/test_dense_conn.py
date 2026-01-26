@@ -179,11 +179,11 @@ class TestDenseConnect:
             DenseConnect()(adj, SelectOutput(s=s_sparse))
 
     def test_dense_connect_prepare_dense_inputs(self):
-        """Test DenseConnect._prepare_dense_inputs static method."""
+        """Test DenseConnect._prepare_batched_dense_inputs static method."""
         # Test with 2D inputs (should add batch dimension)
         s_2d = torch.randn(4, 2)
         adj_2d = torch.randn(4, 4)
-        s_prep, adj_prep = DenseConnect._prepare_dense_inputs(s_2d, adj_2d)
+        s_prep, adj_prep = DenseConnect._prepare_batched_dense_inputs(s_2d, adj_2d)
         assert s_prep.dim() == 3
         assert adj_prep.dim() == 3
         assert s_prep.size(0) == 1
@@ -192,7 +192,7 @@ class TestDenseConnect:
         # Test with 3D inputs (should pass through)
         s_3d = torch.randn(2, 4, 2)
         adj_3d = torch.randn(2, 4, 4)
-        s_prep, adj_prep = DenseConnect._prepare_dense_inputs(s_3d, adj_3d)
+        s_prep, adj_prep = DenseConnect._prepare_batched_dense_inputs(s_3d, adj_3d)
         assert s_prep.shape == s_3d.shape
         assert adj_prep.shape == adj_3d.shape
 
@@ -200,14 +200,16 @@ class TestDenseConnect:
         s_mismatch = torch.randn(2, 4, 2)
         adj_mismatch = torch.randn(3, 4, 4)
         with pytest.raises(ValueError, match="batch sizes do not match"):
-            DenseConnect._prepare_dense_inputs(s_mismatch, adj_mismatch)
+            DenseConnect._prepare_batched_dense_inputs(s_mismatch, adj_mismatch)
 
     def test_dense_connect_prepare_dense_inputs_invalid_dims(self):
-        """Test DenseConnect._prepare_dense_inputs with invalid dimensions."""
+        """Test DenseConnect._prepare_batched_dense_inputs with invalid dimensions."""
         s_invalid = torch.randn(4)
         adj = torch.randn(4, 4)
-        with pytest.raises(ValueError, match="Expected dense inputs with 3 dimensions"):
-            DenseConnect._prepare_dense_inputs(s_invalid, adj)
+        with pytest.raises(
+            ValueError, match="Expected batched dense inputs with 3 dimensions"
+        ):
+            DenseConnect._prepare_batched_dense_inputs(s_invalid, adj)
 
     def test_dense_connect_rejects_non_tensor_assignment(self):
         """DenseConnect should reject non-tensor assignments."""
@@ -319,7 +321,9 @@ class TestDenseConnectUnbatched:
 
     def test_dense_connect_unbatched_degree_norm_empty_after_remove_self_loops(self):
         """Test DenseConnect with degree_norm=True and graph that becomes empty after remove_self_loops."""
-        connector = DenseConnect(remove_self_loops=True, degree_norm=True)
+        connector = DenseConnect(
+            remove_self_loops=True, degree_norm=True, sparse_output=True
+        )
 
         # Create assignment matrix
         num_nodes = 2
@@ -349,7 +353,7 @@ class TestDenseConnectUnbatched:
         k = num_nodes // 2
         so = SelectOutput(s=make_dense_assignment(num_nodes, k))
 
-        connector = DenseConnect(edge_weight_norm=True)
+        connector = DenseConnect(edge_weight_norm=True, sparse_output=True)
 
         with pytest.raises(AssertionError, match="batch_pooled parameter is required"):
             connector(
@@ -410,7 +414,7 @@ class TestDenseConnectUnbatched:
 
     def test_dense_connect_unbatched_filters_small_edges(self, monkeypatch):
         """Test dropping near-zero edges in block output."""
-        import tgp.connect.dense_conn as dense_conn
+        from tgp.utils import ops as ops_module
 
         num_nodes = 3
         edge_index = torch.tensor([[0, 1, 1], [1, 0, 2]], dtype=torch.long)
@@ -420,7 +424,7 @@ class TestDenseConnectUnbatched:
             sparse_output=True, remove_self_loops=False, degree_norm=False
         )
 
-        monkeypatch.setattr(dense_conn, "eps", 1.0)
+        monkeypatch.setattr(ops_module, "eps", 1.0)
         adj_pool, edge_weight_pool = connector(
             edge_index=edge_index, edge_weight=edge_weight, so=so
         )
