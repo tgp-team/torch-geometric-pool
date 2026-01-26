@@ -120,6 +120,7 @@ class LaPooling(DenseSRCPooling):
         batch: Optional[Tensor] = None,
         batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
+        mask: Optional[Tensor] = None,
         **kwargs,
     ) -> PoolingOutput:
         r"""Forward pass.
@@ -148,6 +149,9 @@ class LaPooling(DenseSRCPooling):
                 batches. Pass `out.batch` from the pooling call. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
+            mask (~torch.Tensor, optional): Optional boolean mask indicating valid nodes
+                in each graph. Only used when inputs are already dense/padded.
+                (default: :obj:`None`)
 
         Returns:
             PoolingOutput: The output of the pooling operator.
@@ -166,7 +170,7 @@ class LaPooling(DenseSRCPooling):
                 edge_index=adj,
                 edge_weight=edge_weight,
                 batch=batch,
-                mask=None,
+                mask=mask,
             )
 
             # Select

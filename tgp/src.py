@@ -315,6 +315,11 @@ class DenseSRCPooling(SRCPooling):
     It also specifies how to perform global pooling through the
     :func:`~tgp.reduce.dense_global_reduce` function.
 
+    When :attr:`batched=True`, dense poolers accept either raw sparse inputs
+    (which are converted internally) or already-dense padded tensors. In the
+    latter case, an external boolean mask can be provided to mark valid nodes;
+    otherwise a full-ones mask is assumed.
+
     Args:
         selector (:class:`~tgp.select.Select`): The *dense* :math:`\texttt{select}` operator.
         reducer (:class:`~tgp.reduce.Reduce`): The *dense* :math:`\texttt{reduce}` operator.

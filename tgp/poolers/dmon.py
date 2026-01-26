@@ -158,7 +158,8 @@ class DMoNPooling(DenseSRCPooling):
                 (default: :obj:`None`)
             mask (~torch.Tensor, optional): Mask matrix
                 :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph. (default: :obj:`None`)
+                the valid nodes in each graph. Only used when inputs are already
+                dense/padded. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
