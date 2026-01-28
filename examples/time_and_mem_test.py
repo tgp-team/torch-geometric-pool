@@ -44,15 +44,15 @@ warnings.filterwarnings(
 
 NUM_GRAPHS = 4  # Number of graphs in batch
 MIN_SIZE = 50  # Minimum nodes per graph
-MAX_SIZE = 10000  # Maximum nodes per graph
+MAX_SIZE = 3000  # Maximum nodes per graph
 NUM_ITERATIONS = 10  # Number of iterations to average
 F_DIM = 16  # Feature dimension
 POOLERS_TO_TEST = [
-    # "bnpool",
+    "bnpool",
     # "bnpool_u",
     # "mincut",
     # "lap",
-    "lap_u",
+    # "lap_u",
 ]  # None  # None = all poolers, or specify list like ['topk', 'sag', 'diff']
 
 # Common pooler parameters
@@ -64,11 +64,12 @@ PARAMS = {
     "loss_coeff": 1.0,
     "k": 10,  # Will be adjusted per graph size
     "order_k": 2,
-    "ratio": 0.25,
+    "ratio": 0.1,
     "remove_self_loops": True,
     "scorer": "degree",
     "reduce": "sum",
-    "sparse_output": False,
+    "sparse_output": True,
+    # "num_neg_samples": 100,
 }
 
 # ============================================================================
@@ -218,11 +219,11 @@ def generate_batch_with_variable_sizes(
         # Alternate between Erdos-Renyi and Barabasi-Albert graphs
         if i % 2 == 0:
             x, edge_index, edge_weight, batch = make_erdos_renyi_sparse(
-                N, F_dim, p=0.3, num_disconnected=0, seed=None
+                N, F_dim, p=0.01, num_disconnected=0, seed=None
             )
         else:
             x, edge_index, edge_weight, batch = make_barabasi_albert_sparse(
-                N, F_dim, m=2, seed=None
+                N, F_dim, m=1, seed=None
             )
 
         data_list.append(Data(x=x, edge_index=edge_index, edge_attr=edge_weight))

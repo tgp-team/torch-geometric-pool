@@ -132,6 +132,10 @@ class BNPool(DenseSRCPooling):
         sparse_output (bool, optional):
             If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
             returns batched dense outputs. (default: :obj:`False`)
+        num_neg_samples (int, optional):
+            Cap on the number of negative edges sampled **per graph** in the unbatched
+            (sparse-loss) path. If :obj:`None`, defaults to matching the number of
+            positive edges. (default: :obj:`None`)
     """
 
     def __init__(
@@ -155,6 +159,7 @@ class BNPool(DenseSRCPooling):
         batched: bool = True,
         sparse_output: bool = False,
         cache_preprocessing: bool = False,
+        num_neg_samples: Optional[int] = None,
     ):
         if alpha_DP <= 0:
             raise ValueError("alpha_DP must be positive")
@@ -199,6 +204,7 @@ class BNPool(DenseSRCPooling):
         self.K_mu_val = K_mu
         self.train_K = train_K
         self.eta = eta  # coefficient for the kl_loss
+        self.num_neg_samples = num_neg_samples
 
         # prior of the Stick Breaking Process
         self.register_buffer("alpha_prior", torch.ones(self.k - 1))
@@ -487,6 +493,7 @@ class BNPool(DenseSRCPooling):
             "k_init_value": self.K_init_val,
             "eta": self.eta,
             "train_K": self.train_K,
+            "num_neg_samples": self.num_neg_samples,
         }
 
     def get_rec_adj(self, S):
@@ -497,10 +504,17 @@ class BNPool(DenseSRCPooling):
 
         dev = edge_index.device
         if batch is None:
-            neg_edge_index = negative_edge_sampling(edge_index, force_undirected=True)
+            neg_edge_index = negative_edge_sampling(
+                edge_index,
+                num_neg_samples=self.num_neg_samples,
+                force_undirected=True,
+            )
         else:
             neg_edge_index = batched_negative_edge_sampling(
-                edge_index, batch, force_undirected=True
+                edge_index,
+                batch,
+                num_neg_samples=self.num_neg_samples,
+                force_undirected=True,
             )
 
         num_edges = edge_index.size(1)

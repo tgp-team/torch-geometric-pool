@@ -613,8 +613,8 @@ def weighted_bce_reconstruction_loss(
         edge_mask = adj.bool()
         if mask is not None:
             N = mask.sum(-1)
-            valid = mask.unsqueeze(-1) & mask.unsqueeze(-2)
-            edge_mask = edge_mask & valid
+            edge_mask &= mask.unsqueeze(-1)
+            edge_mask &= mask.unsqueeze(-2)
         else:
             N = adj.shape[-1]
 
@@ -630,8 +630,8 @@ def weighted_bce_reconstruction_loss(
     # Apply mask if provided (create edge mask for adjacency matrices)
     if mask is not None and not torch.all(mask):
         # Create edge mask: (B, N) -> (B, N, N)
-        edge_mask = torch.einsum("bn,bm->bnm", mask, mask)
-        loss.multiply_(edge_mask)
+        loss *= mask.unsqueeze(-1)
+        loss *= mask.unsqueeze(-2)
 
     # Sum over both spatial dimensions (always the same for adjacency matrices)
     loss = loss.sum((-1, -2))  # Sum over both spatial dimensions -> (B,)
