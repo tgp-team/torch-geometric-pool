@@ -383,5 +383,119 @@ def test_kmis_invalid_scorer_raises_value_error():
         kmis_select._scorer(x=x, adj=adj, num_nodes=3)
 
 
+def test_kmis_with_kron_connect():
+    """Test KMISPooling with KronConnect connector.
+
+    This test verifies that KMIS pooling works correctly with the Kron reduction
+    connector, which requires identifying supernode indices from the MIS.
+    """
+    from tgp.connect import KronConnect
+    from tgp.poolers import KMISPooling
+
+    # Create a simple graph with 10 nodes
+    N = 10
+    F = 8
+
+    # Build a cycle graph: 0-1-2-...-9-0
+    row = torch.arange(N, dtype=torch.long)
+    col = torch.cat([torch.arange(1, N, dtype=torch.long), torch.tensor([0])])
+    edge_index = torch.stack([torch.cat([row, col]), torch.cat([col, row])], dim=0)
+    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
+
+    # Create node features and batch
+    x = torch.randn((N, F), dtype=torch.float)
+    batch = torch.zeros(N, dtype=torch.long)
+
+    # Test with edge_index (Tensor)
+    kmis_kron = KMISPooling(
+        in_channels=F,
+        order_k=2,
+        scorer="degree",
+        cached=True,
+    )
+    kmis_kron.connector = KronConnect()
+
+    # Run forward pass
+    out = kmis_kron(x=x, adj=edge_index, batch=batch)
+
+    # Assertions
+    assert hasattr(out, "x")
+    assert hasattr(out, "edge_index")
+    assert hasattr(out, "so")
+    assert isinstance(out.x, torch.Tensor)
+    assert isinstance(out.edge_index, torch.Tensor)
+
+    # Check that we have the correct number of nodes and features
+    assert out.x.size(1) == F
+    assert out.x.size(0) == out.so.num_supernodes
+    assert out.edge_index.size(0) == 2  # Should be [2, E]
+
+    # Test with SparseTensor
+    edge_index_spt = SparseTensor.from_edge_index(edge_index, sparse_sizes=(N, N))
+
+    kmis_kron_spt = KMISPooling(
+        in_channels=F,
+        order_k=2,
+        scorer="constant",
+        cached=True,
+    )
+    kmis_kron_spt.connector = KronConnect(sparse_threshold=1e-2)
+
+    # Run forward pass with SparseTensor
+    out_spt = kmis_kron_spt(x=x, adj=edge_index_spt, batch=batch)
+
+    # Assertions for SparseTensor case
+    assert hasattr(out_spt, "x")
+    assert hasattr(out_spt, "edge_index")
+    assert hasattr(out_spt, "so")
+    assert isinstance(out_spt.x, torch.Tensor)
+    assert isinstance(out_spt.edge_index, SparseTensor)
+
+    # Check dimensions
+    assert out_spt.x.size(1) == F
+    assert out_spt.x.size(0) == out_spt.so.num_supernodes
+
+
+def test_kmis_with_kron_connect_raises_without_mis():
+    """Test that KronConnect raises appropriate error when mis attribute is missing
+    and node_index doesn't match num_supernodes.
+    """
+    from tgp.connect import KronConnect
+
+    # Create a simple graph
+    N = 5
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3, 3, 4], [1, 0, 2, 1, 3, 2, 4, 3]], dtype=torch.long
+    )
+    edge_index, _ = add_self_loops(edge_index, num_nodes=N)
+
+    # Create a SelectOutput without MIS and with inconsistent dimensions
+    # (all nodes assigned to 2 clusters, but no .mis attribute)
+    cluster_index = torch.tensor([0, 0, 0, 1, 1], dtype=torch.long)
+    node_index = torch.arange(N, dtype=torch.long)
+
+    so = SelectOutput(
+        cluster_index=cluster_index,
+        node_index=node_index,
+        num_nodes=N,
+        num_supernodes=2,
+    )
+
+    # Remove the mis attribute if it exists
+    if hasattr(so, "mis"):
+        delattr(so, "mis")
+
+    kc = KronConnect()
+
+    # This should raise ValueError because:
+    # 1. len(node_index) = 5 != num_supernodes = 2
+    # 2. No .mis attribute exists
+    # 3. No generic fallback (we removed it)
+    with pytest.raises(
+        ValueError, match="Inconsistent number of clusters and node indices"
+    ):
+        _ = kc(edge_index=edge_index, so=so, edge_weight=None)
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

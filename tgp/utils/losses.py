@@ -1,5 +1,5 @@
 import math
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -21,6 +21,13 @@ def _batch_reduce_loss(loss: Tensor, batch_reduction: BatchReductionType) -> Ten
         return torch.sum(loss)
     raise ValueError(
         f"Batch reduction {batch_reduction} not allowed, must be one of ['mean', 'sum']."
+    )
+
+
+def _scatter_reduce_loss(loss, batch, batch_size):
+    dev = loss.device
+    return torch.zeros(batch_size, device=dev).index_add_(
+        dim=0, index=batch, source=loss
     )
 
 
@@ -263,10 +270,49 @@ def totvar_loss(
     Returns:
         ~torch.Tensor: The total variation regularization loss.
     """
-    l1_norm = torch.sum(torch.abs(S[..., None, :] - S[:, None, ...]), dim=-1)
-    loss = torch.sum(adj * l1_norm, dim=(-1, -2))
-    n_edges = torch.count_nonzero(adj, dim=(-1, -2))
-    loss *= 1 / (2 * n_edges)
+    # Memory-efficient implementation: only compute L1 norms for actual edges
+    # instead of all N×N pairs (reduces memory from O(N²K) to O(E×K))
+    batch_size, N, K = S.shape
+
+    # Get edge indices from dense adjacency (only non-zero entries)
+    edge_indices = adj.nonzero(
+        as_tuple=False
+    )  # Shape: (num_edges, 3) with [batch, i, j]
+    edge_weights = adj[edge_indices[:, 0], edge_indices[:, 1], edge_indices[:, 2]]
+
+    # Sort edges to ensure deterministic summation order (reduces numerical differences)
+    # This makes the summation order consistent with the original implementation
+    sort_key = (
+        edge_indices[:, 0] * (N * N) + edge_indices[:, 1] * N + edge_indices[:, 2]
+    )
+    sorted_indices = torch.argsort(sort_key)
+    edge_indices = edge_indices[sorted_indices]
+    edge_weights = edge_weights[sorted_indices]
+
+    # Get source and target assignments for each edge
+    batch_idx = edge_indices[:, 0]
+    src_idx = edge_indices[:, 1]
+    tgt_idx = edge_indices[:, 2]
+
+    # Compute L1 norm only for edges: |S[b,i,:] - S[b,j,:]| for each edge (i,j) in batch b
+    S_src = S[batch_idx, src_idx, :]  # Shape: (num_edges, K)
+    S_tgt = S[batch_idx, tgt_idx, :]  # Shape: (num_edges, K)
+    l1_norms = torch.sum(torch.abs(S_src - S_tgt), dim=-1)  # Shape: (num_edges,)
+
+    # Weight by edge weights and sum per batch
+    weighted_norms = edge_weights * l1_norms
+    loss = scatter(weighted_norms, batch_idx, dim=0, dim_size=batch_size, reduce="sum")
+
+    # Count edges per batch and normalize
+    n_edges = scatter(
+        torch.ones_like(edge_weights),
+        batch_idx,
+        dim=0,
+        dim_size=batch_size,
+        reduce="sum",
+    )
+    loss = loss / (2 * torch.clamp(n_edges, min=1))
+
     return _batch_reduce_loss(loss, batch_reduction)
 
 
@@ -601,14 +647,16 @@ def kl_loss(
     q: Distribution,
     p: Distribution,
     mask: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    batch_size: int = None,
     normalizing_const: Optional[Tensor] = None,
     batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Compute KL divergence between two distributions with flexible axis control.
 
     This function computes the KL divergence :math:`D_{KL}(q \parallel p)` between
-    two distributions, with explicit control over which axes to sum and how to
-    apply masking.
+    two distributions. It is possible to speicfy either a mask or a batch vector to allow
+    correct computations on batched graphs.
 
     .. math::
         D_{KL}(q \parallel p) = \mathbb{E}_{x \sim q}[\log q(x) - \log p(x)]
@@ -624,6 +672,10 @@ def kl_loss(
         mask (Optional[~torch.Tensor]): A mask matrix
             :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
             the valid nodes for each graph. (default: :obj:`None`)
+        batch (~torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
+                to which graph in the batch each node belongs. (default: :obj:`None`)
+        batch_size (~int, optional): The batch size
         normalizing_const (Optional[~torch.Tensor]): The normalizing constant used to scale the loss.
             It allows batch computation to ensure consistent scaling across graphs of different sizes.
             (default: :obj:`None`)
@@ -654,13 +706,22 @@ def kl_loss(
         >>> # Compute KL loss: sum over K-1 components, then over nodes
         >>> loss = kl_loss(q_sb, p_sb, mask=mask)
     """
+    # Apply mask if provided
+    if mask is not None and batch is not None:
+        raise ValueError("Cannot specify both mask and batch")
+    if batch is not None and batch_size is None:
+        raise ValueError("Batch size must be specified if batch is specified")
+
     loss = kl_divergence(q, p).sum(-1)
 
-    # Apply mask if provided
     if mask is not None:
         if not torch.all(mask):
             loss = loss * mask
-    loss = loss.sum(-1)
+        loss = loss.sum(-1)
+    elif batch is not None:
+        loss = _scatter_reduce_loss(loss, batch, batch_size)
+    else:
+        loss = loss.sum(-1)
 
     # Normalize by the given constant
     if normalizing_const is not None:
@@ -734,9 +795,58 @@ def cluster_connectivity_prior_loss(
 
     # Normalize by the given constant
     if normalizing_const is not None:
+        bs = normalizing_const.shape[0] if normalizing_const.dim() > 0 else 1
+        prior_loss = (
+            prior_loss / bs
+        )  # to take into account the replication in the next operation
         prior_loss = prior_loss / normalizing_const  # scalar / vector = vector
 
     return _batch_reduce_loss(prior_loss, batch_reduction)
+
+
+def sparse_bce_reconstruction_loss(
+    link_prob_loigit,
+    true_y,
+    edges_batch_id: Optional[Tensor] = None,
+    batch_size=None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tuple[Tensor, Tensor | int]:
+    r"""Sparse weighted binary cross-entropy reconstruction loss for sampled edges.
+
+    Args:
+        link_prob_loigit (~torch.Tensor): Logits for sampled edges of shape :math:`[E]`.
+        true_y (~torch.Tensor): Ground-truth labels for sampled edges of shape :math:`[E]`.
+        edges_batch_id (~torch.Tensor, optional): Batch assignment for each sampled edge.
+            (default: :obj:`None`)
+        batch_size (int, optional): Number of graphs in the batch.
+        batch_reduction (str, optional): Reduction applied across graphs.
+            Can be :obj:`'mean'` or :obj:`'sum'`. (default: :obj:`"mean"`)
+
+    Returns:
+        Tuple[~torch.Tensor, ~torch.Tensor | int]: The loss value and the number
+        of sampled edges (per-graph counts if :obj:`edges_batch_id` is provided).
+    """
+    rec_loss = F.binary_cross_entropy_with_logits(
+        link_prob_loigit, true_y, weight=None, reduction="none"
+    )  # has size (E+NegE)
+
+    # Global (single-graph) case: mean over sampled edges, optional rescale by a normalizer.
+    if edges_batch_id is None:
+        count = torch.tensor(
+            rec_loss.size(0), device=rec_loss.device, dtype=rec_loss.dtype
+        )
+        loss = rec_loss.mean()
+        return loss, count
+    else:
+        # Batched case: per-graph mean, then rescale by sampled-edge count / normalizer.
+        summed_loss = _scatter_reduce_loss(rec_loss, edges_batch_id, batch_size)
+        summed_count = _scatter_reduce_loss(
+            torch.ones_like(rec_loss), edges_batch_id, batch_size
+        )
+        summed_count = torch.clamp(summed_count, min=1)
+        per_graph = summed_loss / summed_count
+        loss = _batch_reduce_loss(per_graph, batch_reduction)
+        return loss, summed_count
 
 
 def maxcut_loss(

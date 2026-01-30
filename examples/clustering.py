@@ -12,7 +12,8 @@ from tgp.poolers import get_pooler, pooler_map
 
 seed_everything(8)
 
-poolers = ["acc", "bnpool", "diff", "dmon", "hosc", "jb", "mincut"]
+poolers = ["acc", "spbnpool", "bnpool", "diff", "dmon", "hosc", "jb", "mincut"]
+# poolers = ["spbnpool"]
 for POOLER in poolers:
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
@@ -81,10 +82,13 @@ for POOLER in poolers:
             )
 
             out = self.pooler(x=x, adj=adj)
-            s = out.so.s[0]
+            s_out = out.so.s
+            # check if s_out has batch dimension
+            if s_out.dim() == 3:
+                s_out = s_out[0]
             aux_loss = sum(out.get_loss_value())
 
-            return s, aux_loss
+            return s_out, aux_loss
 
     ### Model setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
