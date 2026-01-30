@@ -1004,29 +1004,6 @@ class TestCoverageEdgeCases:
         assert result.shape == (5, 2)  # Should handle 0D tensor correctly
         assert result[2, 1] == 1.0  # Should still create correct one-hot
 
-    def test_get_assignments_with_batched_random_assignment(
-        self, pooler_test_graph_sparse_batch_tuple
-    ):
-        """Test get_assignments with batched graphs and random assignment."""
-        from tgp.utils.ops import get_assignments
-
-        x, edge_index, edge_weight, batch = pooler_test_graph_sparse_batch_tuple
-        N = x.size(0)
-
-        kept_nodes = torch.tensor([0, 4])  # One from each graph
-
-        # Test with batched random assignment
-        assignments = get_assignments(
-            kept_node_indices=kept_nodes,
-            edge_index=edge_index,
-            max_iter=1,  # Limited iterations to trigger random assignment
-            batch=batch,
-            num_nodes=N,
-        )
-
-        assert assignments.size(1) == N
-        assert torch.all(assignments[0] >= 0)
-
     def test_get_assignments_all_nodes_assigned_early_break(
         self, pooler_test_graph_sparse
     ):

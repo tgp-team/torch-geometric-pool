@@ -8,7 +8,6 @@ from tgp.select.base_select import SelectOutput
 poolers = list(pooler_map.keys())
 excluded_poolers = ["pan"]
 poolers = [p for p in poolers if p not in excluded_poolers]
-poolers = ["maxcut"]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)

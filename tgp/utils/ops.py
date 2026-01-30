@@ -20,21 +20,49 @@ from tgp.imports import HAS_TORCH_SPARSE, is_sparsetensor
 
 
 def rank3_trace(x):
+    r"""Compute the trace of each matrix in a rank-3 tensor.
+
+    Args:
+        x (~torch.Tensor): Input tensor of shape :math:`(B, N, N)`.
+
+    Returns:
+        ~torch.Tensor: Vector of shape :math:`(B,)` containing the trace of each
+        matrix.
+    """
     return torch.einsum("ijj->i", x)
 
 
 def rank3_diag(x):
+    r"""Create a batch of diagonal matrices from a rank-2 tensor.
+
+    Args:
+        x (~torch.Tensor): Input tensor of shape :math:`(B, N)`.
+
+    Returns:
+        ~torch.Tensor: Batched diagonal matrices of shape :math:`(B, N, N)`.
+    """
     return torch.diag_embed(x)
 
 
 def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
-    """Convert dense adjacency matrices to a block-diagonal sparse format."""
+    r"""Convert dense pooled adjacencies to a block-diagonal sparse format.
+
+    Args:
+        adj_pool (~torch.Tensor): Dense pooled adjacency of shape
+            :math:`(B, K, K)` or :math:`(K, K)`.
+
+    Returns:
+        tuple:
+            - **edge_index** (*~torch.Tensor*): Edge indices of shape
+              :math:`(2, E)` for the block-diagonal adjacency.
+            - **edge_weight** (*~torch.Tensor*): Edge weights of shape :math:`(E,)`.
+    """
     if adj_pool.dim() == 2:
         adj_pool = adj_pool.unsqueeze(0)
     if adj_pool.dim() != 3:
         raise ValueError("adj_pool must have shape [B, K, K] or [K, K].")
 
-    batch_size, num_clusters, _ = adj_pool.size()
+    _, num_clusters, _ = adj_pool.size()
     mask = adj_pool.abs() > eps
     if not mask.any():
         edge_index = torch.empty((2, 0), dtype=torch.long, device=adj_pool.device)
@@ -49,7 +77,11 @@ def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
 
 
 def is_dense_adj(edge_index: Adj) -> bool:
-    """Return True if edge_index looks like a dense adjacency matrix."""
+    r"""Return :obj:`True` if :attr:`edge_index` looks like a dense adjacency matrix.
+
+    Accepts a batched dense tensor of shape :math:`(B, N, N)` or a single dense
+    adjacency matrix of shape :math:`(N, N)`.
+    """
     if not isinstance(edge_index, Tensor) or edge_index.is_sparse:
         return False
     if edge_index.dim() == 3:
@@ -66,7 +98,24 @@ def postprocess_adj_pool_dense(
     adj_transpose: bool = False,
     edge_weight_norm: bool = False,
 ) -> Tensor:
-    """Postprocess a batched dense pooled adjacency tensor."""
+    r"""Postprocess a batched dense pooled adjacency tensor.
+
+    Args:
+        adj_pool (~torch.Tensor): Dense pooled adjacency of shape
+            :math:`(B, K, K)`.
+        remove_self_loops (bool, optional): If :obj:`True`, zeroes the diagonal.
+            (default: :obj:`False`)
+        degree_norm (bool, optional): If :obj:`True`, applies
+            :math:`\mathbf{D}^{-1/2}\mathbf{A}\mathbf{D}^{-1/2}` normalization.
+            (default: :obj:`False`)
+        adj_transpose (bool, optional): If :obj:`True`, treats the output as
+            transposed when computing row sums for normalization. (default: :obj:`False`)
+        edge_weight_norm (bool, optional): If :obj:`True`, normalizes by the
+            maximum absolute edge weight per graph. (default: :obj:`False`)
+
+    Returns:
+        ~torch.Tensor: The postprocessed adjacency tensor of shape :math:`(B, K, K)`.
+    """
     if remove_self_loops:
         torch.diagonal(adj_pool, dim1=-2, dim2=-1)[:] = 0
 
@@ -107,7 +156,29 @@ def postprocess_adj_pool_sparse(
     edge_weight_norm: bool = False,
     batch_pooled: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    """Postprocess a sparse pooled adjacency in edge_index format."""
+    r"""Postprocess a sparse pooled adjacency in :obj:`edge_index` format.
+
+    Args:
+        edge_index (~torch.Tensor): Edge indices of shape :math:`(2, E)`.
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            (default: :obj:`None`)
+        num_nodes (int): Number of pooled nodes.
+        remove_self_loops (bool, optional): If :obj:`True`, removes self-loops.
+            (default: :obj:`False`)
+        degree_norm (bool, optional): If :obj:`True`, applies symmetric degree
+            normalization to edge weights. (default: :obj:`False`)
+        edge_weight_norm (bool, optional): If :obj:`True`, normalizes edge
+            weights by the maximum absolute value per graph. Requires
+            :attr:`batch_pooled`. (default: :obj:`False`)
+        batch_pooled (~torch.Tensor, optional): Batch vector for pooled nodes of
+            shape :math:`(N,)`, used for per-graph normalization.
+            (default: :obj:`None`)
+
+    Returns:
+        tuple:
+            - **edge_index** (*~torch.Tensor*): Filtered edge indices.
+            - **edge_weight** (*~torch.Tensor or None*): Filtered edge weights.
+    """
     if remove_self_loops:
         edge_index, edge_weight = rsl(edge_index, edge_weight)
 
@@ -364,9 +435,9 @@ def delta_gcn_matrix(
     delta: float = 2.0,
     num_nodes: Optional[int] = None,
 ) -> Tuple[Adj, Optional[Tensor]]:
-    r"""Compute the Delta-GCN propagation matrix for heterophilic message passing.
+    r"""Compute the :math:`\delta`-GCN propagation matrix for heterophilic message passing.
 
-    Constructs the Delta-GCN propagation matrix from `MaxCutPool: differentiable
+    Constructs the :math:`\delta`-GCN propagation matrix from `MaxCutPool: differentiable
     feature-aware Maxcut for pooling in graph neural networks` (Abate & Bianchi, ICLR 2025).
 
     The propagation matrix is computed as: :math:`\mathbf{P} = \mathbf{I} - \delta \cdot \mathbf{L}_{sym}`
@@ -450,15 +521,17 @@ def delta_gcn_matrix(
 
 
 def create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=None):
-    """Create one-hot encoding tensor for node assignments.
+    r"""Create a one-hot assignment matrix for kept nodes.
 
     Args:
-        num_nodes (int): Total number of nodes
-        kept_node_tensor (Tensor): Indices of nodes to keep
-        device (torch.device): Device to create tensor on
+        num_nodes (int): Total number of nodes :math:`N`.
+        kept_node_tensor (~torch.Tensor): Indices of kept nodes of shape :math:`(K,)`.
+        device (~torch.device): Device to create the tensor on.
+        dtype (~torch.dtype, optional): Desired dtype. (default: :obj:`torch.float32`)
 
     Returns:
-        Tensor: One-hot encoding matrix [num_nodes, num_kept_nodes + 1]
+        ~torch.Tensor: One-hot matrix of shape :math:`(N, K + 1)`, where column
+        :math:`0` denotes "unassigned" and columns :math:`1..K` correspond to kept nodes.
     """
     # Ensure kept_node_tensor is at least 1D to avoid issues with len()
     if kept_node_tensor.dim() == 0:
@@ -473,15 +546,22 @@ def create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=None):
 
 
 def get_random_map_mask(kept_nodes, mask, batch=None):
-    """Randomly assign remaining unassigned nodes.
+    r"""Randomly assign remaining unassigned nodes to kept nodes.
 
     Args:
-        kept_nodes (Tensor): Indices of kept nodes
-        mask (Tensor): Boolean mask of already assigned nodes
-        batch (Tensor, optional): Batch assignments. Defaults to None.
+        kept_nodes (~torch.Tensor): Indices of kept nodes (supernodes).
+        mask (~torch.Tensor): Boolean mask of already assigned nodes of shape
+            :math:`(N,)`.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`. If
+            provided, nodes are assigned only to kept nodes within the same
+            graph. This assumes kept nodes are grouped by batch (e.g., sorted by
+            node index) and each graph has at least one kept node.
+            (default: :obj:`None`)
 
     Returns:
-        Tensor: Random assignment mapping for unassigned nodes
+        ~torch.Tensor: Mapping tensor of shape :math:`(2, N_u)` where the first
+        row contains unassigned node indices and the second row contains the
+        chosen kept node indices.
     """
     neg_mask = torch.logical_not(mask)
     zero = torch.arange(mask.size(0), device=kept_nodes.device)[neg_mask]
@@ -491,8 +571,7 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
 
     if batch is not None:
         s_batch = batch[kept_nodes]
-        num_graphs = int(batch.max().item()) + 1 if batch.numel() > 0 else 0
-        s_counts = torch.bincount(s_batch, minlength=num_graphs)
+        s_counts = torch.bincount(s_batch)
 
         cumsum = torch.zeros(s_counts.size(0), device=batch.device).to(torch.long)
         cumsum[1:] = s_counts.cumsum(dim=0)[:-1]
@@ -503,24 +582,7 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
         count_tensor = count_tensor[neg_mask]
         sum_tensor = sum_tensor[neg_mask]
 
-        zero_counts = count_tensor == 0
-        if zero_counts.any():
-            # Fallback to global assignments when a graph has no kept nodes.
-            one_fallback = torch.randint(
-                0,
-                kept_nodes.size(0),
-                (int(zero_counts.sum().item()),),
-                device=kept_nodes.device,
-            )
-            one = one.clone()
-            one[zero_counts] = one_fallback
-            non_zero = ~zero_counts
-            if non_zero.any():
-                one[non_zero] = (
-                    one[non_zero] % count_tensor[non_zero] + sum_tensor[non_zero]
-                )
-        else:
-            one = one % count_tensor + sum_tensor
+        one = one % count_tensor + sum_tensor
 
         one = kept_nodes[one]
 
@@ -528,52 +590,99 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
     return mappa
 
 
-def get_sparse_map_mask(x, sparse_adj, kept_node_tensor, mask):
-    """Compute sparse assignment mapping using message passing.
+def propagate_assignments_sparse(
+    assignments, edge_index, kept_node_tensor, mask, num_clusters
+):
+    r"""Propagate assignments through edges using sparse operations.
+
+    This function avoids allocating a dense [num_nodes, num_clusters] tensor and
+    works directly on the COO edge list. For each unassigned destination node,
+    it counts how many incoming edges come from each assigned cluster, then picks
+    the cluster with the highest count (ties are resolved by the smallest cluster
+    index). Propagation follows the direction of `edge_index`; for undirected
+    behavior, ensure the edge list is symmetric.
+
+    Complexity: O(E log E) time due to sorting/unique and O(E) memory.
 
     Args:
-        x (Tensor): Node features/assignments
-        edge_index (Tensor): Graph connectivity
-        kept_node_tensor (Tensor): Indices of kept nodes
-        mask (Tensor): Boolean mask of already assigned nodes
+        assignments (~torch.Tensor): Assignment vector of shape :math:`(N,)`,
+            with :obj:`0` for unassigned nodes and :obj:`1..K` for cluster indices.
+        edge_index (~torch.Tensor): Edge indices of shape :math:`(2, E)`.
+        kept_node_tensor (~torch.Tensor): Indices of kept nodes (supernodes).
+        mask (~torch.Tensor): Boolean mask of assigned nodes of shape :math:`(N,)`.
+        num_clusters (int): Number of clusters :math:`K`.
 
     Returns:
         tuple:
-            - Tensor: Propagated features
-            - Tensor: Node assignment mapping
-            - Tensor: Updated assignment mask
+            - **assignments** (*~torch.Tensor*): Updated assignment vector.
+            - **mapping** (*~torch.Tensor*): Mapping tensor of shape :math:`(2, N_a)`
+              from newly assigned node indices to kept node indices.
+            - **mask** (*~torch.Tensor*): Updated boolean mask.
     """
-    y = torch.sparse.mm(sparse_adj, x)  # propagation step
+    src, dst = edge_index[0], edge_index[1]
 
-    first_internal_mask = torch.logical_not(
-        mask
-    )  # get the mask of the nodes that have not been assigned yet
-    am = torch.argmax(y, dim=1)  # get the visited nodes
-    nonzero = torch.nonzero(am, as_tuple=True)[
-        0
-    ]  # get the visited nodes that are not zero (since the zero-th node is a fake node)
-    second_internal_mask = torch.zeros_like(
-        first_internal_mask, dtype=torch.bool
-    )  # initialize the second mask
-    second_internal_mask[nonzero] = True  # set the mask to True for the visited nodes
-    final_mask = torch.logical_and(
-        first_internal_mask, second_internal_mask
-    )  # newly visited nodes that have not been assigned yet
-    indices = torch.arange(x.size(0), device=x.device)  # inizialize the indices
-    out = kept_node_tensor[
-        am - 1
-    ]  # get the supernode indices of the visited nodes (am-1 because the zero-th node is a fake node)
+    src_assignments = assignments[src]
 
-    indices = indices[
-        final_mask
-    ]  # get the indices of the newly visited nodes that have not been assigned yet
+    valid_edges = (src_assignments > 0) & (~mask[dst])
 
-    mappa = torch.stack([indices, out[indices]])  # create the map
-    mask[indices] = (
-        True  # set the mask to True for the newly visited nodes that have not been assigned yet
+    if valid_edges.sum() == 0:
+        return (
+            assignments,
+            torch.empty((2, 0), device=assignments.device, dtype=torch.long),
+            mask,
+        )
+
+    valid_dst = dst[valid_edges]
+    valid_src_assignments = src_assignments[valid_edges]
+
+    combined = valid_dst * (num_clusters + 1) + valid_src_assignments
+    unique_combined, counts = torch.unique(combined, return_counts=True)
+
+    unique_dst_per_pair = unique_combined // (num_clusters + 1)
+    unique_assignment_per_pair = unique_combined % (num_clusters + 1)
+
+    max_count = counts.max().item() + 1
+    sort_key = (
+        unique_dst_per_pair * (max_count * (num_clusters + 1))
+        - counts * (num_clusters + 1)
+        + unique_assignment_per_pair
     )
 
-    return y, mappa, mask
+    sorted_indices = torch.argsort(sort_key)
+    sorted_dst = unique_dst_per_pair[sorted_indices]
+    sorted_assignments = unique_assignment_per_pair[sorted_indices]
+
+    dst_changes = torch.cat(
+        [
+            torch.tensor([True], device=sorted_dst.device),
+            sorted_dst[1:] != sorted_dst[:-1],
+        ]
+    )
+
+    best_dst = sorted_dst[dst_changes]
+    best_assignments = sorted_assignments[dst_changes]
+
+    valid_mask = best_assignments > 0
+    if valid_mask.sum() == 0:
+        return (
+            assignments,
+            torch.empty((2, 0), device=assignments.device, dtype=torch.long),
+            mask,
+        )
+
+    newly_assigned_dst = best_dst[valid_mask]
+    newly_assigned_clusters = best_assignments[valid_mask]
+
+    supernode_indices = kept_node_tensor[newly_assigned_clusters - 1]
+
+    assignments = assignments.clone()
+    assignments[newly_assigned_dst] = newly_assigned_clusters
+    mask = mask.clone()
+    mask[newly_assigned_dst] = True
+
+    mappa = torch.stack([newly_assigned_dst, supernode_indices])
+
+    return assignments, mappa, mask
 
 
 def get_assignments(
@@ -666,34 +775,26 @@ def get_assignments(
         if edge_index is None:
             raise ValueError("edge_index must be provided when max_iter > 0")
 
-        # Clone edge_index to avoid modifying the original
-        edge_index = edge_index.clone()
-
-        dtype = torch.float16 if device.type == "cuda" else torch.float32
-        sparse_adj = None
+        # Get edge_index in [2, E] format
         if isinstance(edge_index, Tensor) and edge_index.is_sparse:
-            sparse_adj = edge_index
-            if sparse_adj.dtype != dtype:
-                sparse_adj = sparse_adj.to(dtype=dtype)
+            edge_index_2d = edge_index.indices()
         else:
-            edge_weight = torch.ones(
-                edge_index.size(1), device=edge_index.device, dtype=dtype
-            )
-            sparse_adj = torch.sparse_coo_tensor(
-                edge_index, edge_weight, size=(num_nodes, num_nodes)
-            ).coalesce()
-        if hasattr(sparse_adj, "to_sparse_csr"):
-            sparse_adj = sparse_adj.to_sparse_csr()
+            edge_index_2d = edge_index
 
-        # Initialize one-hot tensor for propagation
-        x = create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=dtype)
+        # Initialize assignment vector: 0 = unassigned, 1-K = cluster index
+        num_clusters = kept_node_tensor.size(0)
+        assignments = torch.zeros(num_nodes, device=device, dtype=torch.long)
+        assignments[kept_node_tensor] = torch.arange(1, num_clusters + 1, device=device)
 
-        # Iterative assignment through message passing
+        # Iterative assignment through message passing (fully sparse)
         for _ in range(max_iter):
             if mask.all():  # All nodes assigned
                 break
-            x, _map, mask = get_sparse_map_mask(x, sparse_adj, kept_node_tensor, mask)
-            maps_list.append(_map)
+            assignments, _map, mask = propagate_assignments_sparse(
+                assignments, edge_index_2d, kept_node_tensor, mask, num_clusters
+            )
+            if _map.size(1) > 0:
+                maps_list.append(_map)
 
     # Randomly assign any remaining unassigned nodes
     if not mask.all():
