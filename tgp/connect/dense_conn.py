@@ -82,7 +82,7 @@ class DenseConnect(Connect):
         self.edge_weight_norm = edge_weight_norm
         self.sparse_output = sparse_output
 
-    @staticmethod  # TODO: move to ops?
+    @staticmethod
     def _prepare_batched_dense_inputs(s: Tensor, adj: Tensor) -> Tuple[Tensor, Tensor]:
         if s.dim() == 2:
             s = s.unsqueeze(0)
@@ -97,7 +97,7 @@ class DenseConnect(Connect):
             )
         return s, adj
 
-    @staticmethod  # TODO: move to ops?
+    @staticmethod
     def _validate_select_output(so: SelectOutput) -> Tensor:
         if so is None:
             raise ValueError("SelectOutput is required for DenseConnect.")
@@ -109,97 +109,20 @@ class DenseConnect(Connect):
         return s
 
     @staticmethod
-    def dense_connect(
+    def _dense_connect(
         s: Tensor,
         adj: Tensor,
     ) -> Tensor:
-        r"""Connects the nodes in the coarsened graph for dense pooling methods."""
+        r"""Compute :math:`\mathbf{S}^{\top}\mathbf{A}\mathbf{S}` for batched dense inputs.
+
+        Returns a dense pooled adjacency of shape :math:`[B, K, K]`.
+        """
         sta = torch.matmul(s.transpose(-2, -1), adj)
         adj_pool = torch.matmul(sta, s)
         return adj_pool
 
     @staticmethod
-    def postprocess_adj_pool(
-        adj_pool: Tensor,
-        remove_self_loops: bool = False,
-        degree_norm: bool = False,
-        adj_transpose: bool = False,
-        edge_weight_norm: bool = False,
-    ) -> Tensor:
-        r"""Postprocess the (batched) pooled adjacency matrix."""
-        return postprocess_adj_pool_dense(
-            adj_pool,
-            remove_self_loops=remove_self_loops,
-            degree_norm=degree_norm,
-            adj_transpose=adj_transpose,
-            edge_weight_norm=edge_weight_norm,
-        )
-
-    def forward(
-        self,
-        edge_index: Adj,
-        so: SelectOutput,
-        *,
-        edge_weight: Optional[Tensor] = None,
-        batch: Optional[Tensor] = None,
-        batch_pooled: Optional[Tensor] = None,
-        **kwargs,
-    ) -> Tuple[Adj, Optional[Tensor]]:
-        r"""Forward pass.
-
-        Args:
-            edge_index (~torch_geometric.typing.Adj):
-                For batched dense inputs, a tensor of shape :math:`[B, N, N]`.
-                For unbatched sparse inputs, a sparse connectivity matrix in one
-                of the formats supported by :class:`~torch_geometric.typing.Adj`.
-            so (~tgp.select.SelectOutput):
-                The output of the :math:`\texttt{select}` operator. The assignment
-                matrix :attr:`so.s` must be a **dense** tensor.
-            edge_weight (~torch.Tensor, optional):
-                A vector of shape :math:`[E]` or :math:`[E, 1]` containing the
-                weights of the edges for unbatched inputs. (default: :obj:`None`)
-            batch (~torch.Tensor, optional):
-                The batch vector for unbatched inputs. (default: :obj:`None`)
-            batch_pooled (~torch.Tensor, optional):
-                The pooled batch vector, required for edge weight normalization
-                with unbatched sparse outputs. (default: :obj:`None`)
-
-        Returns:
-            (~torch_geometric.typing.Adj, ~torch.Tensor or None):
-            The pooled adjacency matrix and the edge weights. If the pooled
-            adjacency is dense, returns :obj:`None` for the edge weights.
-        """
-        s = self._validate_select_output(so)
-        if is_dense_adj(edge_index):
-            # Batched dense inputs always return a dense adjacency.
-            return self._forward_batched_inputs(edge_index, s)
-
-        return self._forward_unbatched_inputs(
-            edge_index=edge_index,
-            edge_weight=edge_weight,
-            batch=batch,
-            s=s,
-            batch_pooled=batch_pooled,
-        )
-
-    def _forward_batched_inputs(self, adj: Tensor, s: Tensor) -> Tuple[Tensor, None]:
-        """Handle batched dense inputs; always returns dense adjacency."""
-        s, adj = self._prepare_batched_dense_inputs(s, adj)
-
-        adj_pool = self.dense_connect(s, adj)
-
-        adj_pool = self.postprocess_adj_pool(
-            adj_pool,
-            remove_self_loops=self.remove_self_loops,
-            degree_norm=self.degree_norm,
-            adj_transpose=self.adj_transpose,
-            edge_weight_norm=self.edge_weight_norm,
-        )
-
-        return adj_pool, None
-
-    def _compute_dense_pooled_adj_from_unbatched_inputs(
-        self,
+    def _dense_connect_unbatched(
         edge_index: Adj,
         edge_weight: Optional[Tensor],
         batch: Optional[Tensor],
@@ -208,7 +131,12 @@ class DenseConnect(Connect):
         num_clusters: int,
         batch_size: int,
     ) -> Tensor:
-        """Compute a dense pooled adjacency [B, K, K] from unbatched inputs."""
+        r"""Compute :math:`\mathbf{S}^{\top}\mathbf{A}\mathbf{S}` from unbatched inputs.
+
+        This handles sparse (unbatched) adjacency inputs with a dense assignment
+        matrix :math:`\mathbf{S}` of shape :math:`[N, K]` and returns a batched
+        dense pooled adjacency of shape :math:`[B, K, K]`.
+        """
         # Single graph case
         if batch_size == 1:
             edge_index_coo = connectivity_to_torch_coo(
@@ -263,6 +191,69 @@ class DenseConnect(Connect):
 
         return torch.stack(out_list, dim=0)  # has shape [B, K, K]
 
+    def forward(
+        self,
+        edge_index: Adj,
+        so: SelectOutput,
+        *,
+        edge_weight: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
+        **kwargs,
+    ) -> Tuple[Adj, Optional[Tensor]]:
+        r"""Forward pass.
+
+        Args:
+            edge_index (~torch_geometric.typing.Adj):
+                For batched dense inputs, a tensor of shape :math:`[B, N, N]`.
+                For unbatched sparse inputs, a sparse connectivity matrix in one
+                of the formats supported by :class:`~torch_geometric.typing.Adj`.
+            so (~tgp.select.SelectOutput):
+                The output of the :math:`\texttt{select}` operator. The assignment
+                matrix :attr:`so.s` must be a **dense** tensor.
+            edge_weight (~torch.Tensor, optional):
+                A vector of shape :math:`[E]` or :math:`[E, 1]` containing the
+                weights of the edges for unbatched inputs. (default: :obj:`None`)
+            batch (~torch.Tensor, optional):
+                The batch vector for unbatched inputs. (default: :obj:`None`)
+            batch_pooled (~torch.Tensor, optional):
+                The pooled batch vector, required for edge weight normalization
+                with unbatched sparse outputs. (default: :obj:`None`)
+
+        Returns:
+            (~torch_geometric.typing.Adj, ~torch.Tensor or None):
+            The pooled adjacency matrix and the edge weights. If the pooled
+            adjacency is dense, returns :obj:`None` for the edge weights.
+        """
+        s = self._validate_select_output(so)
+        if is_dense_adj(edge_index):
+            # Batched dense inputs always return a dense adjacency.
+            return self._forward_batched_inputs(edge_index, s)
+
+        return self._forward_unbatched_inputs(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            s=s,
+            batch_pooled=batch_pooled,
+        )
+
+    def _forward_batched_inputs(self, adj: Tensor, s: Tensor) -> Tuple[Tensor, None]:
+        """Handle batched dense inputs; always returns dense adjacency."""
+        s, adj = self._prepare_batched_dense_inputs(s, adj)
+
+        adj_pool = self._dense_connect(s, adj)
+
+        adj_pool = postprocess_adj_pool_dense(
+            adj_pool,
+            remove_self_loops=self.remove_self_loops,
+            degree_norm=self.degree_norm,
+            adj_transpose=self.adj_transpose,
+            edge_weight_norm=self.edge_weight_norm,
+        )
+
+        return adj_pool, None
+
     def _forward_unbatched_inputs(
         self,
         edge_index: Adj,
@@ -291,7 +282,7 @@ class DenseConnect(Connect):
         num_nodes, num_clusters = s.size()
 
         # Compute pooled adjacency in dense format [B, K, K]
-        adj_pool_dense = self._compute_dense_pooled_adj_from_unbatched_inputs(
+        adj_pool_dense = self._dense_connect_unbatched(
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
@@ -303,7 +294,7 @@ class DenseConnect(Connect):
 
         # Return dense adjacency [B, K, K] when sparse_output=False.
         if not self.sparse_output:
-            adj_pool = self.postprocess_adj_pool(
+            adj_pool = postprocess_adj_pool_dense(
                 adj_pool_dense,
                 remove_self_loops=self.remove_self_loops,
                 degree_norm=self.degree_norm,

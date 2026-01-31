@@ -466,7 +466,7 @@ class DenseSRCPooling(SRCPooling):
         edge_index: Optional[Adj],
         edge_weight: Optional[Tensor],
         batch: Optional[Tensor],
-        mask: Optional[Tensor],  # TODO: should we keep this argument?
+        mask: Optional[Tensor],
         use_cache: Optional[bool] = None,
     ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
         if edge_index is None:
