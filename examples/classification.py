@@ -67,7 +67,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
                 # Second MP layer
                 self.use_dense_pool_adj = (
-                    self.pooler.is_dense and not self.pooler.block_diags_output
+                    self.pooler.is_dense and not self.pooler.sparse_output
                 )
                 if self.use_dense_pool_adj:
                     self.conv2 = DenseGCNConv(

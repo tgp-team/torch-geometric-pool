@@ -14,7 +14,8 @@ seed_everything(8)
 
 poolers = ["acc", "bnpool_u", "bnpool", "diff", "dmon", "hosc", "jb", "mincut"]
 for POOLER in poolers:
-    pooler_cls = pooler_map[POOLER]
+    pooler_key = POOLER[:-2] if POOLER.endswith("_u") else POOLER
+    pooler_cls = pooler_map[pooler_key]
     print(f"Using pooler: {POOLER}")
 
     ### Get the data

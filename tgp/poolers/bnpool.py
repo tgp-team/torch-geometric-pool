@@ -285,18 +285,8 @@ class BNPool(DenseSRCPooling):
             x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
             # Connect
-            adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
-
+            adj_pool, _ = self.connect(edge_index=adj, so=so)
             loss = self.compute_loss(adj, mask, so)
-
-            # Normalize coarsened adjacency matrix
-            adj_pool = self.connector.postprocess_adj_pool(
-                adj_pool,
-                remove_self_loops=self.connector.remove_self_loops,
-                degree_norm=self.connector.degree_norm,
-                adj_transpose=self.connector.adj_transpose,
-                edge_weight_norm=self.connector.edge_weight_norm,
-            )
 
             if self.sparse_output:
                 x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (

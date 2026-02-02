@@ -10,6 +10,7 @@ from tgp.reduce import BaseReduce
 from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
 from tgp.utils.losses import hosc_orthogonality_loss, mincut_loss, orthogonality_loss
+from tgp.utils.ops import postprocess_adj_pool_dense
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -197,12 +198,12 @@ class HOSCPooling(DenseSRCPooling):
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
         # Connect
-        adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
+        adj_pool = self.connector._dense_connect(adj=adj, s=so.s)
 
         loss = self.compute_loss(adj, so.s, adj_pool, mask)
 
         # Normalize coarsened adjacency matrix
-        adj_pool = self.connector.postprocess_adj_pool(
+        adj_pool = postprocess_adj_pool_dense(
             adj_pool,
             remove_self_loops=self.connector.remove_self_loops,
             degree_norm=self.connector.degree_norm,
