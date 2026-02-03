@@ -165,20 +165,11 @@ class DPSelect(MLPSelect):
                 If :obj:`batched_representation=False`, the assignment matrix :math:`\mathbf{S}` has shape
                 :math:`\mathbb{R}^{N \times K}`.
         """
+        x = self._prepare_inputs(x)
+        s, q_z = self._inner_forward(x)
+
         if self.batched_representation:
-            # Batched representation: [B, N, F] -> [B, N, K]
-            x = x.unsqueeze(0) if x.dim() == 2 else x
-            s, q_z = self._inner_forward(x)
+            s = self._apply_mask(s, mask)
+            return self._build_output(s, mask=mask, q_z=q_z)
 
-            if mask is not None:
-                s = s * mask.unsqueeze(-1)
-
-            return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask, q_z=q_z)
-        else:
-            # Unbatched representation: [N, F] -> [N, K]
-            assert x.dim() == 2, "x must be of shape [N, F]"
-            s, q_z = self._inner_forward(x)
-
-            return SelectOutput(
-                s=s, s_inv_op=self.s_inv_op, q_z=q_z, node_assignment=s, batch=batch
-            )
+        return self._build_output(s, batch=batch, q_z=q_z)

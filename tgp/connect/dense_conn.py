@@ -121,6 +121,22 @@ class DenseConnect(Connect):
         adj_pool = torch.matmul(sta, s)
         return adj_pool
 
+    def dense_connect(self, adj: Tensor, s: Tensor) -> Tensor:
+        r"""Public method to compute :math:`\mathbf{S}^{\top}\mathbf{A}\mathbf{S}`.
+
+        This method is a convenience wrapper for poolers that need to compute
+        the raw pooled adjacency before applying post-processing.
+
+        Args:
+            adj (~torch.Tensor): The dense adjacency matrix of shape :math:`(B, N, N)`.
+            s (~torch.Tensor): The dense assignment matrix of shape :math:`(B, N, K)`.
+
+        Returns:
+            ~torch.Tensor: The pooled adjacency matrix of shape :math:`(B, K, K)`.
+        """
+        s, adj = self._prepare_batched_dense_inputs(s, adj)
+        return self._dense_connect(s, adj)
+
     @staticmethod
     def _dense_connect_unbatched(
         edge_index: Adj,

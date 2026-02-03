@@ -117,6 +117,170 @@ def orthogonality_loss(
     return _batch_reduce_loss(ortho_loss, batch_reduction)
 
 
+def sparse_mincut_loss(
+    edge_index: Tensor,
+    S: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Sparse auxiliary mincut loss for unbatched graph pooling.
+
+    This is the sparse/unbatched version of :func:`~tgp.utils.losses.mincut_loss`
+    used by :class:`~tgp.poolers.MinCutPooling` in unbatched mode. It operates on
+    sparse adjacency matrices and unbatched dense assignment matrices.
+
+    The loss is computed as
+
+    .. math::
+        \mathcal{L}_\text{CUT} = - \frac{\mathrm{Tr}(\mathbf{S}^{\top} \mathbf{A}
+        \mathbf{S})} {\mathrm{Tr}(\mathbf{S}^{\top} \mathbf{D}
+        \mathbf{S})},
+
+    where
+
+    + :math:`\mathbf{A}` is the adjacency matrix (sparse),
+    + :math:`\mathbf{S}` is the dense cluster assignment matrix,
+    + :math:`\mathbf{D} = \mathrm{diag}(\mathbf{A}^{\top}\mathbf{1})` is the degree
+      matrix.
+
+    Args:
+        edge_index (~torch.Tensor): Graph connectivity in COO format of shape
+            :math:`(2, E)`, where :math:`E` is the number of edges.
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`, where :math:`N` is the total number of nodes and
+            :math:`K` is the number of clusters.
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            If :obj:`None`, all edges have weight :obj:`1.0`. (default: :obj:`None`)
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)` indicating
+            which graph each node belongs to. If :obj:`None`, assumes single graph.
+            (default: :obj:`None`)
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
+
+    Returns:
+        ~torch.Tensor: The mincut loss.
+    """
+    num_nodes = S.size(0)
+    device = S.device
+
+    if edge_weight is None:
+        edge_weight = torch.ones(edge_index.size(1), device=device)
+    elif edge_weight.dim() > 1:
+        edge_weight = edge_weight.squeeze()
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+
+    batch_size = int(batch.max().item()) + 1
+
+    # Compute degrees per node: d_i = sum_j A_ij
+    degrees = scatter(
+        edge_weight, edge_index[0], dim=0, dim_size=num_nodes, reduce="sum"
+    )
+
+    # Compute S^T D S per graph
+    # D is diagonal, so S^T D S = sum_i d_i * S_i * S_i^T (outer product weighted by degree)
+    # Trace(S^T D S) = sum_i d_i * ||S_i||^2
+    S_squared_norm = (S * S).sum(dim=-1)  # [N]
+    den_per_node = degrees * S_squared_norm  # [N]
+    den_per_graph = scatter(
+        den_per_node, batch, dim=0, dim_size=batch_size, reduce="sum"
+    )
+
+    # Compute S^T A S per graph using sparse operations
+    # For each edge (i, j) with weight w_ij: contribution to S^T A S is w_ij * S_i^T * S_j
+    # Trace(S^T A S) = sum_{(i,j)} w_ij * (S_i . S_j)
+    src, dst = edge_index[0], edge_index[1]
+    S_src = S[src]  # [E, K]
+    S_dst = S[dst]  # [E, K]
+    edge_contribution = edge_weight * (S_src * S_dst).sum(dim=-1)  # [E]
+
+    edge_batch = batch[src]  # Batch assignment for each edge
+    num_per_graph = scatter(
+        edge_contribution, edge_batch, dim=0, dim_size=batch_size, reduce="sum"
+    )
+
+    # Compute loss: -num / den
+    cut_loss = -(num_per_graph / (den_per_graph + eps))
+
+    return _batch_reduce_loss(cut_loss, batch_reduction)
+
+
+def unbatched_orthogonality_loss(
+    S: Tensor,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Unbatched auxiliary orthogonality loss for unbatched graph pooling.
+
+    This is the unbatched version of :func:`~tgp.utils.losses.orthogonality_loss`
+    used by :class:`~tgp.poolers.MinCutPooling` in unbatched mode. It operates on
+    unbatched dense assignment matrices.
+
+    The loss is computed as
+
+    .. math::
+        \mathcal{L}_O = {\left\| \frac{\mathbf{S}^{\top} \mathbf{S}}
+        {{\|\mathbf{S}^{\top} \mathbf{S}\|}_F} -\frac{\mathbf{I}_K}{\sqrt{K}}
+        \right\|}_F,
+
+    where
+
+    + :math:`\mathbf{S}` is the dense cluster assignment matrix,
+    + :math:`\mathbf{I}_K` is the identity matrix of size :math:`K`,
+    + :math:`K` is the number of clusters.
+
+    Args:
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`, where :math:`N` is the total number of nodes and
+            :math:`K` is the number of clusters.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)` indicating
+            which graph each node belongs to. If :obj:`None`, assumes single graph.
+            (default: :obj:`None`)
+        batch_reduction (str, optional): Reduction method applied to the batch dimension.
+            Can be :obj:`'mean'` or :obj:`'sum'`.
+            (default: :obj:`"mean"`)
+
+    Returns:
+        ~torch.Tensor: The orthogonality loss.
+    """
+    num_nodes = S.size(0)
+    num_clusters = S.size(1)
+    device = S.device
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+
+    batch_size = int(batch.max().item()) + 1
+
+    # Target matrix scaled by sqrt(K)
+    id_k = torch.eye(num_clusters, device=device, dtype=S.dtype) / math.sqrt(
+        num_clusters
+    )
+
+    # Compute S^T S for each graph
+    # We need to compute this per graph, so we iterate over graphs
+    ortho_losses = []
+    for g in range(batch_size):
+        mask = batch == g
+        S_g = S[mask]  # [N_g, K]
+
+        # S^T S for this graph
+        STS_g = torch.matmul(S_g.t(), S_g)  # [K, K]
+
+        # Normalize
+        STS_term = STS_g / torch.norm(STS_g)
+
+        # Compute loss
+        loss_g = torch.norm(STS_term - id_k)
+        ortho_losses.append(loss_g)
+
+    ortho_loss = torch.stack(ortho_losses)
+    return _batch_reduce_loss(ortho_loss, batch_reduction)
+
+
 def hosc_orthogonality_loss(
     S: Tensor,
     mask: Optional[Tensor] = None,

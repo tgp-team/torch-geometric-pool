@@ -198,7 +198,7 @@ class HOSCPooling(DenseSRCPooling):
         x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
         # Connect
-        adj_pool = self.connector._dense_connect(adj=adj, s=so.s)
+        adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
 
         loss = self.compute_loss(adj, so.s, adj_pool, mask)
 

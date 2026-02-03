@@ -2,12 +2,57 @@
 
 Tests the mincut_loss function with various scenarios including isolated nodes,
 which is important for robust pooling operations.
+
+Also tests that the unbatched loss variants return exactly the same values as
+the dense (batched) variants when given equivalent inputs.
 """
 
 import pytest
 import torch
 
-from tgp.utils.losses import mincut_loss
+from tgp.utils.losses import (
+    mincut_loss,
+    orthogonality_loss,
+    sparse_mincut_loss,
+    unbatched_orthogonality_loss,
+)
+
+
+def _dense_batched_to_sparse_unbatched(adj, S):
+    """Convert dense batched (adj [B,N,N], S [B,N,K]) to sparse unbatched form.
+
+    Returns edge_index [2, E], edge_weight [E], S_flat [N_total, K], batch [N_total].
+    """
+    B, N, K = S.shape
+    device = S.device
+
+    edge_index_list = []
+    edge_weight_list = []
+    batch_list = []
+
+    for b in range(B):
+        # Nonzero entries in adj[b]; avoid self-loops if diagonal is zero
+        nz = adj[b].nonzero(as_tuple=False)  # [E_b, 2]
+        if nz.size(0) == 0:
+            edge_index_list.append(torch.zeros(2, 0, dtype=torch.long, device=device))
+            edge_weight_list.append(torch.zeros(0, device=device))
+        else:
+            row, col = nz[:, 0], nz[:, 1]
+            edge_index_b = torch.stack([row, col], dim=0)  # [2, E_b]
+            edge_weight_b = adj[b][row, col]
+            # Global node indices
+            offset = b * N
+            edge_index_b = edge_index_b + offset
+            edge_index_list.append(edge_index_b)
+            edge_weight_list.append(edge_weight_b)
+        batch_list.append(torch.full((N,), b, dtype=torch.long, device=device))
+
+    edge_index = torch.cat(edge_index_list, dim=1)
+    edge_weight = torch.cat(edge_weight_list)
+    batch = torch.cat(batch_list)
+    S_flat = S.reshape(B * N, K)
+
+    return edge_index, edge_weight, S_flat, batch
 
 
 class TestMinCutLoss:
@@ -191,6 +236,178 @@ class TestMinCutLoss:
 
         loss = mincut_loss(adj, S, adj_pooled, batch_reduction="mean")
         assert torch.isfinite(loss)
+
+
+class TestMinCutLossDenseVsSparseEquality:
+    """Test that unbatched mincut and orthogonality losses return exactly the
+    same values as the dense (batched) versions when given equivalent inputs.
+    """
+
+    @pytest.mark.parametrize("batch_reduction", ["mean", "sum"])
+    def test_mincut_loss_dense_vs_sparse_equality_single_graph(self, batch_reduction):
+        """Single graph: dense [1,N,N] + [1,N,K] vs sparse edge_index + [N,K]."""
+        torch.manual_seed(42)
+        B, N, K = 1, 8, 4
+
+        adj = torch.rand(B, N, N)
+        adj = adj + adj.transpose(-2, -1)
+        for b in range(B):
+            adj[b].fill_diagonal_(0)
+
+        S = torch.randn(B, N, K)
+        S = torch.softmax(S, dim=-1)
+        adj_pooled = torch.matmul(torch.matmul(S.transpose(-2, -1), adj), S)
+
+        loss_dense = mincut_loss(adj, S, adj_pooled, batch_reduction=batch_reduction)
+
+        edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(
+            adj, S
+        )
+        loss_sparse = sparse_mincut_loss(
+            edge_index, S_flat, edge_weight, batch, batch_reduction=batch_reduction
+        )
+
+        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+            f"mincut_loss dense vs sparse mismatch (single graph, {batch_reduction}): "
+            f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
+        )
+
+    @pytest.mark.parametrize("batch_reduction", ["mean", "sum"])
+    def test_mincut_loss_dense_vs_sparse_equality_batch(self, batch_reduction):
+        """Multiple graphs: dense [B,N,N] + [B,N,K] vs sparse edge_index + [N,K] + batch."""
+        torch.manual_seed(123)
+        B, N, K = 3, 6, 4
+
+        adj = torch.rand(B, N, N)
+        adj = adj + adj.transpose(-2, -1)
+        for b in range(B):
+            adj[b].fill_diagonal_(0)
+
+        S = torch.randn(B, N, K)
+        S = torch.softmax(S, dim=-1)
+        adj_pooled = torch.matmul(torch.matmul(S.transpose(-2, -1), adj), S)
+
+        loss_dense = mincut_loss(adj, S, adj_pooled, batch_reduction=batch_reduction)
+
+        edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(
+            adj, S
+        )
+        loss_sparse = sparse_mincut_loss(
+            edge_index, S_flat, edge_weight, batch, batch_reduction=batch_reduction
+        )
+
+        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+            f"mincut_loss dense vs sparse mismatch (batch, {batch_reduction}): "
+            f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
+        )
+
+    @pytest.mark.parametrize("batch_reduction", ["mean", "sum"])
+    def test_mincut_loss_dense_vs_sparse_with_isolated_nodes(self, batch_reduction):
+        """Dense vs sparse mincut with isolated nodes and an empty graph."""
+        torch.manual_seed(321)
+        B, N, K = 2, 5, 3
+
+        adj = torch.zeros(B, N, N)
+        # Graph 0: triangle among nodes 0-2, nodes 3-4 isolated
+        adj[0, 0, 1] = adj[0, 1, 0] = 1.0
+        adj[0, 1, 2] = adj[0, 2, 1] = 1.0
+        adj[0, 2, 0] = adj[0, 0, 2] = 1.0
+        # Graph 1: all nodes isolated (no edges)
+
+        S = torch.randn(B, N, K)
+        S = torch.softmax(S, dim=-1)
+        adj_pooled = torch.matmul(torch.matmul(S.transpose(-2, -1), adj), S)
+
+        loss_dense = mincut_loss(adj, S, adj_pooled, batch_reduction=batch_reduction)
+
+        edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(
+            adj, S
+        )
+        loss_sparse = sparse_mincut_loss(
+            edge_index, S_flat, edge_weight, batch, batch_reduction=batch_reduction
+        )
+
+        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+            "mincut_loss dense vs sparse mismatch with isolated nodes "
+            f"(batch_reduction={batch_reduction}): "
+            f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
+        )
+
+    @pytest.mark.parametrize("batch_reduction", ["mean", "sum"])
+    def test_orthogonality_loss_dense_vs_sparse_equality_single_graph(
+        self, batch_reduction
+    ):
+        """Single graph: dense [1,N,K] vs unbatched [N,K]."""
+        torch.manual_seed(42)
+        B, N, K = 1, 8, 4
+
+        S = torch.randn(B, N, K)
+        S = torch.softmax(S, dim=-1)
+
+        loss_dense = orthogonality_loss(S, batch_reduction=batch_reduction)
+
+        _, _, S_flat, batch = _dense_batched_to_sparse_unbatched(
+            torch.zeros(B, N, N, device=S.device), S
+        )
+        loss_sparse = unbatched_orthogonality_loss(
+            S_flat, batch, batch_reduction=batch_reduction
+        )
+
+        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+            f"orthogonality_loss dense vs sparse mismatch (single graph, {batch_reduction}): "
+            f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
+        )
+
+    @pytest.mark.parametrize("batch_reduction", ["mean", "sum"])
+    def test_orthogonality_loss_dense_vs_sparse_equality_batch(self, batch_reduction):
+        """Multiple graphs: dense [B,N,K] vs unbatched [N,K] + batch."""
+        torch.manual_seed(123)
+        B, N, K = 3, 6, 4
+
+        S = torch.randn(B, N, K)
+        S = torch.softmax(S, dim=-1)
+
+        loss_dense = orthogonality_loss(S, batch_reduction=batch_reduction)
+
+        _, _, S_flat, batch = _dense_batched_to_sparse_unbatched(
+            torch.zeros(B, N, N, device=S.device), S
+        )
+        loss_sparse = unbatched_orthogonality_loss(
+            S_flat, batch, batch_reduction=batch_reduction
+        )
+
+        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+            f"orthogonality_loss dense vs sparse mismatch (batch, {batch_reduction}): "
+            f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
+        )
+
+    def test_mincut_loss_dense_vs_sparse_with_weighted_edges(self):
+        """Dense vs sparse mincut with non-unit edge weights."""
+        torch.manual_seed(456)
+        B, N, K = 2, 5, 3
+
+        adj = torch.rand(B, N, N)
+        adj = adj + adj.transpose(-2, -1)
+        for b in range(B):
+            adj[b].fill_diagonal_(0)
+
+        S = torch.randn(B, N, K)
+        S = torch.softmax(S, dim=-1)
+        adj_pooled = torch.matmul(torch.matmul(S.transpose(-2, -1), adj), S)
+
+        loss_dense = mincut_loss(adj, S, adj_pooled, batch_reduction="mean")
+
+        edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(
+            adj, S
+        )
+        loss_sparse = sparse_mincut_loss(
+            edge_index, S_flat, edge_weight, batch, batch_reduction="mean"
+        )
+
+        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+            "mincut_loss dense vs sparse mismatch with weighted edges: "
+            f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
+        )
 
 
 if __name__ == "__main__":

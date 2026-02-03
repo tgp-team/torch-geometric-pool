@@ -434,7 +434,7 @@ class BNPool(DenseSRCPooling):
     def compute_sparse_loss(
         self, adj: Adj, batch: Optional[Tensor], so: SelectOutput
     ) -> dict:
-        node_assignment, q_z = so.node_assignment, so.q_z
+        node_assignment, q_z = so.s, so.q_z
 
         if batch is not None:
             batch_size = int(batch.max()) + 1
