@@ -11,6 +11,8 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
   whether pooled adjacency is returned as block‑diagonal sparse or batched dense.
 - **BNPool unified**: Dense and sparse BNPool variants are merged into one class with
   batched/unbatched branches and consistent outputs.
+- **MinCut unbatched mode**: MinCutPooling now supports `batched=False` with sparse
+  losses and optional sparse outputs.
 - **DenseConnect consolidated**: All dense connect logic (batched and unbatched paths)
   lives in `DenseConnect`; redundant variants were removed.
 
@@ -57,6 +59,9 @@ This flag determines the appropriate downstream MP/global pooling layers.
   under one class (no separate unbatched class or helper file).
 - **`DenseSelect` renamed to `MLPSelect`**, with module rename from
   `dense_select.py` → `mlp_select.py`.
+- **`MLPSelect`/`DPSelect` now accept `batched_representation`** to emit either
+  batched `[B, N, K]` or unbatched `[N, K]` assignments, and include `batch` in
+  `SelectOutput` when operating unbatched.
 - **`SparseBNPool` removed**; use `BNPool(batched=False)` or `get_pooler("bnpool_u")`.
 - **`dense_conn_spt.py` removed**, all logic folded into `dense_conn.py`.
 - **`get_pooler` now recognizes `_u` suffix** for dense poolers that implement the
@@ -78,8 +83,13 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 - **BNPool**: unified dense/sparse behavior; batched/unbatched branches share a
   consistent interface. Unbatched path computes sparse loss.
+- **BNPool (unbatched)** now supports a **negative‑sampling cap** via
+  `num_neg_samples` to control memory/time when graphs are dense or `K` is large.
 - **LaPooling**: default is `batched=True`; unbatched mode retained for memory efficiency.
   Unbatched selection now computes per‑graph similarity to reduce peak memory.
+- **MinCutPooling**: unbatched mode (`batched=False`) computes sparse losses and can
+  return either dense `[B, K, K]` or block‑diagonal sparse outputs based on
+  `sparse_output`.
 - **NMFPooling**: batched mode supported; unbatched path still not implemented.
   Pre‑coarsening returns sparse output by default for efficient downstream use.
 

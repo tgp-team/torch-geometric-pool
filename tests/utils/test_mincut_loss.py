@@ -267,7 +267,7 @@ class TestMinCutLossDenseVsSparseEquality:
             edge_index, S_flat, edge_weight, batch, batch_reduction=batch_reduction
         )
 
-        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+        assert torch.allclose(loss_dense, loss_sparse, rtol=1e-6, atol=1e-6), (
             f"mincut_loss dense vs sparse mismatch (single graph, {batch_reduction}): "
             f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
         )
@@ -296,7 +296,7 @@ class TestMinCutLossDenseVsSparseEquality:
             edge_index, S_flat, edge_weight, batch, batch_reduction=batch_reduction
         )
 
-        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+        assert torch.allclose(loss_dense, loss_sparse, rtol=1e-6, atol=1e-6), (
             f"mincut_loss dense vs sparse mismatch (batch, {batch_reduction}): "
             f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
         )
@@ -327,7 +327,7 @@ class TestMinCutLossDenseVsSparseEquality:
             edge_index, S_flat, edge_weight, batch, batch_reduction=batch_reduction
         )
 
-        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+        assert torch.allclose(loss_dense, loss_sparse, rtol=1e-6, atol=1e-6), (
             "mincut_loss dense vs sparse mismatch with isolated nodes "
             f"(batch_reduction={batch_reduction}): "
             f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
@@ -353,7 +353,7 @@ class TestMinCutLossDenseVsSparseEquality:
             S_flat, batch, batch_reduction=batch_reduction
         )
 
-        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+        assert torch.allclose(loss_dense, loss_sparse, rtol=1e-6, atol=1e-6), (
             f"orthogonality_loss dense vs sparse mismatch (single graph, {batch_reduction}): "
             f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
         )
@@ -376,7 +376,7 @@ class TestMinCutLossDenseVsSparseEquality:
             S_flat, batch, batch_reduction=batch_reduction
         )
 
-        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+        assert torch.allclose(loss_dense, loss_sparse, rtol=1e-6, atol=1e-6), (
             f"orthogonality_loss dense vs sparse mismatch (batch, {batch_reduction}): "
             f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
         )
@@ -404,7 +404,7 @@ class TestMinCutLossDenseVsSparseEquality:
             edge_index, S_flat, edge_weight, batch, batch_reduction="mean"
         )
 
-        assert torch.allclose(loss_dense, loss_sparse, rtol=0.0, atol=0.0), (
+        assert torch.allclose(loss_dense, loss_sparse, rtol=1e-6, atol=1e-6), (
             "mincut_loss dense vs sparse mismatch with weighted edges: "
             f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
         )

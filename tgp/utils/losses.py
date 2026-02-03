@@ -9,6 +9,7 @@ from torch_geometric.utils import scatter
 
 from tgp import eps
 from tgp.utils import rank3_diag, rank3_trace
+from tgp.utils.ops import check_and_filter_edge_weights
 
 BatchReductionType = Literal["mean", "sum"]
 
@@ -167,8 +168,12 @@ def sparse_mincut_loss(
 
     if edge_weight is None:
         edge_weight = torch.ones(edge_index.size(1), device=device)
-    elif edge_weight.dim() > 1:
-        edge_weight = edge_weight.squeeze()
+    else:
+        edge_weight = check_and_filter_edge_weights(edge_weight)
+        if edge_weight is None:
+            edge_weight = torch.ones(edge_index.size(1), device=device)
+        else:
+            edge_weight = edge_weight.view(-1)
 
     if batch is None:
         batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
