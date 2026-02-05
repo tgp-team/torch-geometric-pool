@@ -164,6 +164,7 @@ class LaPooling(DenseSRCPooling):
             )
             return x_lifted
 
+        # === Batched path ===
         if self.batched:
             x, adj, mask = self._ensure_batched_inputs(
                 x=x,
@@ -208,10 +209,7 @@ class LaPooling(DenseSRCPooling):
 
             return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so)
 
-        # Unbatched mode
-        if adj is None:
-            raise ValueError("adj cannot be None when batched=False.")
-
+        # === Unbatched path ===
         # Select
         so = self.select(
             x=x,

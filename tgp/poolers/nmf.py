@@ -114,7 +114,7 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
 
         self.cached = cached
 
-        # Connector used in the precoarsening step
+        # Connector used in the precoarsening step # TODO: is it still necessary to have a preconnector and redefine the precoarsening method after the modification done to DenseConnect and the introduction of unbatched mode?
         self.preconnector = DenseConnect(
             remove_self_loops=remove_self_loops,
             degree_norm=degree_norm,

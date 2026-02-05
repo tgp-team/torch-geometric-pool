@@ -202,6 +202,7 @@ class MinCutPooling(DenseSRCPooling):
             )
             return x_lifted
 
+        # === Batched path ===
         if self.batched:
             x, adj, mask = self._ensure_batched_inputs(
                 x=x,
@@ -252,10 +253,7 @@ class MinCutPooling(DenseSRCPooling):
 
             return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
-        # Unbatched mode
-        if adj is None:
-            raise ValueError("adj cannot be None when batched=False.")
-
+        # === Unbatched (sparse-loss) path ===
         # Select
         so = self.select(x=x, batch=batch)
 
