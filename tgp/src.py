@@ -568,6 +568,9 @@ class BasePrecoarseningMixin(Precoarsenable):
         num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
+        if edge_index is None:
+            raise ValueError("edge_index cannot be None for precoarsening.")
+
         so = self.select(
             edge_index=edge_index,
             edge_weight=edge_weight,
@@ -575,9 +578,23 @@ class BasePrecoarseningMixin(Precoarsenable):
             num_nodes=num_nodes,
             **kwargs,
         )
+
+        if batch is None:
+            batch = so.batch if getattr(so, "batch", None) is not None else None
+            if batch is None:
+                n_nodes = so.num_nodes
+                batch = torch.zeros(n_nodes, dtype=torch.long, device=so.s.device)
+            so.batch = batch
+
         batch_pooled = self.reducer.reduce_batch(select_output=so, batch=batch)
-        edge_index_pooled, edge_weight_pooled = self.connector(
-            so=so, edge_index=edge_index, edge_weight=edge_weight
+
+        connector = getattr(self, "preconnector", self.connector)
+        edge_index_pooled, edge_weight_pooled = connector(
+            so=so,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
         )
         return PoolingOutput(
             edge_index=edge_index_pooled,

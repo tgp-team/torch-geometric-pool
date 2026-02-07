@@ -1,6 +1,7 @@
 from .base_select import Select, SelectOutput
 from .dp_select import DPSelect
 from .edge_contraction_select import EdgeContractionSelect
+from .eigenpool_select import EigenPoolSelect, eigenpool_select
 from .graclus_select import GraclusSelect
 from .identity_select import IdentitySelect
 from .kmis_select import KMISSelect, degree_scorer
@@ -13,6 +14,7 @@ from .topk_select import TopkSelect
 
 select_functions = [
     "degree_scorer",
+    "eigenpool_select",
 ]
 
 select_classes = [
@@ -21,6 +23,7 @@ select_classes = [
     "MLPSelect",
     "DPSelect",
     "EdgeContractionSelect",
+    "EigenPoolSelect",
     "GraclusSelect",
     "IdentitySelect",
     "LaPoolSelect",

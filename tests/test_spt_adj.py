@@ -57,7 +57,11 @@ def test_output_with_spt_adj(pooler_test_graph_sparse_spt, pooler_name):
     x_lifted = pooler(x=x_pool, so=out.so, lifting=True)
     assert isinstance(x_lifted, torch.Tensor)
     assert x_lifted.size(-2) == N
-    assert x_lifted.size(-1) == x_pool.size(-1)
+    # EigenPooling contracts feature dimension during lifting (H*d -> d)
+    if pooler_name == "eigen":
+        assert x_lifted.size(-1) == F  # EigenPooling lifts back to original dimension
+    else:
+        assert x_lifted.size(-1) == x_pool.size(-1)
 
     # reset params check
     if hasattr(pooler, "reset_parameters"):

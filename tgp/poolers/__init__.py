@@ -4,6 +4,7 @@ from .bnpool import BNPool
 from .diffpool import DiffPool
 from .dmon import DMoNPooling
 from .edge_contraction import EdgeContractionPooling
+from .eigenpool import EigenPooling
 from .graclus import GraclusPooling
 from .hosc import HOSCPooling
 from .just_balance import JustBalancePooling
@@ -25,6 +26,7 @@ pooler_classes = [
     "DiffPool",
     "DMoNPooling",
     "EdgeContractionPooling",
+    "EigenPooling",
     "GraclusPooling",
     "HOSCPooling",
     "LaPooling",
@@ -47,6 +49,7 @@ pooler_map = {
     "diff": DiffPool,
     "dmon": DMoNPooling,
     "ec": EdgeContractionPooling,
+    "eigen": EigenPooling,
     "graclus": GraclusPooling,
     "hosc": HOSCPooling,
     "lap": LaPooling,
