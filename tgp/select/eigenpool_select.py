@@ -212,7 +212,18 @@ def eigenpool_select(
     num_modes: int = 5,
     normalized: bool = True,
 ) -> SelectOutput:
-    r"""Compute EigenPool node assignments and pooling matrices.
+    r"""Compute EigenPool assignments and eigenvector pooling matrices.
+
+    Given a graph with :math:`N` nodes, this function computes:
+
+    + a hard assignment matrix
+      :math:`\mathbf{S} \in \{0,1\}^{N \times K}` via spectral clustering;
+    + an eigenvector pooling matrix
+      :math:`\boldsymbol{\Theta} \in \mathbb{R}^{N \times (K\cdot H)}`.
+
+    For consistency with the connector notation, :math:`\boldsymbol{\Omega}` used in
+    :class:`~tgp.connect.EigenPoolConnect` is the same matrix as
+    :math:`\mathbf{S}`.
 
     Args:
         edge_index (~torch_geometric.typing.Adj):
@@ -336,9 +347,14 @@ class EigenPoolSelect(Select):
     r"""The :math:`\texttt{select}` operator for EigenPooling.
 
     This operator performs spectral clustering on the adjacency matrix to build
-    a dense assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{N \times K}` and
-    the eigenvector pooling matrix :math:`\boldsymbol{\Theta}` used by the
-    EigenPooling reduce/lift steps.
+    a dense assignment matrix
+    :math:`\mathbf{S} \in \{0,1\}^{N \times K}` and the eigenvector pooling
+    matrix :math:`\boldsymbol{\Theta} \in \mathbb{R}^{N \times (K\cdot H)}` used
+    by the EigenPooling reduce/lift steps.
+
+    The same assignment matrix may also be denoted as
+    :math:`\boldsymbol{\Omega}` in connectivity formulas; in this implementation
+    :math:`\boldsymbol{\Omega} = \mathbf{S}`.
 
     Args:
         k (int):
@@ -393,7 +409,10 @@ class EigenPoolSelect(Select):
 
         Returns:
             ~tgp.select.SelectOutput:
-                Selection output with :obj:`s` and :obj:`theta`.
+                Selection output with:
+
+                - :obj:`s`: assignment matrix :math:`\mathbf{S}`
+                - :obj:`theta`: pooling matrix :math:`\boldsymbol{\Theta}`
         """
         return eigenpool_select(
             edge_index=edge_index,

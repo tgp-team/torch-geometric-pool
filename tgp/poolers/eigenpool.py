@@ -23,15 +23,27 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.EigenPoolConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.EigenPoolLift`.
 
+    Let:
+
+    + :math:`\mathbf{X} \in \mathbb{R}^{N \times F}` be node features;
+    + :math:`\mathbf{S} \in \{0,1\}^{N \times K}` be the hard assignment matrix
+      produced by :class:`~tgp.select.EigenPoolSelect`;
+    + :math:`\boldsymbol{\Omega} := \mathbf{S}` (same matrix, connectivity notation);
+    + :math:`\mathbf{A}_{\text{ext}} \in \mathbb{R}^{N \times N}` be the input
+      (possibly block-diagonal) adjacency used by the connector;
+    + :math:`H` be the number of eigenvector modes.
+
     EigenPooling first partitions nodes into :math:`K` clusters via spectral
     clustering, then builds a multi-mode pooling matrix
     :math:`\boldsymbol{\Theta} \in \mathbb{R}^{N \times (K\cdot H)}` from
-    cluster Laplacian eigenvectors. Features are pooled as:
+    Laplacian eigenvectors of each cluster-induced subgraph. Features are pooled as:
 
     .. math::
-        \mathbf{X}_{\text{pool}} = \boldsymbol{\Theta}^{\top}\mathbf{X},
+        \mathbf{X}_{\text{pool,raw}} = \boldsymbol{\Theta}^{\top}\mathbf{X},
 
-    and connectivity is coarsened with inter-cluster edges only:
+    then reshaped from :math:`[H\!\cdot\!K, F]` to :math:`[K, H\!\cdot\!F]`.
+
+    Connectivity is coarsened as:
 
     .. math::
         \mathbf{A}_{\text{coar}} = \boldsymbol{\Omega}^{\top}\mathbf{A}_{\text{ext}}\boldsymbol{\Omega}.
@@ -165,7 +177,9 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
                 During lifting, accepts pooled features
                 :math:`\mathbf{X}_{\text{pool}} \in \mathbb{R}^{K \times (H\cdot F)}`.
             adj (~torch_geometric.typing.Adj, optional):
-                Sparse graph connectivity. Required when :obj:`lifting=False`.
+                Sparse graph connectivity (edge index, :class:`~torch_sparse.SparseTensor`,
+                or torch COO tensor). Internally interpreted as
+                :math:`\mathbf{A}_{\text{ext}}`; required when :obj:`lifting=False`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional):
                 Edge weights associated with :obj:`adj`. (default: :obj:`None`)
