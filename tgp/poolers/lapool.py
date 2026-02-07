@@ -133,7 +133,11 @@ class LaPooling(DenseSRCPooling):
                 For unbatched mode: It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
-                For batched mode: A dense tensor of shape :math:`[B, N, N]`.
+                For batched mode: it can be either sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor of shape
+                :math:`[B, N, N]`, or an already dense tensor of shape
+                :math:`[B, N, N]`.
                 If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`

@@ -1,20 +1,17 @@
 from typing import Optional, Union
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import to_dense_adj
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
-from tgp.src import DenseSRCPooling, PoolingOutput, Precoarsenable
-from tgp.utils.ops import connectivity_to_edge_index
+from tgp.src import BasePrecoarseningMixin, DenseSRCPooling, PoolingOutput
 from tgp.utils.typing import LiftType, SinvType
 
 
-class NMFPooling(Precoarsenable, DenseSRCPooling):
+class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
     r"""The Non-negative Matrix Factorization
     pooling as proposed in the paper `"A Non-Negative Factorization approach
     to node pooling in Graph Convolutional Neural Networks"
@@ -114,7 +111,7 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
 
         self.cached = cached
 
-        # Connector used in the precoarsening step # TODO: is it still necessary to have a preconnector and redefine the precoarsening method after the modification done to DenseConnect and the introduction of unbatched mode?
+        # Connector used in the precoarsening step (always sparse output).
         self.preconnector = DenseConnect(
             remove_self_loops=remove_self_loops,
             degree_norm=degree_norm,
@@ -137,18 +134,33 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor): Node feature tensor
-                :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`, with
-                batch-size :math:`B`, (maximum) number of nodes :math:`N` for
-                each graph, and feature dimension :math:`F`.
-            adj (~torch.Tensor): Adjacency tensor
-                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
+            x (~torch.Tensor): Node feature tensor.
+                For batched mode: :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`.
+                For unbatched mode: :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`.
+            adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
+                For batched mode: it can be either sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor of shape
+                :math:`[B, N, N]`, or an already dense tensor of shape
+                :math:`[B, N, N]`.
+                For unbatched mode: sparse connectivity in one of the formats
+                supported by :class:`~torch_geometric.typing.Adj`.
+                If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
+                (default: :obj:`None`)
+            edge_weight (~torch.Tensor, optional): Edge weights for sparse inputs.
+                (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
             mask (~torch.Tensor, optional): Mask matrix
                 :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
                 the valid nodes in each graph. Only used when inputs are already
                 dense/padded. (default: :obj:`None`)
+            batch (~torch.Tensor, optional): Batch vector
+                :math:`\mathbf{b} \in \{0,\ldots,B-1\}^{N}` for sparse inputs.
+                (default: :obj:`None`)
+            batch_pooled (~torch.Tensor, optional): Batch vector for pooled nodes.
+                Required when lifting from dense :math:`[N, K]` assignments on
+                multi-graph batches. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -162,86 +174,77 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
             )
             return x_lifted
 
-        if not self.batched:
-            raise NotImplementedError("NMF unbatched mode is not implemented yet.")
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
+            )
 
-        x, adj, mask = self._ensure_batched_inputs(
-            x=x,
-            edge_index=adj,
-            edge_weight=edge_weight,
-            batch=batch,
-            mask=mask,
-        )
+            # Select
+            so = self.select(edge_index=adj, mask=mask)
 
-        # Select
-        so = self.select(edge_index=adj, mask=mask)
+            # Reduce
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
-        # Reduce
-        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+            # Connect
+            adj_pooled, _ = self.connect(
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch=batch,
+                batch_pooled=batch_pooled,
+            )
 
-        # Connect
-        adj_pooled, _ = self.connect(
-            edge_index=adj,
-            so=so,
-            edge_weight=edge_weight,
-            batch=batch,
-            batch_pooled=batch_pooled,
-        )
-
-        if self.sparse_output:
-            x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_sparse_output(
-                    x_pool=x_pooled,
-                    adj_pool=adj_pooled,
-                    batch=batch,
-                    batch_pooled=batch_pooled,
+            if self.sparse_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pooled,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
                     so=so,
                 )
-            )
-            return PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-            )
 
-        return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so)
+            return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so)
 
-    def precoarsening(
-        self,
-        edge_index: Optional[Adj] = None,
-        edge_weight: Optional[Tensor] = None,
-        *,
-        batch: Optional[Tensor] = None,
-        **kwargs,
-    ) -> PoolingOutput:
-        if edge_index is None:
-            raise ValueError("edge_index cannot be None for precoarsening.")
-        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
-        adj = to_dense_adj(
-            edge_index, edge_attr=edge_weight
-        )  # has shape [1, N, N] -- Note: we do not pass batch here.
+        # === Unbatched path ===
+        # Select
+        so = self.select(
+            edge_index=adj,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=x.size(0),
+        )
 
-        so = self.select(edge_index=adj)
+        # Reduce
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
 
-        if batch is None:  # single graph -> give all nodes the same ID
-            batch = adj.new_zeros(adj.size(-1), dtype=torch.long)
-
-        # Use dense [N, K] representation for efficiency
-        s = so.s  # has shape [1, N, K]
-        s = s.squeeze(0)  # shape [N, K]
-        so = SelectOutput(s=s, s_inv_op=self.selector.s_inv_op, batch=batch)
-
-        batch_pooled = self.reducer.reduce_batch(so, batch)
-        edge_index_pooled, edge_weight_pooled = self.preconnector(
+        # Connect
+        edge_index_pooled, edge_weight_pooled = self.connect(
+            edge_index=adj,
             so=so,
-            edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
             batch_pooled=batch_pooled,
         )
+
         return PoolingOutput(
+            x=x_pooled,
             edge_index=edge_index_pooled,
             edge_weight=edge_weight_pooled,
             batch=batch_pooled,
@@ -249,4 +252,8 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         )
 
     def extra_repr_args(self) -> dict:
-        return {"cached": self.cached}
+        return {
+            "batched": self.batched,
+            "sparse_output": self.sparse_output,
+            "cached": self.cached,
+        }

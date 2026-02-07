@@ -169,7 +169,11 @@ class MinCutPooling(DenseSRCPooling):
                 For unbatched mode: :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`,
                 where :math:`N` is the total number of nodes across all graphs.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                For batched mode: Dense tensor of shape :math:`[B, N, N]`.
+                For batched mode: it can be either sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor of shape
+                :math:`[B, N, N]`, or an already dense tensor of shape
+                :math:`[B, N, N]`.
                 For unbatched mode: Sparse connectivity matrix in one of the formats
                 supported by :class:`~torch_geometric.typing.Adj` (edge_index, SparseTensor, etc.).
                 (default: :obj:`None`)
