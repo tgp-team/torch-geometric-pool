@@ -250,12 +250,11 @@ class BNPool(DenseSRCPooling):
                 batch-size :math:`B`, (maximum) number of nodes :math:`N` for
                 each graph, and feature dimension :math:`F`.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                In batched mode, it can be either:
-                - sparse connectivity (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`,
-                  or torch COO), which is internally converted to a dense padded tensor
-                  :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`;
-                - an already dense adjacency tensor
-                  :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
+                In batched mode, this accepts sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor
+                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`, or an
+                already dense adjacency tensor with the same shape.
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)

@@ -1,8 +1,21 @@
 import datetime
 import doctest
 import os
+import sys
+from pathlib import Path
 
 from docutils import nodes
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+existing_pythonpath = os.environ.get("PYTHONPATH")
+if existing_pythonpath:
+    os.environ["PYTHONPATH"] = f"{REPO_ROOT}{os.pathsep}{existing_pythonpath}"
+else:
+    os.environ["PYTHONPATH"] = str(REPO_ROOT)
 
 import tgp
 from tgp.utils import cheatsheet
