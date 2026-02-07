@@ -242,3 +242,9 @@ class LaPooling(DenseSRCPooling):
             so=so,
         )
         return out
+
+    def extra_repr_args(self) -> dict:
+        return {
+            "batched": self.batched,
+            "sparse_output": self.sparse_output,
+        }

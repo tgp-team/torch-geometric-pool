@@ -350,5 +350,5 @@ class LaPoolSelect(Select):
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}(s_inv_op={self.s_inv_op}, "
-            f"batched_representation={self.batched_representation})"
+            f"shortest_path_reg={self.shortest_path_reg})"
         )

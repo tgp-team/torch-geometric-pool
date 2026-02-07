@@ -346,7 +346,8 @@ class MinCutPooling(DenseSRCPooling):
 
     def extra_repr_args(self) -> dict:
         return {
+            "batched": self.batched,
+            "sparse_output": self.sparse_output,
             "cut_loss_coeff": self.cut_loss_coeff,
             "ortho_loss_coeff": self.ortho_loss_coeff,
-            "batched": self.batched,
         }

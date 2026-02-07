@@ -238,4 +238,9 @@ class AsymCheegerCutPooling(DenseSRCPooling):
         }
 
     def extra_repr_args(self) -> dict:
-        return {"totvar_coeff": self.totvar_coeff, "balance_coeff": self.balance_coeff}
+        return {
+            "batched": self.batched,
+            "sparse_output": self.sparse_output,
+            "totvar_coeff": self.totvar_coeff,
+            "balance_coeff": self.balance_coeff,
+        }

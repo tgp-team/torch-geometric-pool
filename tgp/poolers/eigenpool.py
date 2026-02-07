@@ -205,9 +205,6 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
                 batch_pooled=batch_pooled,
             )
 
-        if adj is None:
-            raise ValueError("adj cannot be None when lifting=False.")
-
         # Select (if not precomputed)
         if so is None:
             so = self.select(edge_index=adj, edge_weight=edge_weight, batch=batch)
@@ -244,6 +241,8 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
 
     def extra_repr_args(self) -> dict:
         return {
+            "batched": self.batched,
+            "sparse_output": self.sparse_output,
             "k": self.k,
             "num_modes": self.num_modes,
             "normalized": self.normalized,

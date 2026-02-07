@@ -8,6 +8,18 @@ from tgp.select.base_select import SelectOutput
 poolers = list(pooler_map.keys())
 excluded_poolers = ["pan"]
 poolers = [p for p in poolers if p not in excluded_poolers]
+dense_poolers = [
+    "acc",
+    "bnpool",
+    "diff",
+    "dmon",
+    "eigen",
+    "hosc",
+    "jb",
+    "lap",
+    "mincut",
+    "nmf",
+]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
@@ -127,6 +139,26 @@ def test_poolers_forward_and_lifting(pooler_test_graph_sparse_batch_tuple, poole
 def test_wrong_pooler_name():
     with pytest.raises(ValueError):
         get_pooler("non_existent_pooler")
+
+
+@pytest.mark.parametrize("pooler_name", dense_poolers)
+def test_dense_pooler_repr_reports_modes(pooler_name):
+    params = {
+        "in_channels": 4,
+        "k": 2,
+        "ratio": 0.5,
+        "cached": True,
+        "lift": "precomputed",
+        "s_inv_op": "transpose",
+        "lift_red_op": "mean",
+        "loss_coeff": 1.0,
+        "remove_self_loops": True,
+        "reduce": "sum",
+    }
+    pooler = get_pooler(pooler_name, **params)
+    rep = repr(pooler)
+    assert "batched=" in rep
+    assert "sparse_output=" in rep
 
 
 if __name__ == "__main__":

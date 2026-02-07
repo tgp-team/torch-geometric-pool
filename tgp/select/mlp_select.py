@@ -151,7 +151,6 @@ class MLPSelect(Select):
             f"{self.__class__.__name__}("
             f"in_channels={self.in_channels}, "
             f"k={self.k}, "
-            f"batched_representation={self.batched_representation}, "
             f"act={self.act}, "
             f"dropout={self.dropout}, "
             f"s_inv_op={self.s_inv_op})"
