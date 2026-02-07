@@ -12,17 +12,15 @@ class TestEigenPoolLiftBasic:
 
     def test_eigenpool_lift_repr(self):
         """Test EigenPoolLift __repr__ method."""
-        lifter = EigenPoolLift(num_modes=5, normalized=True)
+        lifter = EigenPoolLift(num_modes=5)
         repr_str = repr(lifter)
         assert "EigenPoolLift" in repr_str
         assert "num_modes=5" in repr_str
-        assert "normalized=True" in repr_str
 
     def test_eigenpool_lift_initialization(self):
         """Test EigenPoolLift initialization."""
-        lifter = EigenPoolLift(num_modes=3, normalized=False)
+        lifter = EigenPoolLift(num_modes=3)
         assert lifter.num_modes == 3
-        assert lifter.normalized is False
 
 
 class TestEigenPoolLiftForward:
@@ -67,7 +65,7 @@ class TestEigenPoolLiftForward:
         assert x_lifted.abs().sum() > 0
 
     def test_eigenpool_lift_requires_theta(self, pooler_test_graph_sparse):
-        """Test that SelectOutput.theta is required."""
+        """Test that missing theta fails when lift is called directly."""
         x, edge_index, _, batch = pooler_test_graph_sparse
         k = 3
         num_modes = 2
@@ -81,7 +79,7 @@ class TestEigenPoolLiftForward:
         lifter = EigenPoolLift(num_modes=num_modes)
 
         so_no_theta = SelectOutput(s=so.s)
-        with pytest.raises(ValueError, match="SelectOutput.theta is required"):
+        with pytest.raises(AttributeError):
             lifter(x_pool=x_pool, so=so_no_theta, batch=batch)
 
 
@@ -135,38 +133,34 @@ class TestEigenPoolLiftReduceCycle:
 
 
 class TestEigenPoolLiftNormalization:
-    """Tests for normalized vs unnormalized Laplacian in lift."""
+    """Tests for consistency across lift instances."""
 
-    def test_normalized_vs_unnormalized(self, pooler_test_graph_sparse):
-        """Test that normalized and unnormalized produce different results."""
+    def test_lift_instances_same_shape(self, pooler_test_graph_sparse):
+        """Test that equivalent lift instances produce same output shape."""
         x, edge_index, _, batch = pooler_test_graph_sparse
         k = 3
         num_modes = 2
 
         so = eigenpool_select(edge_index=edge_index, k=k)
 
-        # Reduce with both normalized and unnormalized
-        reducer_norm = EigenPoolReduce(num_modes=num_modes, normalized=True)
-        reducer_unnorm = EigenPoolReduce(num_modes=num_modes, normalized=False)
+        reducer_a = EigenPoolReduce(num_modes=num_modes)
+        reducer_b = EigenPoolReduce(num_modes=num_modes)
 
-        x_pool_norm, _ = reducer_norm(x=x, so=so, batch=batch, edge_index=edge_index)
-        x_pool_unnorm, _ = reducer_unnorm(
-            x=x, so=so, batch=batch, edge_index=edge_index
+        x_pool_a, _ = reducer_a(x=x, so=so, batch=batch, edge_index=edge_index)
+        x_pool_b, _ = reducer_b(x=x, so=so, batch=batch, edge_index=edge_index)
+
+        lifter_a = EigenPoolLift(num_modes=num_modes)
+        lifter_b = EigenPoolLift(num_modes=num_modes)
+
+        x_lifted_a = lifter_a(
+            x_pool=x_pool_a, so=so, batch=batch, edge_index=edge_index
         )
-
-        # Lift with matching normalization
-        lifter_norm = EigenPoolLift(num_modes=num_modes, normalized=True)
-        lifter_unnorm = EigenPoolLift(num_modes=num_modes, normalized=False)
-
-        x_lifted_norm = lifter_norm(
-            x_pool=x_pool_norm, so=so, batch=batch, edge_index=edge_index
-        )
-        x_lifted_unnorm = lifter_unnorm(
-            x_pool=x_pool_unnorm, so=so, batch=batch, edge_index=edge_index
+        x_lifted_b = lifter_b(
+            x_pool=x_pool_b, so=so, batch=batch, edge_index=edge_index
         )
 
         # Both should have same shape
-        assert x_lifted_norm.shape == x_lifted_unnorm.shape
+        assert x_lifted_a.shape == x_lifted_b.shape
 
 
 class TestEigenPoolLiftDifferentModes:

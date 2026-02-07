@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+from typing import Any, Dict, Optional, Tuple, Union
+
 import torch
 from torch_geometric.data import Data
 from torch_geometric.transforms import BaseTransform
@@ -9,6 +12,13 @@ from torch_geometric.utils import (
 )
 
 from tgp.src import SRCPooling
+
+PoolerLevelSpec = Union[
+    SRCPooling,
+    str,
+    Tuple[str, Dict[str, Any]],
+    Dict[str, Any],
+]
 
 
 class NormalizeAdj(BaseTransform):
@@ -166,7 +176,7 @@ class SortNodes(BaseTransform):
 
 
 class PreCoarsening(BaseTransform):
-    r"""A PyG transform that precomputes a hierarchy of pooled (coarsened) graphs
+    r"""A transform that precomputes a hierarchy of pooled (coarsened) graphs
     and attaches them to the input :class:`~torch_geometric.data.Data` object.
 
     Takes a pooling operator from :class:`~tgp.src.SRCPooling` to build
@@ -180,9 +190,10 @@ class PreCoarsening(BaseTransform):
     in :class:`~torch_geometric.data.Data`, which downstream GNN models can consume.
 
     Args:
-        pooler (~tgp.src.SRCPooling):
-            A non-trainable pooling operator that implements the
-            function :meth:`~tgp.src.SRCPooling.precoarsening`.
+        pooler (~tgp.src.SRCPooling, optional):
+            A non-trainable pooling operator that implements
+            :meth:`~tgp.src.SRCPooling.precoarsening`.
+            Used for every level when :obj:`poolers` is not provided.
         input_key (str, optional):
             The key in the data object from which to read the graph data.
             If :obj:`None`, uses the default data object.
@@ -190,24 +201,71 @@ class PreCoarsening(BaseTransform):
             The key in the data object where the pooled graphs will be stored.
             Defaults to :obj:`"pooled_data"`.
         recursive_depth (int):
-            The number of recursive coarsening levels. Must be greater than 0.
+            Number of recursive coarsening levels when using :obj:`pooler`.
+            Must be greater than 0.
+        poolers (Sequence, optional):
+            Optional per-level pooler specification. If provided, it overrides
+            :obj:`pooler` and :obj:`recursive_depth`.
+            Each entry can be one of:
+
+            - a pre-instantiated pooler object;
+            - a pooler alias string, e.g. :obj:`"ndp"`;
+            - a tuple :obj:`("eigen", {"k": 5})`;
+            - a dictionary with keys :obj:`{"pooler": "<name>", ...kwargs}`
+              or :obj:`{"name": "<name>", ...kwargs}`.
     """
 
     def __init__(
         self,
-        pooler: SRCPooling,
+        pooler: Optional[SRCPooling] = None,
         input_key: str = None,
         output_key: str = "pooled_data",
         recursive_depth: int = 1,
+        poolers: Optional[Sequence[PoolerLevelSpec]] = None,
     ) -> None:
         super().__init__()
-        assert isinstance(pooler, SRCPooling)
-        assert not pooler.is_trainable, "The pooler must not be trainable."
-        self.pooler = pooler
         self.input_key = input_key
         self.output_key = output_key
-        assert recursive_depth > 0
-        self.recursive_depth = recursive_depth
+
+        if poolers is None:
+            if pooler is None:
+                raise ValueError(
+                    "`pooler` must be provided when `poolers` is not specified."
+                )
+            if recursive_depth <= 0:
+                raise ValueError("`recursive_depth` must be greater than 0.")
+            poolers = [pooler for _ in range(recursive_depth)]
+
+        self.poolers = tuple(self._resolve_pooler_spec(spec) for spec in poolers)
+        if not self.poolers:
+            raise ValueError("At least one pooling level is required.")
+        self.pooler = self.poolers[0]  # Backward compatibility.
+        self.recursive_depth = len(self.poolers)
+
+    @staticmethod
+    def _build_pooler(pooler_name: str, kwargs: Optional[Dict[str, Any]] = None):
+        from tgp.poolers import get_pooler
+
+        return get_pooler(pooler_name, **(kwargs or {}))
+
+    def _resolve_pooler_spec(self, spec: PoolerLevelSpec) -> SRCPooling:
+        if isinstance(spec, dict):
+            spec_dict = dict(spec)
+            spec = (
+                spec_dict.pop("pooler", spec_dict.pop("name", None)),
+                spec_dict,
+            )
+
+        if isinstance(spec, tuple):
+            pooler = self._build_pooler(spec[0], spec[1])
+        elif isinstance(spec, str):
+            pooler = self._build_pooler(spec)
+        else:
+            pooler = spec
+
+        if pooler.is_trainable:
+            raise ValueError("The pooler must not be trainable.")
+        return pooler
 
     @torch.no_grad()
     def forward(self, data: Data) -> Data:
@@ -215,8 +273,8 @@ class PreCoarsening(BaseTransform):
         data_obj = data if self.input_key is None else getattr(data, self.input_key)
 
         pooled_out = []
-        for d in range(self.recursive_depth):
-            data_pooled = self.pooler.precoarsening(
+        for pooler in self.poolers:
+            data_pooled = pooler.precoarsening(
                 edge_index=data_obj.edge_index,
                 edge_weight=data_obj.edge_weight,
                 batch=data_obj.batch,

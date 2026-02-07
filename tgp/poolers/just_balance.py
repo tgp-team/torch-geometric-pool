@@ -274,7 +274,6 @@ class JustBalancePooling(DenseSRCPooling):
     def extra_repr_args(self) -> dict:
         return {
             "batched": self.batched,
-            "sparse_output": self.sparse_output,
             "loss_coeff": self.loss_coeff,
             "normalize_loss": self.normalize_loss,
         }

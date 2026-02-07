@@ -288,7 +288,6 @@ class HOSCPooling(DenseSRCPooling):
     def extra_repr_args(self) -> dict:
         return {
             "batched": self.batched,
-            "sparse_output": self.sparse_output,
             "mu": self.mu,
             "alpha": self.alpha,
             "hosc_ortho": self.hosc_ortho,

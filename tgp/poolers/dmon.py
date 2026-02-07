@@ -262,7 +262,6 @@ class DMoNPooling(DenseSRCPooling):
     def extra_repr_args(self) -> dict:
         return {
             "batched": self.batched,
-            "sparse_output": self.sparse_output,
             "spectral_loss_coeff": self.spectral_loss_coeff,
             "cluster_loss_coeff": self.cluster_loss_coeff,
             "ortho_loss_coeff": self.ortho_loss_coeff,

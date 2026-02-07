@@ -11,17 +11,15 @@ class TestEigenPoolReduceBasic:
 
     def test_eigenpool_reduce_repr(self):
         """Test EigenPoolReduce __repr__ method."""
-        reducer = EigenPoolReduce(num_modes=5, normalized=True)
+        reducer = EigenPoolReduce(num_modes=5)
         repr_str = repr(reducer)
         assert "EigenPoolReduce" in repr_str
         assert "num_modes=5" in repr_str
-        assert "normalized=True" in repr_str
 
     def test_eigenpool_reduce_initialization(self):
         """Test EigenPoolReduce initialization."""
-        reducer = EigenPoolReduce(num_modes=3, normalized=False)
+        reducer = EigenPoolReduce(num_modes=3)
         assert reducer.num_modes == 3
-        assert reducer.normalized is False
 
 
 class TestEigenPoolReduceForward:
@@ -60,7 +58,7 @@ class TestEigenPoolReduceForward:
         assert x_pool.abs().sum() > 0
 
     def test_eigenpool_reduce_requires_theta(self, pooler_test_graph_sparse):
-        """Test that SelectOutput.theta is required."""
+        """Test that missing theta fails when reduce is called directly."""
         x, edge_index, _, batch = pooler_test_graph_sparse
         k = 3
 
@@ -68,7 +66,7 @@ class TestEigenPoolReduceForward:
         so_no_theta = SelectOutput(s=so.s)  # drop theta
         reducer = EigenPoolReduce(num_modes=2)
 
-        with pytest.raises(ValueError, match="SelectOutput.theta is required"):
+        with pytest.raises(AttributeError):
             reducer(x=x, so=so_no_theta, batch=batch)
 
     def test_eigenpool_reduce_different_num_modes(self, pooler_test_graph_sparse):
@@ -153,24 +151,24 @@ class TestEigenPoolReduceReshape:
 
 
 class TestEigenPoolReduceNormalization:
-    """Tests for normalized vs unnormalized Laplacian."""
+    """Tests for consistency across reducer instances."""
 
-    def test_normalized_vs_unnormalized(self, pooler_test_graph_sparse):
-        """Test that normalized and unnormalized produce different results."""
+    def test_reducer_instances_same_shape(self, pooler_test_graph_sparse):
+        """Test that equivalent reducer instances produce same output shape."""
         x, edge_index, _, batch = pooler_test_graph_sparse
         k = 3
         num_modes = 2
 
         so = eigenpool_select(edge_index=edge_index, k=k)
 
-        reducer_norm = EigenPoolReduce(num_modes=num_modes, normalized=True)
-        reducer_unnorm = EigenPoolReduce(num_modes=num_modes, normalized=False)
+        reducer_a = EigenPoolReduce(num_modes=num_modes)
+        reducer_b = EigenPoolReduce(num_modes=num_modes)
 
-        x_pool_norm, _ = reducer_norm(x=x, so=so, batch=batch)
-        x_pool_unnorm, _ = reducer_unnorm(x=x, so=so, batch=batch)
+        x_pool_a, _ = reducer_a(x=x, so=so, batch=batch)
+        x_pool_b, _ = reducer_b(x=x, so=so, batch=batch)
 
         # Results should have same shape
-        assert x_pool_norm.shape == x_pool_unnorm.shape
+        assert x_pool_a.shape == x_pool_b.shape
 
 
 class TestEigenPoolReduceHelpers:

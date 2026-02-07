@@ -1,9 +1,3 @@
-"""EigenPool lift operator with eigenvector-based unpooling.
-
-This module uses eigenvector-based pooling matrices computed during Select
-and stored in SelectOutput.theta.
-"""
-
 from typing import Optional
 
 import torch
@@ -16,30 +10,69 @@ from tgp.utils.typing import ReduceType
 
 
 class EigenPoolLift(Lift):
-    """EigenPool lift operator with eigenvector-based unpooling.
+    r"""The :math:`\texttt{lift}` operator for EigenPooling.
 
-    This operator uses eigenvector-based pooling matrices computed in Select
-    and stored in SelectOutput.theta.
-    It expects pooled features of shape [K, H*d] and produces lifted features
-    of shape [N, d].
+    It uses the pooling matrix :math:`\boldsymbol{\Theta}` stored in
+    :obj:`so.theta` and lifts pooled features back to node space as:
+
+    .. math::
+        \mathbf{X}_{\text{lift}} =
+        \boldsymbol{\Theta}\mathbf{X}_{\text{pool,raw}},
+
+    where :math:`\mathbf{X}_{\text{pool,raw}}` is the mode-major version of the
+    pooled features.
 
     Args:
-        num_modes: Number of eigenvector modes (H) to use for lifting. (default: 5)
-        normalized: If True, use normalized Laplacian for eigenvector computation.
-            (default: True)
-        reduce_op: Aggregation function (unused, kept for API). (default: "sum")
+        num_modes (int, optional):
+            Number of eigenvector modes :math:`H`. Kept for API symmetry with the
+            EigenPool components. (default: :obj:`5`)
+        reduce_op (~tgp.utils.typing.ReduceType, optional):
+            Kept for API compatibility with :class:`~tgp.lift.Lift`.
+            (default: :obj:`"sum"`)
     """
 
     def __init__(
         self,
         num_modes: int = 5,
-        normalized: bool = True,
         reduce_op: ReduceType = "sum",
     ):
         super().__init__()
         self.num_modes = num_modes
-        self.normalized = normalized
         self.reduce_op = reduce_op
+
+    @staticmethod
+    def _reshape_feature_blocks_to_mode_major(
+        x_pool: Tensor,
+        num_clusters: int,
+        num_modes: int,
+    ) -> Tensor:
+        r"""Reshape pooled features from :math:`[K, H\cdot F]` to
+        mode-major :math:`[H\cdot K, F]`.
+        """
+        feat_dim = x_pool.size(-1) // num_modes
+        return (
+            x_pool.view(num_clusters, num_modes, feat_dim)
+            .permute(1, 0, 2)
+            .reshape(num_modes * num_clusters, feat_dim)
+        )
+
+    @classmethod
+    def _lift_with_theta(
+        cls,
+        theta: Tensor,
+        x_pool: Tensor,
+        num_clusters: int,
+    ) -> Tensor:
+        num_modes = theta.size(-1) // num_clusters
+        x_pool_mode_major = cls._reshape_feature_blocks_to_mode_major(
+            x_pool=x_pool,
+            num_clusters=num_clusters,
+            num_modes=num_modes,
+        )
+
+        if theta.is_sparse:
+            return torch.sparse.mm(theta, x_pool_mode_major)
+        return theta.matmul(x_pool_mode_major)
 
     def forward(
         self,
@@ -51,146 +84,69 @@ class EigenPoolLift(Lift):
         edge_weight: Optional[Tensor] = None,
         **kwargs,
     ) -> Tensor:
-        """Forward pass with eigenvector-based unpooling.
+        r"""Forward pass.
 
         Args:
-            x_pool: Pooled features [K, H*d].
-            so: SelectOutput containing the one-hot assignment matrix [N, K].
-            batch: Batch vector for original nodes.
-            batch_pooled: Batch vector for pooled nodes.
-            edge_index: Unused for EigenPooling (kept for API compatibility).
-            edge_weight: Unused for EigenPooling (kept for API compatibility).
+            x_pool (~torch.Tensor):
+                Pooled feature matrix of shape :math:`[K, H\cdot F]`,
+                :math:`[B\cdot K, H\cdot F]`, or :math:`[B, K, H\cdot F]`.
+            so (~tgp.select.SelectOutput, optional):
+                Output of the :math:`\texttt{select}` operator with dense
+                assignment matrix :obj:`so.s` and pooling matrix :obj:`so.theta`.
+            batch (~torch.Tensor, optional):
+                Batch vector for original nodes. If :obj:`None`, this method uses
+                :obj:`so.batch` when available. (default: :obj:`None`)
+            batch_pooled (~torch.Tensor, optional):
+                Batch vector for pooled nodes in multi-graph lifting.
+                (default: :obj:`None`)
+            edge_index (~torch.Tensor, optional):
+                Unused for EigenPooling; kept for API compatibility.
+                (default: :obj:`None`)
+            edge_weight (~torch.Tensor, optional):
+                Unused for EigenPooling; kept for API compatibility.
+                (default: :obj:`None`)
 
         Returns:
-            Lifted features [N, d].
+            ~torch.Tensor:
+                Lifted node features of shape :math:`[N, F]`.
         """
-        if batch is None and hasattr(so, "batch") and so.batch is not None:
+        if batch is None and so.batch is not None:
             batch = so.batch
 
-        device = x_pool.device
-        dtype = x_pool.dtype
-
         num_clusters = so.s.size(-1)
+        theta = so.theta
+
         is_multi_graph = (
             batch is not None
             and batch.numel() > 0
             and int(batch.min().item()) != int(batch.max().item())
         )
 
-        if not hasattr(so, "theta") or so.theta is None:
-            raise ValueError(
-                "SelectOutput.theta is required for EigenPoolLift. "
-                "Make sure EigenPoolSelect computes and stores it."
+        # Single graph case.
+        if not is_multi_graph:
+            x_pool_mat = x_pool.squeeze(0) if x_pool.dim() == 3 else x_pool
+            return self._lift_with_theta(
+                theta=theta, x_pool=x_pool_mat, num_clusters=num_clusters
             )
 
-        theta = so.theta
+        # Multi-graph case: unbatch pooled features and theta, lift each graph, then concatenate.
+        batch_size = int(batch.max().item()) + 1
+        if batch_pooled is None:
+            batch_pooled = torch.arange(
+                batch_size, dtype=batch.dtype, device=batch.device
+            ).repeat_interleave(num_clusters)
 
-        def reshape_feature_blocks_to_mode_major(
-            x_pool_mat: Tensor, n_clusters: int, n_modes: int, feat_dim: int
-        ) -> Tensor:
-            """Convert [K, H*d] (mode blocks per cluster) to [H*K, d] (mode-major)."""
-            return (
-                x_pool_mat.view(n_clusters, n_modes, feat_dim)
-                .permute(1, 0, 2)
-                .reshape(n_modes * n_clusters, feat_dim)
+        x_pool_flat = x_pool.view(-1, x_pool.size(-1)) if x_pool.dim() == 3 else x_pool
+        x_pool_list = unbatch(x_pool_flat, batch=batch_pooled)
+        theta_list = theta if isinstance(theta, list) else unbatch(theta, batch=batch)
+
+        x_lift_list = [
+            self._lift_with_theta(
+                theta=theta_b, x_pool=x_pool_b, num_clusters=num_clusters
             )
-
-        if is_multi_graph:
-            if x_pool.dim() == 3:
-                B, K, Hd = x_pool.shape
-                x_pool_flat = x_pool.view(B * K, Hd)
-            elif x_pool.dim() == 2:
-                x_pool_flat = x_pool
-            else:
-                raise ValueError(
-                    f"Expected x_pool to be 2D or 3D, got shape {x_pool.shape}"
-                )
-
-            batch_size = int(batch.max().item()) + 1
-            expected_nodes = batch_size * num_clusters
-            if x_pool_flat.size(0) != expected_nodes:
-                raise ValueError(
-                    "Unexpected pooled feature shape for multi-graph lifting: "
-                    f"got x_pool.size(0)={x_pool_flat.size(0)}, expected {expected_nodes}."
-                )
-
-            if batch_pooled is None:
-                batch_pooled = torch.arange(
-                    batch_size, dtype=batch.dtype, device=batch.device
-                ).repeat_interleave(num_clusters)
-
-            unbatched_x_pool = unbatch(x_pool_flat, batch=batch_pooled)
-            if isinstance(theta, list):
-                theta_list = theta
-            else:
-                if batch is None:
-                    raise ValueError(
-                        "batch is required to unbatch SelectOutput.theta for batched lifting."
-                    )
-                theta_list = unbatch(theta, batch=batch)
-            if len(theta_list) != batch_size:
-                raise ValueError(
-                    "SelectOutput.theta has an unexpected number of graphs for batched lifting: "
-                    f"got {len(theta_list)}, expected {batch_size}."
-                )
-
-            x_lift_list = []
-            for b in range(batch_size):
-                theta_b = theta_list[b]
-                if not isinstance(theta_b, Tensor):
-                    theta_b = torch.tensor(theta_b, dtype=dtype, device=device)
-                n_nodes = theta_b.size(0)
-                actual_num_modes = (
-                    theta_b.size(-1) // num_clusters if num_clusters > 0 else 1
-                )
-                x_pool_b = unbatched_x_pool[b]
-                Hd = x_pool_b.size(-1)
-                d = Hd // actual_num_modes if actual_num_modes > 0 else 0
-                if n_nodes == 0:
-                    x_lift_list.append(torch.zeros((0, d), dtype=dtype, device=device))
-                    continue
-
-                x_pool_reshaped = reshape_feature_blocks_to_mode_major(
-                    x_pool_b,
-                    num_clusters,
-                    actual_num_modes,
-                    d,
-                )
-                if theta_b.is_sparse:
-                    x_lift_list.append(torch.sparse.mm(theta_b, x_pool_reshaped))
-                else:
-                    x_lift_list.append(theta_b.matmul(x_pool_reshaped))
-
-            return torch.cat(x_lift_list, dim=0)
-
-        theta_mat = theta
-        if not isinstance(theta_mat, Tensor):
-            theta_mat = torch.tensor(theta_mat, dtype=dtype, device=device)
-        actual_num_modes = theta_mat.size(-1) // num_clusters
-        if x_pool.dim() == 2:
-            K, Hd = x_pool.shape
-            d = Hd // actual_num_modes
-            x_pool_reshaped = reshape_feature_blocks_to_mode_major(
-                x_pool,
-                K,
-                actual_num_modes,
-                d,
-            )
-        else:
-            raise ValueError(
-                f"Expected x_pool to be 2D [K, H*d], got shape {x_pool.shape}"
-            )
-
-        if theta_mat.is_sparse:
-            x_lift = torch.sparse.mm(theta_mat, x_pool_reshaped)
-        else:
-            x_lift = theta_mat.matmul(x_pool_reshaped)
-
-        return x_lift
+            for theta_b, x_pool_b in zip(theta_list, x_pool_list)
+        ]
+        return torch.cat(x_lift_list, dim=0)
 
     def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"num_modes={self.num_modes}, "
-            f"normalized={self.normalized})"
-        )
+        return f"{self.__class__.__name__}(num_modes={self.num_modes})"

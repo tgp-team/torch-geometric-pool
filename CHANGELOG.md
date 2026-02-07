@@ -15,6 +15,41 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
   losses and optional sparse outputs.
 - **DenseConnect consolidated**: All dense connect logic (batched and unbatched paths)
   lives in `DenseConnect`; redundant variants were removed.
+- **EigenPooling implemented and integrated**:
+  - Added `EigenPooling` end-to-end pipeline with dedicated
+    `EigenPoolSelect`, `EigenPoolReduce`, `EigenPoolConnect`, and `EigenPoolLift`.
+  - Exported EigenPool modules through package `__init__` files and enabled
+    factory creation via `get_pooler("eigen")`.
+  - Added sparse multi-graph support via `edge_index` + `batch`, including
+    pre-coarsening support through the shared mixin.
+
+- **NMF unbatched path implemented**:
+  - `NMFPooling(batched=False)` is now supported.
+  - Works with sparse connectivity in unbatched mode and supports both dense
+    and sparse pooled adjacency outputs via `sparse_output`.
+
+- **NMF select generalized**:
+  - `NMFSelect` now accepts dense and sparse connectivity inputs.
+  - Supports single-graph and multi-graph sparse batches.
+  - Handles edge cases robustly (e.g., small graphs / `k > N`) with consistent
+    output shaping and padding behavior.
+
+- **Precoarsening generalized in core SRC**:
+  - Introduced/extended `BasePrecoarseningMixin` to centralize precoarsening behavior.
+  - Poolers can now reuse the shared implementation instead of redefining custom
+    precoarsening logic.
+  - Supports automatic batch inference for select outputs and optional
+    `preconnector` overrides.
+
+- **PreCoarsening transform now supports per-level pooler composition**:
+  - `PreCoarsening` can receive a `poolers` sequence for heterogeneous
+    multi-level schedules.
+  - Each level can be configured independently (pooler aliases and per-level kwargs),
+    enabling mixed pooler stacks and different args per level.
+
+- **Dense pooler repr fixes**:
+  - `extra_repr` output for dense poolers now consistently reports
+    `batched` and `sparse_output`, improving debuggability and config visibility.
 
 ## Dense Pooling Modes (Intended Usage)
 
@@ -90,8 +125,12 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - **MinCutPooling**: unbatched mode (`batched=False`) computes sparse losses and can
   return either dense `[B, K, K]` or block‑diagonal sparse outputs based on
   `sparse_output`.
-- **NMFPooling**: batched mode supported; unbatched path still not implemented.
-  Pre‑coarsening returns sparse output by default for efficient downstream use.
+- **NMFPooling**: both batched and unbatched modes are now supported.
+  Unbatched mode operates on sparse connectivity without padding and can return
+  dense or sparse pooled outputs. Pre‑coarsening returns sparse output by default
+  for efficient downstream use.
+- **EigenPooling**: added as a new pooling method with dedicated select/reduce/connect/lift
+  operators for spectral-clustering-based hierarchical pooling.
 
 ## Bug Fixes
 

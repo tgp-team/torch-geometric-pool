@@ -6,3 +6,4 @@ Tutorials
     intro.ipynb
     preprocessing_and_transforms.ipynb
     advanced.ipynb
+    hierarchical_gnns.ipynb

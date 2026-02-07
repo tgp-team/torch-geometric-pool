@@ -154,10 +154,10 @@ class TestEigenPoolSelectClass:
         assert selector.is_dense is True
 
     def test_eigenpool_select_class_requires_edge_index(self):
-        """Test that forward raises ValueError when edge_index is None."""
+        """Test that invalid edge_index input raises from connectivity parsing."""
         selector = EigenPoolSelect(k=3)
 
-        with pytest.raises(ValueError, match="edge_index is required"):
+        with pytest.raises(NotImplementedError):
             selector(edge_index=None)
 
     def test_eigenpool_select_class_x_unused(self, pooler_test_graph_sparse):

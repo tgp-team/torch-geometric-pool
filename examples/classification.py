@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn.functional as F
 from torch_geometric import seed_everything
@@ -43,6 +45,9 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "remove_self_loops": True,
             "scorer": "degree",
             "adj_transpose": True,
+            "num_modes": 5,
+            "sparse_output": False,
+            "batched": True,
         }
 
         ### Model definition
@@ -66,16 +71,19 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 print(self.pooler)
 
                 # Second MP layer
+                pool_hidden = (
+                    getattr(self.pooler, "num_modes", 1) * hidden_channels
+                )  # EigenPooling expands features to [K, H*d]; use H*d as in_channels
                 self.use_dense_pool_adj = (
                     self.pooler.is_dense and not self.pooler.sparse_output
                 )
                 if self.use_dense_pool_adj:
                     self.conv2 = DenseGCNConv(
-                        in_channels=hidden_channels, out_channels=hidden_channels
+                        in_channels=pool_hidden, out_channels=hidden_channels
                     )
                 else:
                     self.conv2 = GCNConv(
-                        in_channels=hidden_channels, out_channels=hidden_channels
+                        in_channels=pool_hidden, out_channels=hidden_channels
                     )
 
                 # Readout layer
@@ -145,6 +153,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
         ### Training loop
         best_val_acc = test_acc = 0
+        start_time = time.time()
         for epoch in range(1, 11):
             train_loss = train()
             val_acc = test(test_loader)
@@ -152,3 +161,5 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 f"Epoch: {epoch:03d}, Train Loss: {train_loss:.4f}, "
                 f"Val Acc: {val_acc:.4f}"
             )
+        end_time = time.time()
+        print(f"Time taken: {end_time - start_time:.2f} seconds")

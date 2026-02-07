@@ -483,7 +483,6 @@ class BNPool(DenseSRCPooling):
     def extra_repr_args(self) -> dict:
         return {
             "batched": self.batched,
-            "sparse_output": self.sparse_output,
             "alpha_DP": self.alpha_DP,
             "k_prior_variance": self.K_var_val,
             "k_prior_mean": self.K_mu_val,

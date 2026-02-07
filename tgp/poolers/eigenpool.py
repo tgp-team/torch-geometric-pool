@@ -103,7 +103,7 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
                 "eigenvector-based lifting.",
                 UserWarning,
             )
-        # EigenPooling always uses unbatched mode internally
+        # EigenPooling always uses unbatched mode
         # because spectral clustering operates on individual graphs
         super().__init__(
             selector=EigenPoolSelect(
@@ -114,11 +114,9 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
             ),
             reducer=EigenPoolReduce(
                 num_modes=num_modes,
-                normalized=normalized,
             ),
             lifter=EigenPoolLift(
                 num_modes=num_modes,
-                normalized=normalized,
             ),
             connector=EigenPoolConnect(
                 remove_self_loops=remove_self_loops,
@@ -221,7 +219,7 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
             batch_pooled=pooled_batch,
         )
 
-        # When dense output and multiple graphs: reshape x to [B, K, F] for DenseGCNConv
+        # When dense output and multiple graphs: reshape x_pooled to [B, K, F]
         if (
             not self.sparse_output
             and pooled_batch is not None
@@ -242,7 +240,6 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
     def extra_repr_args(self) -> dict:
         return {
             "batched": self.batched,
-            "sparse_output": self.sparse_output,
             "k": self.k,
             "num_modes": self.num_modes,
             "normalized": self.normalized,

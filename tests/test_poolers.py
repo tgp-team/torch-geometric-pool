@@ -158,7 +158,8 @@ def test_dense_pooler_repr_reports_modes(pooler_name):
     pooler = get_pooler(pooler_name, **params)
     rep = repr(pooler)
     assert "batched=" in rep
-    assert "sparse_output=" in rep
+    # `sparse_output` belongs to connect repr only, not to pooler extra repr args.
+    assert "\n\tsparse_output=" not in rep
 
 
 if __name__ == "__main__":

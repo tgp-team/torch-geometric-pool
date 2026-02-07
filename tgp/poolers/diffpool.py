@@ -251,7 +251,6 @@ class DiffPool(DenseSRCPooling):
     def extra_repr_args(self) -> dict:
         return {
             "batched": self.batched,
-            "sparse_output": self.sparse_output,
             "link_loss_coeff": self.link_loss_coeff,
             "ent_loss_coeff": self.ent_loss_coeff,
             "normalize_loss": self.normalize_loss,

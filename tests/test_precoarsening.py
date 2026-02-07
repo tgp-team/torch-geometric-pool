@@ -117,6 +117,39 @@ def test_precoarsening_multiple_levels_returns_list():
         assert pd.num_nodes >= 0
 
 
+def test_precoarsening_with_mixed_level_poolers():
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]], dtype=torch.long
+    )
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
+    x = torch.randn((4, 3))
+    batch = torch.zeros(4, dtype=torch.long)
+    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
+    data.num_nodes = 4
+
+    transform = PreCoarsening(
+        poolers=["ndp", ("kmis", {"scorer": "degree", "order_k": 2})]
+    )
+    data_t = transform(data)
+
+    assert len(transform.poolers) == 2
+    assert isinstance(transform.poolers[0], NDPPooling)
+    assert isinstance(transform.poolers[1], KMISPooling)
+    assert isinstance(data_t.pooled_data, list)
+    assert len(data_t.pooled_data) == 2
+
+
+def test_precoarsening_poolers_take_priority_over_pooler_and_depth():
+    transform = PreCoarsening(
+        pooler=NDPPooling(),
+        recursive_depth=4,
+        poolers=["ndp", ("kmis", {"scorer": "degree"})],
+    )
+    assert len(transform.poolers) == 2
+    assert isinstance(transform.poolers[0], NDPPooling)
+    assert isinstance(transform.poolers[1], KMISPooling)
+
+
 def test_pooledbatch_from_data_list_and_get_example():
     # Create two simple Data objects (no advanced coarsening required)
     d1 = Data(

@@ -40,22 +40,24 @@ class EigenPoolConnect(DenseConnect):
     :math:`c_i = \arg\max_k \Omega_{ik}`.
 
     Input representations:
-        - **Batched dense inputs**: adjacency :math:`[B, N, N]`, assignment :math:`[B, N, K]`.
-        - **Unbatched sparse inputs**: sparse adjacency and dense assignment :math:`[N, K]`
-          (or :math:`[1, N, K]`).
+        - Batched dense inputs: adjacency :math:`[B, N, N]`, assignment
+          :math:`[B, N, K]`.
+        - Unbatched sparse inputs: sparse adjacency and dense assignment
+          :math:`[N, K]` (or :math:`[1, N, K]`).
 
     Output representations:
-        - Batched dense inputs always return a dense adjacency :math:`[B, K, K]`
-          (edge weights are :obj:`None`).
-        - Unbatched sparse inputs return either a dense adjacency :math:`[B, K, K]`
-          or a block-diagonal sparse adjacency :math:`[B*K, B*K]` depending on
-          :attr:`sparse_output`.
+        - Batched dense inputs always return a dense adjacency
+          :math:`[B, K, K]` (edge weights are :obj:`None`).
+        - Unbatched sparse inputs return either a dense adjacency
+          :math:`[B, K, K]` or a block-diagonal sparse adjacency
+          :math:`[B*K, B*K]` depending on :attr:`sparse_output`.
 
     Args:
         remove_self_loops (bool, optional):
             Whether to remove self-loops after coarsening. (default: :obj:`True`)
         degree_norm (bool, optional):
-            If :obj:`True`, symmetrically normalize the pooled adjacency. (default: :obj:`True`)
+            If :obj:`True`, symmetrically normalize the pooled adjacency.
+            (default: :obj:`True`)
         adj_transpose (bool, optional):
             If :obj:`True`, transpose the dense pooled adjacency for message passing.
             Only applies to batched dense inputs. (default: :obj:`True`)
@@ -90,16 +92,22 @@ class EigenPoolConnect(DenseConnect):
         adj: Tensor,
         cluster_index: Tensor,
     ) -> Tensor:
-        """Compute the external adjacency matrix (inter-cluster edges only).
+        r"""Compute the external adjacency matrix :math:`\mathbf{A}_{\text{ext}}`.
 
-        A_ext = A - A_int where A_int contains only intra-cluster edges.
+        This removes intra-cluster edges and keeps only inter-cluster edges:
+
+        .. math::
+            \mathbf{A}_{\text{ext}} = \mathbf{A} - \mathbf{A}_{\text{int}}.
 
         Args:
-            adj: Dense adjacency matrix [N, N].
-            cluster_index: Node-to-cluster assignment [N].
+            adj (~torch.Tensor):
+                Dense adjacency matrix of shape :math:`[N, N]`.
+            cluster_index (~torch.Tensor):
+                Cluster assignment vector of shape :math:`[N]`.
 
         Returns:
-            A_ext: Adjacency with only inter-cluster edges [N, N].
+            ~torch.Tensor:
+                External adjacency matrix of shape :math:`[N, N]`.
         """
         # Create mask for intra-cluster edges
         # Two nodes are in the same cluster if their cluster_index values are equal
@@ -115,14 +123,24 @@ class EigenPoolConnect(DenseConnect):
 
     @staticmethod
     def _coarsen_dense_adj(adj: Tensor, omega: Tensor) -> Tensor:
-        """Compute A_coar from a single dense adjacency and assignment.
+        r"""Compute :math:`\mathbf{A}_{\text{coar}}` for one dense graph.
+
+        Given a dense adjacency :math:`\mathbf{A}` and hard assignment matrix
+        :math:`\boldsymbol{\Omega}`, this computes:
+
+        .. math::
+            \mathbf{A}_{\text{coar}} =
+            \boldsymbol{\Omega}^{\top}\mathbf{A}_{\text{ext}}\boldsymbol{\Omega}.
 
         Args:
-            adj: Dense adjacency [N, N].
-            omega: One-hot assignment [N, K].
+            adj (~torch.Tensor):
+                Dense adjacency matrix of shape :math:`[N, N]`.
+            omega (~torch.Tensor):
+                Dense one-hot assignment matrix of shape :math:`[N, K]`.
 
         Returns:
-            A_coar: Coarsened adjacency [K, K].
+            ~torch.Tensor:
+                Coarsened adjacency matrix of shape :math:`[K, K]`.
         """
         # EigenPooling assumes hard cluster assignments (one-hot).
         cluster_index = omega.argmax(dim=-1)
@@ -139,25 +157,46 @@ class EigenPoolConnect(DenseConnect):
         batch_pooled: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Adj, Optional[Tensor]]:
-        """Forward pass.
-
-        Computes A_coar = Omega^T A_ext Omega using so.s as Omega.
+        r"""Forward pass.
 
         Args:
-            edge_index: Graph connectivity (dense [B, N, N] or sparse).
-            so: SelectOutput with standard [N, K] one-hot assignment matrix.
-            edge_weight: Optional edge weights for sparse inputs.
-            batch: Batch vector for unbatched inputs.
-            batch_pooled: Pooled batch vector.
+            edge_index (~torch_geometric.typing.Adj):
+                For batched dense inputs, a dense adjacency tensor of shape
+                :math:`[B, N, N]`. For unbatched inputs, sparse connectivity in
+                any format supported by :class:`~torch_geometric.typing.Adj`.
+            so (~tgp.select.SelectOutput):
+                Output of the :math:`\texttt{select}` operator. The assignment
+                matrix :attr:`so.s` must be dense.
+            edge_weight (~torch.Tensor, optional):
+                Edge weights associated with :obj:`edge_index` for sparse inputs.
+                (default: :obj:`None`)
+            batch (~torch.Tensor, optional):
+                Batch vector for sparse multi-graph inputs. If :obj:`None`, all
+                nodes are treated as belonging to a single graph.
+                (default: :obj:`None`)
+            batch_pooled (~torch.Tensor, optional):
+                Batch vector for pooled nodes, used by sparse post-processing when
+                per-graph edge-weight normalization is enabled.
+                (default: :obj:`None`)
 
         Returns:
-            Tuple of (coarsened adjacency, edge weights or None).
+            (~torch_geometric.typing.Adj, ~torch.Tensor or None):
+                The coarsened adjacency and edge weights. Dense outputs return
+                :obj:`None` for edge weights.
+
+        The coarsened adjacency is computed as:
+
+        .. math::
+            \mathbf{A}_{\text{coar}} =
+            \boldsymbol{\Omega}^{\top}\mathbf{A}_{\text{ext}}\boldsymbol{\Omega},
+
+        where :math:`\boldsymbol{\Omega} = \texttt{so.s}`.
         """
         # Validate assignment matrix (must be dense).
         omega = self._validate_select_output(so)
 
+        # Batched dense inputs: adj [B, N, N], omega [B, N, K]
         if is_dense_adj(edge_index):
-            # Batched dense inputs: adj [B, N, N], omega [B, N, K]
             omega, adj = self._prepare_batched_dense_inputs(omega, edge_index)
 
             # Compute A_coar for each graph in the batch.
@@ -174,10 +213,10 @@ class EigenPoolConnect(DenseConnect):
             )
             return adj_pool, None
 
+        # Unbatched sparse inputs: omega must be [N, K] (or [1, N, K]).
         edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
             edge_index, edge_weight
         )
-        # Unbatched sparse inputs: omega must be [N, K] (or [1, N, K]).
         if omega.dim() == 3:
             if omega.size(0) != 1:
                 raise ValueError(

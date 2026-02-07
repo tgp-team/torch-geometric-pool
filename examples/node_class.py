@@ -30,12 +30,14 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "k": data.num_nodes // 20,
             "order_k": 2,
             "ratio": 0.25,
+            "num_modes": 5,
             "remove_self_loops": True,
             "scorer": "degree",
             "reduce": "sum",
             "edge_weight_norm": False,
             "degree_norm": True,
-            "sparse_output": False,
+            "sparse_output": True,
+            "batched": True,
         }
 
         #### Model definition
@@ -56,13 +58,18 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 print(self.pooler)
                 self.pooler.reset_parameters()
 
+                # EigenPooling expands features to [K, H*d].
+                pool_modes = getattr(self.pooler, "num_modes", 1)
+                pool_hidden_in = hidden_channels * pool_modes
+                pool_hidden_out = (hidden_channels // 2) * pool_modes
+
                 self.use_dense_pool_adj = (
                     self.pooler.is_dense and not self.pooler.sparse_output
                 )
                 if self.use_dense_pool_adj:
-                    self.conv_pool = DenseGCNConv(hidden_channels, hidden_channels // 2)
+                    self.conv_pool = DenseGCNConv(pool_hidden_in, pool_hidden_out)
                 else:
-                    self.conv_pool = GCNConv(hidden_channels, hidden_channels // 2)
+                    self.conv_pool = GCNConv(pool_hidden_in, pool_hidden_out)
 
                 self.pooler_batched = getattr(self.pooler, "batched", False)
                 self.use_dense_input_adj = self.pooler_batched and getattr(
