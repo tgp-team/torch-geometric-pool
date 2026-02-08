@@ -23,7 +23,15 @@ from tgp.utils.typing import SinvType
 
 
 class SEPSelect(Select):
-    r"""TODO"""
+    r"""Implements a Select operator based on a hierarchical partitioning method.
+
+    This class builds and applies a hierarchical partitioning of nodes in a
+    graph to perform selection at varying levels of granularity. The partitioning
+    is determined using a coding tree based on adjacency structures.
+
+    Args:
+        s_inv_op (SinvType): The operation used for inverse selection.
+    """
 
     def __init__(self, s_inv_op: SinvType = "transpose"):
         super().__init__()
@@ -68,13 +76,19 @@ class SEPSelect(Select):
         """
         edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
 
-        edge_index_list = unbatch_edge_index(edge_index, batch)
-        batch_size = len(edge_index_list)
-        edge_weight_list = (
-            unbatch(edge_weight, batch)
-            if edge_weight is not None
-            else [None] * batch_size
-        )
+        if batch is None:
+            # there is only one graph
+            edge_index_list = [edge_index]
+            edge_weight_list = [edge_weight] if edge_weight is not None else [None]
+            batch_size = 1
+        else:
+            edge_index_list = unbatch_edge_index(edge_index, batch)
+            batch_size = len(edge_index_list)
+            edge_weight_list = (
+                unbatch(edge_weight, batch)
+                if edge_weight is not None
+                else [None] * batch_size
+            )
 
         num_nodes = (
             num_nodes
@@ -127,7 +141,7 @@ class SEPSelect(Select):
         return so
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(s_inv_op={self.s_inv_op})"
+        return f"{self.__class__.__name__}(tree_depth={self.tree_depth})"
 
 
 def adj_mat_to_coding_tree(adj: np.ndarray, tree_depth: int):

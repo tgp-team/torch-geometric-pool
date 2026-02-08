@@ -6,66 +6,36 @@ from torch_geometric.typing import Adj
 from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import GraclusSelect, SelectOutput
+from tgp.select import SelectOutput, SEPSelect
 from tgp.src import BasePrecoarseningMixin, PoolingOutput, SRCPooling
 from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 
-class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
-    r"""The Graclus pooling operator inspired by the paper `"Weighted Graph Cuts without
-    Eigenvectors: A Multilevel Approach" <https://ieeexplore.ieee.org/document/4302760>`_
-    (Dhillon et al., TPAMI 2007).
+class SEPPooling(BasePrecoarseningMixin, SRCPooling):
+    r"""The SEPPooling operator from the paper
+    "Structural Entropy Guided Graph Hierarchical Pooling"
+    <https://proceedings.mlr.press/v162/wu22b/wu22b.pdf>`_ (Wu et al., ICML 2022).
 
-    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.GraclusSelect`.
-    + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
-    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.SparseConnect`.
-    + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
+    SEP performs graph pooling by **optimizing cluster assignments globally**, in a single
+    shot, with the goal of minimizing **structural entropy** over the whole graph.
+
+    WARNING: This pooling operator works only if it is the only pooling operator in the pipeline.
 
     Args:
-        lift (~tgp.utils.typing.LiftType, optional):
-            Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
-
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
-              the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
-              the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-
-        s_inv_op (~tgp.utils.typing.SinvType, optional):
-            The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
-            the :class:`~tgp.select.SelectOutput`. It can be one of:
-
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
-              the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
-              the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-
-        reduce_red_op (~tgp.utils.typing.ReduceType, optional):
-            The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
-            (default: :obj:`sum`)
-        lift_red_op (~tgp.typing.ReduceType, optional):
-            The aggregation function to be applied to the lifted node features.
-            Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
-            :obj:`~torch_geometric.utils.scatter`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
         cached (bool, optional):
-            If set to :obj:`True`, the output of the :math:`\texttt{select}` and :math:`\texttt{select}`
-            operations will be cached, so that they do not need to be recomputed.
-            (default: :obj:`False`)
+            If :obj:`True`, cache :class:`~tgp.select.SelectOutput`. (default: :obj:`False`)
         remove_self_loops (bool, optional):
-            If :obj:`True`, the self-loops will be removed from the adjacency matrix.
-            (default: :obj:`True`)
+            Whether to remove self-loops after coarsening. (default: :obj:`True`)
         degree_norm (bool, optional):
-            If :obj:`True`, the adjacency matrix will be symmetrically normalized.
-            (default: :obj:`False`)
+            If :obj:`True`, symmetrically normalize pooled adjacency. (default: :obj:`True`)
         edge_weight_norm (bool, optional):
-            Whether to normalize the edge weights by dividing by the maximum absolute value per graph.
-            (default: :obj:`False`)
+            Whether to normalize pooled edge weights. (default: :obj:`False`)
+        lift (~tgp.utils.typing.LiftType, optional):
+            Kept for API compatibility. EigenPooling always uses eigenvector-based
+            lifting and ignores this option. (default: :obj:`"precomputed"`)
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
+            Operation used to compute :math:`\\mathbf{S}_\text{inv}` in
+            :class:`~tgp.select.SelectOutput`. (default: :obj:`"transpose"`)
     """
 
     def __init__(
@@ -81,7 +51,7 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
         edge_weight_norm: bool = False,
     ):
         super().__init__(
-            selector=GraclusSelect(s_inv_op=s_inv_op),
+            selector=SEPSelect(s_inv_op=s_inv_op),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
@@ -92,7 +62,6 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
             ),
             cached=cached,
         )
-        self.cached = cached
 
     def forward(
         self,
@@ -135,31 +104,36 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
             x_lifted = self.lift(x_pool=x, so=so)
             return x_lifted
 
-        else:
+        # Select (if not precomputed)
+        if so is None:
             # Select
             so = self.select(
-                edge_index=adj, edge_weight=edge_weight, num_nodes=x.size(0)
-            )
-
-            # Reduce
-            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
-
-            # Connect
-            edge_index_pooled, edge_weight_pooled = self.connect(
                 edge_index=adj,
-                so=so,
                 edge_weight=edge_weight,
-                batch_pooled=batch_pooled,
+                batch=batch,
+                num_nodes=x.size(0),
             )
 
-            out = PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-            )
-            return out
+        # Reduce
+        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+
+        # Connect
+        edge_index_pooled, edge_weight_pooled = self.connect(
+            edge_index=adj,
+            so=so,
+            edge_weight=edge_weight,
+            batch_pooled=batch_pooled,
+        )
+
+        out = PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+        )
+        return out
 
     def extra_repr_args(self) -> dict:
+        # TODO: i am not sure  what we should put here
         return {"cached": self.cached}
