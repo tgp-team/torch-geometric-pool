@@ -174,6 +174,44 @@ def test_precoarsening_eigen_fixed_k_collates_across_graph_sizes():
     assert batch.pooled_data[0].so.s.size(1) == k
 
 
+def test_precoarsening_nmf_fixed_k_collates_across_graph_sizes():
+    # One graph with 5 nodes (< k) and one with 10 nodes (> k)
+    edge_small = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]], dtype=torch.long)
+    edge_small = torch.cat([edge_small, edge_small.flip(0)], dim=1)
+    d_small = Data(
+        x=torch.randn((5, 3)),
+        edge_index=edge_small,
+        edge_weight=torch.ones(edge_small.size(1)),
+        batch=torch.zeros(5, dtype=torch.long),
+    )
+    d_small.num_nodes = 5
+
+    edge_large = torch.tensor(
+        [[0, 1, 2, 3, 4, 5, 6, 7, 8], [1, 2, 3, 4, 5, 6, 7, 8, 9]],
+        dtype=torch.long,
+    )
+    edge_large = torch.cat([edge_large, edge_large.flip(0)], dim=1)
+    d_large = Data(
+        x=torch.randn((10, 3)),
+        edge_index=edge_large,
+        edge_weight=torch.ones(edge_large.size(1)),
+        batch=torch.zeros(10, dtype=torch.long),
+    )
+    d_large.num_nodes = 10
+
+    k = 8
+    transform = PreCoarsening(poolers=[("nmf", {"k": k})])
+    d_small_t = transform(d_small)
+    d_large_t = transform(d_large)
+
+    assert d_small_t.pooled_data[0].so.s.size(1) == k
+    assert d_large_t.pooled_data[0].so.s.size(1) == k
+
+    loader = PoolDataLoader([d_small_t, d_large_t], batch_size=2, shuffle=False)
+    batch = next(iter(loader))
+    assert batch.pooled_data[0].so.s.size(1) == k
+
+
 def test_precoarsening_poolers_take_priority_over_pooler_and_depth():
     transform = PreCoarsening(
         pooler=NDPPooling(),

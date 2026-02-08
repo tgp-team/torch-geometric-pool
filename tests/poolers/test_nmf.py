@@ -34,6 +34,23 @@ def test_nmf_select_sparse_single_graph(pooler_test_graph_sparse):
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)
 
 
+def test_nmf_select_sparse_single_graph_fixed_k():
+    x, edge_index, edge_weight, _ = make_chain_graph_sparse(N=4, F_dim=3, seed=42)
+    k = 8
+    selector = NMFSelect(k=k)
+    out = selector(
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        num_nodes=x.size(0),
+        fixed_k=True,
+    )
+
+    assert out.s.dim() == 2
+    assert out.s.shape == (x.size(0), k)
+    row_sums = out.s.sum(dim=-1)
+    assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)
+
+
 def test_nmf_select_sparse_single_graph_batch_infers_num_nodes():
     # Single graph with one isolated trailing node (node 3).
     edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
@@ -76,6 +93,20 @@ def test_nmf_select_sparse_batched(pooler_test_graph_sparse_batch):
     assert out.s.dim() == 2
     assert out.s.size(0) == data_batch.num_nodes
     assert out.s.size(1) == k
+    row_sums = out.s.sum(dim=-1)
+    assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)
+
+
+def test_nmf_select_sparse_batched_with_edgeless_graph():
+    # Graph 0: two nodes and one undirected edge.
+    edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+    # Graph 1: three isolated nodes (no edges).
+    batch = torch.tensor([0, 0, 1, 1, 1], dtype=torch.long)
+
+    selector = NMFSelect(k=3)
+    out = selector(edge_index=edge_index, batch=batch, num_nodes=batch.numel())
+
+    assert out.s.shape == (5, 3)
     row_sums = out.s.sum(dim=-1)
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)
 
@@ -149,6 +180,19 @@ def test_batch_none(pooler_test_graph_sparse_batch):
 
     # Without an explicit batch vector, precoarsening treats the input as a single graph.
     assert pooling_out.batch.size(0) == pooling_out.so.num_supernodes
+
+
+def test_nmf_precoarsening_fixed_k_small_graph():
+    _, edge_index, edge_weight, _ = make_chain_graph_sparse(N=5, F_dim=3, seed=42)
+    k = 8
+    pooling_out = NMFPooling(k=k).precoarsening(
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        num_nodes=5,
+    )
+
+    assert pooling_out.so.s.shape == (5, k)
+    assert pooling_out.batch.shape == (k,)
 
 
 if __name__ == "__main__":

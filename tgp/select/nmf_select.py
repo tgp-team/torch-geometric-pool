@@ -4,7 +4,7 @@ import torch
 from sklearn.decomposition import non_negative_factorization
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import to_dense_adj, unbatch, unbatch_edge_index
+from torch_geometric.utils import to_dense_adj
 
 from tgp.select import Select, SelectOutput
 from tgp.utils.ops import connectivity_to_edge_index, is_dense_adj
@@ -125,6 +125,7 @@ class NMFSelect(Select):
         *,
         batch: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
+        fixed_k: bool = False,
         **kwargs,
     ) -> SelectOutput:
         r"""Forward pass of the select operator.
@@ -142,6 +143,10 @@ class NMFSelect(Select):
                 (default: :obj:`None`)
             num_nodes (int, optional): Number of nodes for sparse inputs when it
                 cannot be inferred from :obj:`edge_index`. (default: :obj:`None`)
+            fixed_k (bool, optional): If :obj:`True`, force assignment width to
+                exactly :obj:`k` for single sparse graphs by right-padding zero
+                columns. Useful for pre-coarsening where per-sample outputs are
+                collated together. (default: :obj:`False`)
 
         Returns:
            :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
@@ -198,19 +203,24 @@ class NMFSelect(Select):
                 num_nodes=num_nodes,
             )
             s = self._factorize_single_adjacency(adj_dense)
+            if fixed_k:
+                s = self._pad_assignment(s, self.k)
             return SelectOutput(s=s, s_inv_op=self.s_inv_op, batch=batch)
 
         # Multi-graph sparse batch: factorize each graph independently and return [N, K].
         batch_size = int(batch.max().item()) + 1
         num_nodes_per_graph = torch.bincount(batch, minlength=batch_size)
-        unbatched_edges = unbatch_edge_index(edge_index_conv, batch=batch)
-
-        if edge_weight_conv is None:
-            unbatched_weights = [None] * batch_size
-            dtype = torch.get_default_dtype()
+        node_ptr = torch.cat(
+            [num_nodes_per_graph.new_zeros(1), num_nodes_per_graph.cumsum(0)], dim=0
+        )
+        if edge_index_conv.numel() == 0:
+            edge_batch = batch.new_empty((0,), dtype=torch.long)
         else:
             edge_batch = batch[edge_index_conv[0]]
-            unbatched_weights = unbatch(edge_weight_conv.view(-1), batch=edge_batch)
+
+        if edge_weight_conv is None:
+            dtype = torch.get_default_dtype()
+        else:
             dtype = edge_weight_conv.dtype
 
         s_list = []
@@ -220,11 +230,23 @@ class NMFSelect(Select):
                 s_list.append(torch.zeros((0, self.k), dtype=dtype, device=device))
                 continue
 
-            adj_dense = to_dense_adj(
-                unbatched_edges[i],
-                edge_attr=unbatched_weights[i],
-                max_num_nodes=n_nodes,
-            ).squeeze(0)
+            edge_mask = edge_batch == i
+            edge_index_i = edge_index_conv[:, edge_mask]
+            if edge_weight_conv is None:
+                edge_weight_i = None
+            else:
+                edge_weight_i = edge_weight_conv[edge_mask]
+
+            if edge_index_i.numel() == 0:
+                adj_dense = torch.zeros((n_nodes, n_nodes), dtype=dtype, device=device)
+            else:
+                node_start = int(node_ptr[i].item())
+                edge_index_i = edge_index_i - node_start
+                adj_dense = to_dense_adj(
+                    edge_index_i,
+                    edge_attr=edge_weight_i,
+                    max_num_nodes=n_nodes,
+                ).squeeze(0)
             s_i = self._pad_assignment(
                 self._factorize_single_adjacency(adj_dense),
                 self.k,
