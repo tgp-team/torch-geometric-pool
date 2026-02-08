@@ -1,3 +1,4 @@
+import warnings
 from typing import Optional, Union
 
 from torch import Tensor
@@ -29,6 +30,11 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
+
+    Notes:
+        - This implementation supports sparse inputs and multi-graph batches via
+          :obj:`edge_index` + :obj:`batch`.
+        - Dense padded batched inputs (:math:`[B, N, N]`) are not supported.
 
     Args:
         k (int):
@@ -75,6 +81,12 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
+        batched (bool, optional):
+            Kept for API compatibility. Dense padded batched mode is unsupported
+            and this option is ignored.
+            (default: :obj:`False`)
+        sparse_output (bool, optional):
+            If :obj:`True`, return sparse pooled connectivity. (default: :obj:`False`)
     """
 
     def __init__(
@@ -87,10 +99,17 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
-        batched: bool = True,
+        batched: bool = False,
         sparse_output: bool = False,
         cache_preprocessing: bool = False,
     ):
+        if batched:
+            warnings.warn(
+                "NMFPooling does not support dense padded batched inputs. "
+                "Use sparse edge_index with a batch vector.",
+                UserWarning,
+            )
+
         super().__init__(
             selector=NMFSelect(k=k, s_inv_op=s_inv_op),
             reducer=BaseReduce(),
@@ -105,7 +124,7 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
             cached=cached,
             cache_preprocessing=cache_preprocessing,
             adj_transpose=adj_transpose,
-            batched=batched,
+            batched=False,
             sparse_output=sparse_output,
         )
 
@@ -135,26 +154,18 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
 
         Args:
             x (~torch.Tensor): Node feature tensor.
-                For batched mode: :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`.
-                For unbatched mode: :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`.
+                Node features :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                For batched mode: it can be either sparse connectivity
-                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
-                which is internally converted to a dense padded tensor of shape
-                :math:`[B, N, N]`, or an already dense tensor of shape
-                :math:`[B, N, N]`.
-                For unbatched mode: sparse connectivity in one of the formats
-                supported by :class:`~torch_geometric.typing.Adj`.
+                Sparse connectivity in one of the formats supported by
+                :class:`~torch_geometric.typing.Adj`.
                 If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): Edge weights for sparse inputs.
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
-            mask (~torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph. Only used when inputs are already
-                dense/padded. (default: :obj:`None`)
+            mask (~torch.Tensor, optional): Unused, kept for API compatibility.
+                (default: :obj:`None`)
             batch (~torch.Tensor, optional): Batch vector
                 :math:`\mathbf{b} \in \{0,\ldots,B-1\}^{N}` for sparse inputs.
                 (default: :obj:`None`)
@@ -174,59 +185,14 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
             )
             return x_lifted
 
-        # === Batched path ===
-        if self.batched:
-            x, adj, mask = self._ensure_batched_inputs(
-                x=x,
-                edge_index=adj,
-                edge_weight=edge_weight,
-                batch=batch,
-                mask=mask,
-            )
-
+        if so is None:
             # Select
-            so = self.select(edge_index=adj, mask=mask)
-
-            # Reduce
-            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
-
-            # Connect
-            adj_pooled, _ = self.connect(
+            so = self.select(
                 edge_index=adj,
-                so=so,
                 edge_weight=edge_weight,
                 batch=batch,
-                batch_pooled=batch_pooled,
+                num_nodes=x.size(0),
             )
-
-            if self.sparse_output:
-                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                    self._finalize_sparse_output(
-                        x_pool=x_pooled,
-                        adj_pool=adj_pooled,
-                        batch=batch,
-                        batch_pooled=batch_pooled,
-                        so=so,
-                    )
-                )
-                return PoolingOutput(
-                    x=x_pooled,
-                    edge_index=edge_index_pooled,
-                    edge_weight=edge_weight_pooled,
-                    batch=batch_pooled,
-                    so=so,
-                )
-
-            return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so)
-
-        # === Unbatched path ===
-        # Select
-        so = self.select(
-            edge_index=adj,
-            edge_weight=edge_weight,
-            batch=batch,
-            num_nodes=x.size(0),
-        )
 
         # Reduce
         return_batched = not self.sparse_output

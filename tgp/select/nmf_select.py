@@ -7,7 +7,7 @@ from torch_geometric.typing import Adj
 from torch_geometric.utils import to_dense_adj
 
 from tgp.select import Select, SelectOutput
-from tgp.utils.ops import connectivity_to_edge_index, is_dense_adj
+from tgp.utils.ops import connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
@@ -121,7 +121,6 @@ class NMFSelect(Select):
         self,
         edge_index: Adj,
         edge_weight: Optional[Tensor] = None,
-        mask: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
         num_nodes: Optional[int] = None,
@@ -132,13 +131,9 @@ class NMFSelect(Select):
 
         Args:
             edge_index (~torch_geometric.typing.Adj): Graph connectivity.
-                It can be a dense adjacency tensor :math:`[B, N, N]` (or :math:`[N, N]`)
-                or a sparse representation (:obj:`edge_index`, SparseTensor, torch COO).
+                Sparse graph connectivity (:obj:`edge_index`, SparseTensor, or torch COO).
             edge_weight (~torch.Tensor, optional): Edge weights for sparse inputs.
                 (default: :obj:`None`)
-            mask (~torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph for dense inputs. (default: :obj:`None`)
             batch (~torch.Tensor, optional): Batch vector for sparse inputs.
                 (default: :obj:`None`)
             num_nodes (int, optional): Number of nodes for sparse inputs when it
@@ -151,38 +146,6 @@ class NMFSelect(Select):
         Returns:
            :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
         """
-        # Dense adjacency path: returns [B, N, K] with fixed K.
-        if is_dense_adj(edge_index):
-            adj = edge_index
-            if adj.dim() == 2:
-                adj = adj.unsqueeze(0)
-            if adj.dim() != 3:
-                raise ValueError(
-                    f"Expected dense adjacency with shape [B, N, N], got {adj.size()}."
-                )
-
-            B, N, _ = adj.size()
-            if mask is None:
-                mask = torch.ones((B, N), dtype=torch.bool, device=adj.device)
-
-            s_list = []
-            for b in range(B):
-                s_b = adj.new_zeros((N, self.k))
-                valid_idx = torch.nonzero(mask[b], as_tuple=False).view(-1)
-                n_nodes = int(valid_idx.numel())
-                if n_nodes > 0:
-                    adj_b = adj[b][valid_idx][:, valid_idx]
-                    s_valid = self._pad_assignment(
-                        self._factorize_single_adjacency(adj_b),
-                        self.k,
-                    )
-                    s_b[valid_idx] = s_valid
-                s_list.append(s_b)
-
-            s = torch.stack(s_list, dim=0)
-            return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask)
-
-        # Sparse connectivity path.
         edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
             edge_index, edge_weight
         )
@@ -213,6 +176,8 @@ class NMFSelect(Select):
         node_ptr = torch.cat(
             [num_nodes_per_graph.new_zeros(1), num_nodes_per_graph.cumsum(0)], dim=0
         )
+
+        # Build an edge->graph mapping (vector of shape [num_edges]) to slice out edges for each graph.
         if edge_index_conv.numel() == 0:
             edge_batch = batch.new_empty((0,), dtype=torch.long)
         else:
@@ -230,6 +195,7 @@ class NMFSelect(Select):
                 s_list.append(torch.zeros((0, self.k), dtype=dtype, device=device))
                 continue
 
+            # Slice out edges belonging to the current graph i.
             edge_mask = edge_batch == i
             edge_index_i = edge_index_conv[:, edge_mask]
             if edge_weight_conv is None:
