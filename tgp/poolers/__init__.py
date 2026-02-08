@@ -17,6 +17,7 @@ from .nmf import NMFPooling
 from .nopool import NoPool
 from .pan import PANPooling
 from .sag import SAGPooling
+from .sep import SEPPooling
 from .topk import TopkPooling
 
 pooler_classes = [
@@ -39,6 +40,7 @@ pooler_classes = [
     "NoPool",
     "PANPooling",
     "SAGPooling",
+    "SEPPooling",
     "TopkPooling",
 ]
 
@@ -62,6 +64,7 @@ pooler_map = {
     "nopool": NoPool,
     "pan": PANPooling,
     "sag": SAGPooling,
+    "sep": SEPPooling,
     "topk": TopkPooling,
 }
 
