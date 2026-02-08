@@ -1,5 +1,6 @@
 import pytest
 import torch
+from torch_geometric.data import Data
 
 from tgp.select.base_select import Select, SelectOutput, cluster_to_s
 
@@ -115,6 +116,48 @@ def test_selectoutput_repr_clone_apply_and_device_ops():
     out.s_inv = None
     out.cpu()
     assert out_cpu.s.device.type == "cpu"
+
+
+def test_selectoutput_apply_updates_extra_tensor_args():
+    s = torch.eye(2)
+    theta = torch.arange(4, dtype=torch.float32).view(2, 2)
+    so = SelectOutput(
+        s=s,
+        theta=theta.clone(),
+        nested=[theta.clone(), {"inner": theta.clone()}],
+        non_tensor="keep-me",
+    )
+
+    so.apply(lambda x: x + 1)
+
+    assert torch.equal(so.s, s + 1)
+    assert torch.equal(so.theta, theta + 1)
+    assert torch.equal(so.nested[0], theta + 1)
+    assert torch.equal(so.nested[1]["inner"], theta + 1)
+    assert so.non_tensor == "keep-me"
+
+
+def test_data_to_moves_selectoutput_extra_tensors_in_nested_pooled_data():
+    root_so = SelectOutput(
+        s=torch.eye(2),
+        theta=torch.ones(2, 2),
+        theta_list=[torch.zeros(2, 2)],
+    )
+    pooled_so = SelectOutput(
+        s=torch.eye(2),
+        theta=torch.ones(2, 2),
+        theta_list=[torch.zeros(2, 2)],
+    )
+    data = Data(so=root_so, pooled_data=[Data(so=pooled_so)])
+
+    data = data.to("meta")
+
+    assert data.so.s.device.type == "meta"
+    assert data.so.theta.device.type == "meta"
+    assert data.so.theta_list[0].device.type == "meta"
+    assert data.pooled_data[0].so.s.device.type == "meta"
+    assert data.pooled_data[0].so.theta.device.type == "meta"
+    assert data.pooled_data[0].so.theta_list[0].device.type == "meta"
 
 
 def test_selectoutput_invalid_init():

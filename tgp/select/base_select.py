@@ -1,6 +1,7 @@
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -250,11 +251,27 @@ class SelectOutput:
         out += ")"
         return out
 
+    @staticmethod
+    def _apply_to_value(value: Any, func: Callable) -> Any:
+        if isinstance(value, Tensor):
+            return func(value)
+        if isinstance(value, list):
+            return [SelectOutput._apply_to_value(v, func) for v in value]
+        if isinstance(value, tuple):
+            return tuple(SelectOutput._apply_to_value(v, func) for v in value)
+        if isinstance(value, Mapping):
+            return {k: SelectOutput._apply_to_value(v, func) for k, v in value.items()}
+        return value
+
     def apply(self, func: Callable) -> "SelectOutput":
-        r"""Applies the function :obj:`func` to both :obj:`s` and :obj:`s_inv`."""
+        r"""Applies :obj:`func` to tensors in :obj:`s`, :obj:`s_inv`, and tensor-valued extra attributes."""
         self.s = func(self.s)
         if self.s_inv is not None:
             self.s_inv = func(self.s_inv)
+        for attr_name in self._extra_args:
+            if hasattr(self, attr_name):
+                value = getattr(self, attr_name)
+                setattr(self, attr_name, self._apply_to_value(value, func))
         return self
 
     def clone(self) -> "SelectOutput":
