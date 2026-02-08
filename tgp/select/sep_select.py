@@ -155,7 +155,7 @@ def adj_mat_to_coding_tree(adj: np.ndarray, tree_depth: int):
     else:
         trees = []
         for gi in range(n_components):
-            sub_nodes = set([u for u in range(num_nodes) if labels == gi])
+            sub_nodes = set([u for u in range(num_nodes) if labels[u] == gi])
 
             if len(sub_nodes) == 1:
                 node = list(sub_nodes)[0]
@@ -184,7 +184,6 @@ def adj_mat_to_coding_tree(adj: np.ndarray, tree_depth: int):
                 # sg = g["G"].subgraph(sub_nodes)
 
                 tree = trans_to_tree(sub_adj, tree_depth)
-                tree = update_node(tree)
                 js = list(tree.values())
                 rmap = {i: sub_nodes[i] for i in range(len(sub_nodes))}
                 for j in js:
