@@ -12,6 +12,7 @@ from tgp.reduce import global_reduce
 seed_everything(8)
 
 pooling_schedules = {
+    "sep": ["sep"],
     "nopool->nopool": ["nopool", "nopool"],
     "ndp->ndp": ["ndp", "ndp"],
     "graclus->graclus": ["graclus", "graclus"],
