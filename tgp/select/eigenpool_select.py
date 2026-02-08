@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from sklearn.cluster import SpectralClustering
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import to_dense_adj, unbatch, unbatch_edge_index
+from torch_geometric.utils import to_dense_adj
 
 from tgp.select.base_select import Select, SelectOutput
 from tgp.utils.ops import connectivity_to_edge_index
@@ -208,6 +208,8 @@ def eigenpool_select(
     k: int,
     edge_weight: Optional[Tensor] = None,
     batch: Optional[Tensor] = None,
+    num_nodes: Optional[int] = None,
+    fixed_k: bool = False,
     s_inv_op: SinvType = "transpose",
     num_modes: int = 5,
     normalized: bool = True,
@@ -235,6 +237,14 @@ def eigenpool_select(
         batch (~torch.Tensor, optional):
             Batch vector :math:`\mathbf{b} \in \{0,\dots,B-1\}^N` for multi-graph inputs.
             (default: :obj:`None`)
+        num_nodes (int, optional):
+            Total number of nodes. Useful when :obj:`edge_index` is empty.
+            (default: :obj:`None`)
+        fixed_k (bool, optional):
+            If :obj:`True`, always use exactly :obj:`k` output clusters
+            (allowing empty clusters). If :obj:`False`, single-graph mode
+            may reduce the effective number of clusters for tiny graphs.
+            (default: :obj:`False`)
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             Operation used to compute :math:`\mathbf{S}_\text{inv}` stored in
             :class:`~tgp.select.SelectOutput`. (default: :obj:`"transpose"`)
@@ -258,11 +268,17 @@ def eigenpool_select(
     )
 
     device = edge_index_conv.device
-    num_nodes = (
+    # Infer node count from connectivity, then merge with explicit hints.
+    # This is important for edgeless graphs where edge_index carries no nodes.
+    inferred_num_nodes = (
         int(edge_index_conv.max().item()) + 1 if edge_index_conv.numel() > 0 else 0
     )
     if batch is not None:
-        num_nodes = max(num_nodes, batch.size(0))
+        inferred_num_nodes = max(inferred_num_nodes, batch.size(0))
+    if num_nodes is None:
+        num_nodes = inferred_num_nodes
+    else:
+        num_nodes = max(int(num_nodes), inferred_num_nodes)
 
     if num_nodes == 0:
         raise ValueError("Cannot perform eigenpool selection on empty graph.")
@@ -283,6 +299,9 @@ def eigenpool_select(
             k=k,
             num_modes=num_modes,
             normalized=normalized,
+            # In pre-coarsening we may need a fixed width K across samples
+            # to make downstream collation of dense assignments deterministic.
+            num_classes=k if fixed_k else None,
         )
         return SelectOutput(
             s=s,
@@ -294,14 +313,19 @@ def eigenpool_select(
     # Multi-graph batch: process each graph separately and return a list of theta matrices.
     batch_size = int(batch.max().item()) + 1
     num_nodes_per_graph = torch.bincount(batch, minlength=batch_size)
-    unbatched_edges = unbatch_edge_index(edge_index_conv, batch=batch)
+    # Prefix sums let us convert global node ids to local graph ids when needed.
+    node_ptr = torch.cat(
+        [num_nodes_per_graph.new_zeros(1), num_nodes_per_graph.cumsum(0)], dim=0
+    )
+    if edge_index_conv.numel() == 0:
+        edge_batch = batch.new_empty((0,), dtype=torch.long)
+    else:
+        # In COO edge_index, source node graph id is enough because edges do not cross graphs.
+        edge_batch = batch[edge_index_conv[0]]
 
     if edge_weight_conv is None:
-        unbatched_weights = [None] * batch_size
         out_dtype = torch.get_default_dtype()
     else:
-        edge_batch = batch[edge_index_conv[0]]
-        unbatched_weights = unbatch(edge_weight_conv.view(-1), batch=edge_batch)
         out_dtype = edge_weight_conv.dtype
 
     s_list, theta_list = [], []
@@ -309,22 +333,41 @@ def eigenpool_select(
     for i, n_nodes_tensor in enumerate(num_nodes_per_graph):
         n_nodes = int(n_nodes_tensor.item())
         if n_nodes == 0:
+            # Preserve graph slots for empty graphs to keep list/batch alignment.
             s_list.append(torch.zeros((0, k), dtype=out_dtype, device=device))
             theta_list.append(
                 torch.zeros((0, k * num_modes), dtype=out_dtype, device=device)
             )
             continue
 
-        adj_dense = to_dense_adj(
-            unbatched_edges[i],
-            edge_attr=unbatched_weights[i],
-            max_num_nodes=n_nodes,
-        ).squeeze(0)
+        edge_mask = edge_batch == i
+        edge_index_i = edge_index_conv[:, edge_mask]
+        if edge_weight_conv is None:
+            edge_weight_i = None
+        else:
+            edge_weight_i = edge_weight_conv[edge_mask]
+
+        if edge_index_i.numel() == 0:
+            # Graph has nodes but no edges: use all-zero adjacency.
+            adj_dense = torch.zeros(
+                (n_nodes, n_nodes), dtype=out_dtype, device=device
+            )
+        else:
+            node_start = int(node_ptr[i].item())
+            # Convert global node indices to per-graph local indexing [0, n_nodes).
+            edge_index_i = edge_index_i - node_start
+            adj_dense = to_dense_adj(
+                edge_index_i,
+                edge_attr=edge_weight_i,
+                max_num_nodes=n_nodes,
+            ).squeeze(0)
+
         s, theta = _select_from_dense_adjacency(
             adj_dense=adj_dense,
             k=k,
             num_modes=num_modes,
             normalized=normalized,
+            # Batched mode always uses fixed K so all graphs can be concatenated.
             num_classes=k,
         )
         s_list.append(s.to(dtype=out_dtype))
@@ -419,6 +462,8 @@ class EigenPoolSelect(Select):
             k=self.k,
             edge_weight=edge_weight,
             batch=batch,
+            num_nodes=num_nodes,
+            fixed_k=bool(kwargs.pop("fixed_k", False)),
             s_inv_op=self.s_inv_op,
             num_modes=self.num_modes,
             normalized=self.normalized,

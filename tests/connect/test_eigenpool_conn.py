@@ -82,6 +82,33 @@ class TestEigenPoolConnectWithSparseInput:
         assert adj_pool.shape[0] == 2  # edge_index format
         assert edge_weight_pool is not None
 
+    def test_eigenpool_connect_handles_empty_edge_index_with_nodes(self):
+        """Test sparse unbatched path when a graph has nodes but no edges."""
+        num_nodes = 5
+        k = 3
+
+        # Explicitly model a graph with 5 isolated nodes.
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        batch = torch.zeros(num_nodes, dtype=torch.long)
+
+        # Build a deterministic hard assignment S in [N, K].
+        cluster_index = torch.tensor([0, 1, 2, 0, 1], dtype=torch.long)
+        s = torch.nn.functional.one_hot(cluster_index, num_classes=k).to(torch.float32)
+        so = SelectOutput(s=s, batch=batch)
+
+        connector = EigenPoolConnect(sparse_output=False, remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(
+            edge_index=edge_index,
+            so=so,
+            edge_weight=None,
+            batch=batch,
+        )
+
+        # No edges means A_ext is zero, so the pooled dense adjacency must be zero too.
+        assert adj_pool.shape == (1, k, k)
+        assert torch.allclose(adj_pool, torch.zeros_like(adj_pool))
+        assert edge_weight_pool is None
+
     def test_eigenpool_connect_remove_self_loops(self, pooler_test_graph_sparse):
         """Test EigenPoolConnect with remove_self_loops=True."""
         x, edge_index, edge_weight, _ = pooler_test_graph_sparse

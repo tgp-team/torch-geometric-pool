@@ -88,6 +88,32 @@ class TestEigenPoolSelectFunction:
 
         assert so.batch is batch
 
+    def test_eigenpool_select_uses_num_nodes_for_edgeless_graph(self):
+        """Test that num_nodes is honored when edge_index is empty."""
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        num_nodes = 4
+
+        so = eigenpool_select(edge_index=edge_index, k=1, num_nodes=num_nodes)
+
+        assert so.s.shape == (num_nodes, 1)
+        assert hasattr(so, "theta")
+        assert so.theta.shape[0] == num_nodes
+
+    def test_eigenpool_select_batched_handles_graph_without_edges(self):
+        """Test batched mode when one graph has no edges."""
+        # Graph 0: two nodes with one undirected edge.
+        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+        # Graph 1: three isolated nodes (no edges).
+        batch = torch.tensor([0, 0, 1, 1, 1], dtype=torch.long)
+
+        so = eigenpool_select(edge_index=edge_index, k=2, batch=batch)
+
+        assert so.s.shape == (5, 2)
+        assert isinstance(so.theta, list)
+        assert len(so.theta) == 2
+        assert so.theta[0].shape[0] == 2
+        assert so.theta[1].shape[0] == 3
+
     def test_eigenpool_select_k_larger_than_nodes(self):
         """Test eigenpool_select when k >= num_nodes."""
         x, edge_index, _, _ = make_chain_graph_sparse(N=4, F_dim=2, seed=42)

@@ -181,6 +181,17 @@ class TestEigenPoolingPrecoarsening:
         assert precoarsened.batch.shape == (actual_k,)
         assert torch.all(precoarsened.batch == 0)
 
+    def test_precoarsening_fixed_k_for_small_graph(self):
+        """Test that EigenPooling.precoarsening keeps exactly k clusters."""
+        _, edge_index, _, _ = make_chain_graph_sparse(N=4, F_dim=2, seed=42)
+        k = 5
+
+        pooler = EigenPooling(k=k, num_modes=2, batched=False)
+        precoarsened = pooler.precoarsening(edge_index=edge_index)
+
+        assert precoarsened.so.s.shape == (4, k)
+        assert precoarsened.batch.shape == (k,)
+
 
 class TestEigenPoolingEdgeCases:
     """Tests for edge cases in EigenPooling."""

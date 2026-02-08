@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import to_dense_adj, unbatch, unbatch_edge_index
+from torch_geometric.utils import to_dense_adj, unbatch
 
 from tgp.connect import DenseConnect
 from tgp.select import SelectOutput
@@ -237,24 +237,50 @@ class EigenPoolConnect(DenseConnect):
             batch = omega.new_zeros(num_nodes, dtype=torch.long)
         batch_size = int(batch.max().item()) + 1 if batch.numel() > 0 else 1
 
-        # Unbatch assignments and edges per graph.
+        # Unbatch assignments per graph.
         unbatched_s = unbatch(omega, batch=batch)
-        unbatched_edges = unbatch_edge_index(edge_index_conv, batch=batch)
-        if edge_weight_conv is None:
-            unbatched_weights = [None] * batch_size
+        num_nodes_per_graph = torch.bincount(batch, minlength=batch_size)
+        node_ptr = torch.cat(
+            [num_nodes_per_graph.new_zeros(1), num_nodes_per_graph.cumsum(0)], dim=0
+        )
+
+        if edge_index_conv.numel() == 0:
+            edge_batch = batch.new_empty((0,), dtype=torch.long)
         else:
             edge_batch = batch[edge_index_conv[0]]
-            unbatched_weights = unbatch(edge_weight_conv.view(-1), batch=edge_batch)
 
         # Convert each graph to dense, compute A_ext, then coarsen.
         adj_pool_list = []
-        for s_b, edge_index_b, edge_weight_b in zip(
-            unbatched_s, unbatched_edges, unbatched_weights
-        ):
+        for graph_idx in range(batch_size):
+            if graph_idx < len(unbatched_s):
+                s_b = unbatched_s[graph_idx]
+            else:
+                s_b = omega.new_zeros((0, num_clusters))
             n_nodes = s_b.size(0)
-            adj_b = to_dense_adj(
-                edge_index_b, edge_attr=edge_weight_b, max_num_nodes=n_nodes
-            ).squeeze(0)
+
+            if n_nodes == 0:
+                adj_b = omega.new_zeros((0, 0))
+            else:
+                edge_mask = edge_batch == graph_idx
+                edge_index_b = edge_index_conv[:, edge_mask]
+
+                if edge_weight_conv is None:
+                    edge_weight_b = None
+                else:
+                    edge_weight_b = edge_weight_conv[edge_mask]
+
+                if edge_index_b.numel() == 0:
+                    adj_b = omega.new_zeros((n_nodes, n_nodes))
+                else:
+                    # Nodes are grouped by graph in the batch vector; remap to local indices.
+                    node_start = int(node_ptr[graph_idx].item())
+                    edge_index_b = edge_index_b - node_start
+                    adj_b = to_dense_adj(
+                        edge_index_b,
+                        edge_attr=edge_weight_b,
+                        max_num_nodes=n_nodes,
+                    ).squeeze(0)
+
             adj_pool_list.append(self._coarsen_dense_adj(adj_b, s_b))
 
         adj_pool = torch.stack(adj_pool_list, dim=0)

@@ -251,6 +251,26 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
             so=so,
         )
 
+    def precoarsening(
+        self,
+        edge_index: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
+        *,
+        batch: Optional[Tensor] = None,
+        num_nodes: Optional[int] = None,
+        **kwargs,
+    ) -> PoolingOutput:
+        # In pre-coarsening, fix the assignment width to k across samples so
+        # batched collation can concatenate dense SelectOutput.s safely.
+        return super().precoarsening(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=num_nodes,
+            fixed_k=True,
+            **kwargs,
+        )
+
     def extra_repr_args(self) -> dict:
         return {
             "batched": self.batched,
