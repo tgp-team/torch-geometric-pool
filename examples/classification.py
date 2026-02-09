@@ -11,7 +11,7 @@ from tgp.utils import connectivity_to_sparse_tensor
 seed_everything(8)  # Reproducibility
 
 for POOLER, value in pooler_map.items():  # Use all poolers
-    # for POOLER in ['spbnpool']:                 # Test a specific pooler
+    # for POOLER in ['mincut']:                 # Test a specific pooler
 
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
@@ -67,7 +67,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 print(self.pooler)
 
                 # Second MP layer
-                if self.pooler.is_dense_batched:
+                if self.pooler.is_dense:
                     self.conv2 = DenseGCNConv(
                         in_channels=hidden_channels, out_channels=hidden_channels
                     )

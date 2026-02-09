@@ -9,7 +9,6 @@ from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_scatter import scatter
 from torch_sparse import SparseTensor
 
-from tgp import eps
 from tgp.select import SelectOutput
 from tgp.utils import connectivity_to_edge_index, connectivity_to_sparse_tensor
 from tgp.utils.typing import ConnectionType
@@ -88,14 +87,6 @@ def sparse_connect(
     if remove_self_loops:
         edge_index, edge_weight = rsl(edge_index, edge_weight)
 
-    # filter out edges with tiny weights
-    if edge_weight is not None:
-        edge_weight = edge_weight.view(-1)
-        mask = edge_weight.abs() > eps
-        if not torch.all(mask):
-            edge_index = edge_index[:, mask]
-            edge_weight = edge_weight[mask]
-
     if degree_norm:
         if edge_weight is None:
             edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
@@ -104,8 +95,8 @@ def sparse_connect(
         deg = scatter(
             edge_weight, edge_index[0], dim=0, dim_size=num_supernodes, reduce="sum"
         )
-        deg = deg.clamp(min=eps)  # Avoid tiny degrees that explode gradients
-        deg_inv_sqrt = deg.pow(-0.5)
+        deg[deg == 0] = 1.0  # Avoid division by zero
+        deg_inv_sqrt = 1.0 / deg.sqrt()
 
         # Apply symmetric normalization to edge weights
         edge_weight = (

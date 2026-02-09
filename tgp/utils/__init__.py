@@ -1,7 +1,3 @@
-from .negative_edge_sampling import (
-    batched_negative_edge_sampling,
-    negative_edge_sampling,
-)
 from .ops import (
     add_remaining_self_loops,
     check_and_filter_edge_weights,

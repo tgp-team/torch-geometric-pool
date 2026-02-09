@@ -53,17 +53,6 @@ def test_forward():
     assert out.x.shape == (k, 1)
 
 
-def test_forward_with_sparse_adj():
-    x, edge_index, edge_weight, batch = make_chain_graph(N=4, F_dim=2)
-    adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
-    pooler = EdgeContractionPooling(in_channels=2)
-    pooler.eval()
-
-    out = pooler(x=x, adj=adj, batch=batch, lifting=False)
-    assert isinstance(out, PoolingOutput)
-    assert out.x.dim() == 2
-
-
 def make_simple_undirected_graph():
     # 4-node cycle: 0–1–2–3–0
     row = torch.tensor([0, 1, 2, 3, 1, 2, 3, 0], dtype=torch.long)

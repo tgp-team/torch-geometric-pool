@@ -197,7 +197,6 @@ omit = [
     "tgp/datasets/*",
     "tgp/imports.py",
     "tgp/data/collate.py",
-    "tests/*",
 ]
 branch = true
 parallel = true

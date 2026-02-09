@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test edge weight normalization across all connect methods.
-Tests: SparseConnect, DenseConnect, DenseConnectUnbatched
+Tests: SparseConnect, DenseConnect, DenseConnectSPT
 """
 
 import pytest
@@ -8,9 +8,9 @@ import torch
 from torch_geometric.data import Batch, Data
 from torch_sparse import SparseTensor
 
-from tgp.connect import DenseConnect, DenseConnectUnbatched, SparseConnect
+from tgp.connect import DenseConnect, DenseConnectSPT, SparseConnect
 from tgp.reduce import BaseReduce
-from tgp.select import SelectOutput, TopkSelect
+from tgp.select import TopkSelect
 
 
 class TestEdgeWeightNormalization:
@@ -47,22 +47,6 @@ class TestEdgeWeightNormalization:
         """Get SelectOutput and compute batch_pooled."""
         selector = TopkSelect(in_channels=batch_data.x.size(1), ratio=ratio)
         so = selector(batch_data.x, batch=batch_data.batch)
-        batch_pooled = BaseReduce.reduce_batch(so, batch_data.batch)
-        return so, batch_pooled
-
-    def get_dense_select_output_and_batch_pooled(self, batch_data, k: int = 2):
-        """Get a dense SelectOutput of shape [N, K] and compute batch_pooled."""
-        batch = batch_data.batch
-        num_nodes = batch.numel()
-        num_graphs = int(batch.max().item()) + 1
-
-        s = torch.zeros((num_nodes, k), dtype=torch.float, device=batch.device)
-        for graph_id in range(num_graphs):
-            node_idx = torch.nonzero(batch == graph_id, as_tuple=True)[0]
-            local_pos = torch.arange(node_idx.numel(), device=batch.device)
-            s[node_idx, local_pos % k] = 1.0
-
-        so = SelectOutput(s=s)
         batch_pooled = BaseReduce.reduce_batch(so, batch_data.batch)
         return so, batch_pooled
 
@@ -331,54 +315,35 @@ class TestEdgeWeightNormalization:
         repr_str = repr(connector)
         assert "edge_weight_norm=True" in repr_str
 
-    # ===== DENSE CONNECT UNBATCHED TESTS =====
+    # ===== DENSE CONNECT SPT TESTS =====
 
-    def test_dense_connect_unbatched_assertion_error(self):
-        """Test that DenseConnectUnbatched raises AssertionError when batch_pooled is None."""
+    def test_dense_connect_spt_assertion_error(self):
+        """Test that DenseConnectSPT raises AssertionError when batch_pooled is None."""
         batch_data = self.create_batch_graphs()
-        so, _ = self.get_dense_select_output_and_batch_pooled(batch_data)
+        so, _ = self.get_select_output_and_batch_pooled(batch_data)
 
-        connector = DenseConnectUnbatched(edge_weight_norm=True)
+        connector = DenseConnectSPT(edge_weight_norm=True)
 
         with pytest.raises(AssertionError, match="batch_pooled parameter is required"):
             connector(
-                edge_index=batch_data.edge_index,
-                edge_weight=batch_data.edge_weight,
-                batch=batch_data.batch,
-                so=so,
-                batch_pooled=None,
+                batch_data.edge_index, batch_data.edge_weight, so, batch_pooled=None
             )
 
-    def test_dense_connect_unbatched_with_batch_pooled(self):
-        """Test DenseConnectUnbatched with proper batch_pooled parameter."""
+    def test_dense_connect_spt_with_batch_pooled(self):
+        """Test DenseConnectSPT with proper batch_pooled parameter."""
         batch_data = self.create_batch_graphs()
-        so, batch_pooled = self.get_dense_select_output_and_batch_pooled(batch_data)
+        so, batch_pooled = self.get_select_output_and_batch_pooled(batch_data)
 
         # Test without normalization
-        connector = DenseConnectUnbatched(edge_weight_norm=False)
-        adj_orig, edge_weight_orig = connector(
-            edge_index=batch_data.edge_index,
-            edge_weight=batch_data.edge_weight,
-            batch=batch_data.batch,
-            so=so,
-        )
+        connector = DenseConnectSPT(edge_weight_norm=False)
+        adj_orig, _ = connector(batch_data.edge_index, batch_data.edge_weight, so)
 
         # Test with normalization
-        connector_norm = DenseConnectUnbatched(edge_weight_norm=True)
-        adj_norm, edge_weight_norm = connector_norm(
-            edge_index=batch_data.edge_index,
-            edge_weight=batch_data.edge_weight,
-            batch=batch_data.batch,
-            so=so,
-            batch_pooled=batch_pooled,
+        connector_norm = DenseConnectSPT(edge_weight_norm=True)
+        adj_norm, _ = connector_norm(
+            batch_data.edge_index, batch_data.edge_weight, so, batch_pooled=batch_pooled
         )
 
-        adj_orig = SparseTensor.from_edge_index(
-            edge_index=adj_orig, edge_attr=edge_weight_orig
-        )
-        adj_norm = SparseTensor.from_edge_index(
-            edge_index=adj_norm, edge_attr=edge_weight_norm
-        )
         # Check normalization
         if isinstance(adj_norm, SparseTensor):
             _, _, values = adj_norm.coo()
@@ -405,9 +370,9 @@ class TestEdgeWeightNormalization:
                                 graph_values_norm, expected_norm, atol=1e-5, rtol=1e-5
                             )
 
-    def test_dense_connect_unbatched_repr(self):
-        """Test DenseConnectUnbatched __repr__ includes edge_weight_norm."""
-        connector = DenseConnectUnbatched(edge_weight_norm=True)
+    def test_dense_connect_spt_repr(self):
+        """Test DenseConnectSPT __repr__ includes edge_weight_norm."""
+        connector = DenseConnectSPT(edge_weight_norm=True)
         repr_str = repr(connector)
         assert "edge_weight_norm=True" in repr_str
 

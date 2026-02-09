@@ -73,6 +73,12 @@ class BNPool(DenseSRCPooling):
             (default: :obj:`1.0`)
         eta (float, optional): Weights the KL divergence loss term.
             (default: :obj:`1.0`)
+        rescale_loss (bool, optional): If :obj:`True`, losses are normalized by the square of the number of nodes :math:`N^2`
+            to ensure proper scaling across different graph sizes.
+            (default: :obj:`True`)
+        balance_links (bool, optional): If :obj:`True`, applies class-balancing weights in the reconstruction loss
+            to handle the imbalance between edges and non-edges in sparse graphs.
+            (default: :obj:`True`)
         train_K (bool, optional): If :obj:`True`, the cluster connectivity matrix :math:`\mathbf{K}` is learnable.
             If :obj:`False`, :math:`\mathbf{K}` is fixed to its initial value.
             (default: :obj:`True`)
@@ -125,6 +131,8 @@ class BNPool(DenseSRCPooling):
         K_mu=10.0,
         K_init=1.0,
         eta=1.0,
+        rescale_loss=True,
+        balance_links=True,
         train_K=True,  # hyperparameters of the selector
         act: str = None,
         dropout: float = 0.0,
@@ -148,14 +156,7 @@ class BNPool(DenseSRCPooling):
             raise ValueError("max_k must be positive")
 
         super(BNPool, self).__init__(
-            selector=DPSelect(
-                in_channels,
-                k,
-                batched_representation=True,
-                act=act,
-                dropout=dropout,
-                s_inv_op=s_inv_op,
-            ),
+            selector=DPSelect(in_channels, k, act, dropout, s_inv_op),
             reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift),
             connector=DenseConnect(
@@ -172,6 +173,8 @@ class BNPool(DenseSRCPooling):
         self.alpha_DP = alpha_DP
         self.K_var_val = K_var
         self.K_mu_val = K_mu
+        self.rescale_loss = rescale_loss
+        self.balance_links = balance_links
         self.train_K = train_K
         self.eta = eta  # coefficient for the kl_loss
 
@@ -264,8 +267,8 @@ class BNPool(DenseSRCPooling):
         3. **Cluster Connectivity Prior Loss**: Regularizes the learned connectivity matrix :math:`\mathbf{K}`
            towards the specified prior distribution.
 
-        All losses are normalized by :math:`N^2` (number of node pairs) to ensure consistent scaling
-        across different graph sizes.
+        All losses can be optionally normalized by :math:`N^2` (number of node pairs) when :attr:`rescale_loss=True`
+        to ensure consistent scaling across different graph sizes.
 
         Args:
             adj (~torch.Tensor): True adjacency matrix of shape :math:`(B, N, N)` to reconstruct.
@@ -295,7 +298,7 @@ class BNPool(DenseSRCPooling):
         if mask is not None:
             N = mask.sum(-1)  # has shape B x 1
         else:
-            N = torch.tensor(adj.shape[-1], device=adj.device)  # N
+            N = adj.shape[-1]  # N
 
         N_squared = N**2
         # Reconstruction loss
@@ -303,7 +306,7 @@ class BNPool(DenseSRCPooling):
             rec_adj,
             adj,
             mask,
-            balance_links=True,
+            balance_links=self.balance_links,
             normalizing_const=N_squared,
             batch_reduction="mean",
         )
@@ -346,6 +349,8 @@ class BNPool(DenseSRCPooling):
             "k_prior_mean": self.K_mu_val,
             "k_init_value": self.K_init_val,
             "eta": self.eta,
+            "rescale_loss": self.rescale_loss,
+            "balance_links": self.balance_links,
             "train_K": self.train_K,
         }
 
