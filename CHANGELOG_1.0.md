@@ -134,6 +134,8 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 ## Bug Fixes
 
+- **Batched spectral loss** no longer returns NaN for graphs with zero edges;
+  empty graphs now contribute zero loss and the result remains finite.
 - **Weighted BCE reconstruction loss** now counts edges using a boolean mask to
   avoid mismatches when adjacency is non‑binary or has clamped edges.
 - **Batched random assignment** in `get_random_map_mask` now handles graphs with
