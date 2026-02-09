@@ -7,10 +7,15 @@ from torch_geometric.utils import coalesce, subgraph
 from torch_geometric.utils import remove_self_loops as rsl
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_scatter import scatter
-from torch_sparse import SparseTensor
 
+from tgp import eps
+from tgp.imports import is_sparsetensor
 from tgp.select import SelectOutput
-from tgp.utils import connectivity_to_edge_index, connectivity_to_sparse_tensor
+from tgp.utils import (
+    connectivity_to_edge_index,
+    connectivity_to_sparsetensor,
+    connectivity_to_torch_coo,
+)
 from tgp.utils.typing import ConnectionType
 
 
@@ -65,18 +70,21 @@ def sparse_connect(
     degree_norm: bool = False,
 ) -> Tuple[Adj, OptTensor]:
     r"""Connects the nodes in the coarsened graph."""
-    to_sparse = False
-
-    if isinstance(edge_index, SparseTensor):
-        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
-        to_sparse = True
-
+    to_sparsetensor = False
+    to_torch_coo = False
+    if is_sparsetensor(edge_index):
+        to_sparsetensor = True
+    elif isinstance(edge_index, Tensor) and edge_index.is_sparse:
+        to_torch_coo = True
+    edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
-    if node_index is not None and len(node_index) < num_nodes:
+    if node_index is not None and len(node_index) < num_nodes:  # e.g. topkpooling
         edge_index, edge_weight = subgraph(
             node_index, edge_index, edge_weight, relabel_nodes=True, num_nodes=num_nodes
         )
-    elif cluster_index is not None and len(cluster_index) == num_nodes:
+    elif (
+        cluster_index is not None and len(cluster_index) == num_nodes
+    ):  # e.g. maxcutpool (assign all nodes) - kmis
         edge_index = cluster_index[edge_index]
         edge_index, edge_weight = coalesce(
             edge_index, edge_weight, num_nodes=num_supernodes, reduce=reduce_op
@@ -87,6 +95,14 @@ def sparse_connect(
     if remove_self_loops:
         edge_index, edge_weight = rsl(edge_index, edge_weight)
 
+    # filter out edges with tiny weights
+    if edge_weight is not None:
+        edge_weight = edge_weight.view(-1)
+        mask = edge_weight.abs() > eps
+        if not torch.all(mask):
+            edge_index = edge_index[:, mask]
+            edge_weight = edge_weight[mask]
+
     if degree_norm:
         if edge_weight is None:
             edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
@@ -95,8 +111,8 @@ def sparse_connect(
         deg = scatter(
             edge_weight, edge_index[0], dim=0, dim_size=num_supernodes, reduce="sum"
         )
-        deg[deg == 0] = 1.0  # Avoid division by zero
-        deg_inv_sqrt = 1.0 / deg.sqrt()
+        deg = deg.clamp(min=eps)  # Avoid tiny degrees that explode gradients
+        deg_inv_sqrt = deg.pow(-0.5)
 
         # Apply symmetric normalization to edge weights
         edge_weight = (
@@ -118,10 +134,13 @@ def sparse_connect(
         # Normalize edge weights by their respective graph's maximum
         edge_weight = edge_weight / max_per_graph[edge_batch]
 
-    if to_sparse:
-        edge_index = connectivity_to_sparse_tensor(
+    if to_sparsetensor:
+        edge_index = connectivity_to_sparsetensor(
             edge_index, edge_weight, num_supernodes
         )
+        edge_weight = None
+    elif to_torch_coo:
+        edge_index = connectivity_to_torch_coo(edge_index, edge_weight, num_supernodes)
         edge_weight = None
 
     return edge_index, edge_weight

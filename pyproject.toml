@@ -37,10 +37,12 @@ dependencies = [
     "torch >= 1.8, <3",
     "torch_geometric >=2.6, <3",
     "torch_scatter",
-    "torch_sparse",
 ]
 
 [project.optional-dependencies]
+torch_sparse = [
+    "torch_sparse",
+]
 ndp = [
     "scipy",
 ]

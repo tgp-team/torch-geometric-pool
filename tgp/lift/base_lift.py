@@ -1,5 +1,5 @@
-import torch_sparse
 from torch import Tensor, nn
+from torch_geometric.utils import scatter
 
 from tgp.select import SelectOutput
 from tgp.utils import pseudo_inverse
@@ -89,15 +89,15 @@ class BaseLift(Lift):
                 The lifted node features.
         """
         if self.matrix_op == "precomputed":
-            if isinstance(so.s, Tensor):
+            if so.s.is_sparse:
+                s_inv = so.s_inv.transpose(-2, -1).coalesce()
+            else:
                 s_inv = so.s_inv.transpose(-2, -1)
-            else:
-                s_inv = so.s_inv.t()
         elif self.matrix_op == "inverse":
-            if isinstance(so.s, Tensor):
-                s_inv = pseudo_inverse(so.s).transpose(-2, -1)
+            if so.s.is_sparse:
+                s_inv = pseudo_inverse(so.s).transpose(-2, -1).coalesce()
             else:
-                s_inv = pseudo_inverse(so.s).t()
+                s_inv = pseudo_inverse(so.s).transpose(-2, -1)
         elif self.matrix_op == "transpose":
             s_inv = so.s
         else:
@@ -105,10 +105,30 @@ class BaseLift(Lift):
                 f"'matrix_op' must be one of {list(LiftType.__args__)} ({self.matrix_op} given)"
             )
 
-        if isinstance(s_inv, Tensor):
-            x_prime = s_inv.matmul(x_pool)
+        # s_inv must be a torch.Tensor (either sparse COO or dense)
+        if not isinstance(s_inv, Tensor):
+            raise TypeError(
+                f"Expected s_inv to be a torch.Tensor (sparse COO or dense), got {type(s_inv)}"
+            )
+
+        if s_inv.is_sparse:
+            row, col = s_inv.indices()
+            values = s_inv.values()
+            src = x_pool[col]
+            if values is not None:
+                src = src * values.view(-1, 1)
+            reduce = "any" if self.reduce_op == "any" else self.reduce_op
+            if reduce == "any":
+                src = src.bool()
+            x_prime = scatter(
+                src,
+                row,
+                dim=0,
+                dim_size=s_inv.size(0),
+                reduce=reduce,
+            )
         else:
-            x_prime = torch_sparse.matmul(s_inv, x_pool, reduce=self.reduce_op)
+            x_prime = s_inv.matmul(x_pool)
 
         return x_prime
 

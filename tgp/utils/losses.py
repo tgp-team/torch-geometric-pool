@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Distribution, kl_divergence
 from torch_geometric.utils import scatter
-from torch_sparse import SparseTensor
 
 from tgp import eps
 from tgp.utils import rank3_diag, rank3_trace
@@ -857,13 +856,12 @@ def maxcut_loss(
         if edge_weight.dim() > 1:
             edge_weight = edge_weight.squeeze()
 
-    # Construct sparse adjacency matrix
-    adj = SparseTensor(
-        row=edge_index[0],
-        col=edge_index[1],
-        value=edge_weight,
-        sparse_sizes=(num_nodes, num_nodes),
-    )
+    # Construct sparse adjacency matrix (torch COO)
+    adj = torch.sparse_coo_tensor(
+        edge_index,
+        edge_weight,
+        size=(num_nodes, num_nodes),
+    ).coalesce()
 
     # Compute A * z (adjacency matrix times scores)
     az = adj.matmul(scores.unsqueeze(-1)).squeeze(-1)

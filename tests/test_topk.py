@@ -159,9 +159,18 @@ def test_topk_pooling_end_to_end_pool_and_lift():
     # out.edge_index is a SparseTensor or edge_index of pooled graph
     pooled_adj = out.edge_index
     # Check that pooled_adj is either a torch.Tensor or SparseTensor
-    from torch_sparse import SparseTensor as _SparseTensor
+    try:
+        from torch_sparse import SparseTensor as _SparseTensor
 
-    assert isinstance(pooled_adj, (Tensor, _SparseTensor))
+        has_sparse = True
+    except ImportError:
+        _SparseTensor = type(None)  # Dummy type that won't match
+        has_sparse = False
+
+    if has_sparse:
+        assert isinstance(pooled_adj, (Tensor, _SparseTensor))
+    else:
+        assert isinstance(pooled_adj, Tensor)
 
     # out.so is a SelectOutput
     assert isinstance(out.so, SelectOutput)

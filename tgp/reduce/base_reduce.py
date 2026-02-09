@@ -1,10 +1,8 @@
 from typing import Optional
 
 import torch
-import torch_sparse
 from torch import Tensor, nn
 from torch_geometric.utils import scatter
-from torch_sparse import SparseTensor
 
 from tgp.select import SelectOutput
 from tgp.utils.typing import ReduceType
@@ -34,7 +32,7 @@ class Reduce(nn.Module):
         if batch is None:
             return batch
 
-        assert isinstance(select_output.s, SparseTensor)
+        assert select_output.s.is_sparse
 
         out = torch.arange(select_output.num_supernodes, device=batch.device)
         return out.scatter_(
@@ -114,15 +112,20 @@ class BaseReduce(Reduce):
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
         """
-        if isinstance(so.s, SparseTensor):
-            if self.operation == "any":
-                x_pool = scatter(
-                    x[so.node_index], so.cluster_index, dim=0, reduce="any"
-                )
-                if so.s.storage.value() is not None:
-                    x_pool = x_pool * so.s.storage.value().view(-1, 1)
-            else:
-                x_pool = torch_sparse.matmul(so.s.t(), x, reduce=self.operation)
+        if so.s.is_sparse:
+            src = x[so.node_index]
+            values = so.s.values()
+            if values is not None and self.operation != "any":
+                src = src * values.view(-1, 1)
+
+            reduce = "any" if self.operation == "any" else self.operation
+            x_pool = scatter(
+                src.bool() if reduce == "any" else src,
+                so.cluster_index,
+                dim=0,
+                dim_size=so.num_supernodes,
+                reduce=reduce,
+            )
         else:
             x_pool = so.s.transpose(-2, -1).matmul(x)
 

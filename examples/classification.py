@@ -6,7 +6,7 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
 from tgp.poolers import get_pooler, pooler_map
-from tgp.utils import connectivity_to_sparse_tensor
+from tgp.utils import connectivity_to_torch_coo
 
 seed_everything(8)  # Reproducibility
 
@@ -81,7 +81,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
             def forward(self, x, edge_index, edge_weight, batch=None):
                 num_nodes = x.size(0)
-                edge_index = connectivity_to_sparse_tensor(
+                edge_index = connectivity_to_torch_coo(
                     edge_index, edge_weight, num_nodes
                 )
 

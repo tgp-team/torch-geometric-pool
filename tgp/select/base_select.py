@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.imports import SparseTensor
+from tgp.imports import is_sparsetensor
 from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
 
 
@@ -38,6 +38,8 @@ def cluster_to_s(
     """
     if num_nodes is None:
         num_nodes = cluster_index.size(0)
+    if num_supernodes is None:
+        num_supernodes = int(cluster_index.max().item()) + 1
     if node_index is None:
         node_index = torch.arange(
             num_nodes, dtype=torch.long, device=cluster_index.device
@@ -45,11 +47,21 @@ def cluster_to_s(
     if as_edge_index:
         return torch.stack([node_index, cluster_index], dim=0), weight
     else:
-        return SparseTensor(
-            row=node_index,
-            col=cluster_index,
-            value=weight,
-            sparse_sizes=(num_nodes, num_supernodes),
+        # Sort indices for compatibility with subgraph operation in sparse_connect
+        # which requires sorted node indices for proper edge relabeling
+        node_index, perm = torch.sort(node_index)
+        cluster_index = cluster_index[perm]
+        indices = torch.stack([node_index, cluster_index], dim=0)
+        values = (
+            weight[perm]
+            if weight is not None
+            else torch.ones(indices.size(1), device=indices.device)
+        )
+        return torch.sparse_coo_tensor(
+            indices=indices,
+            values=values,
+            size=(num_nodes, num_supernodes),
+            is_coalesced=True,
         )
 
 
@@ -73,13 +85,13 @@ class SelectOutput:
             each cluster. (default: :obj:`None`)
     """
 
-    s: Union[SparseTensor, Tensor]
-    s_inv: Union[SparseTensor, Tensor] = None
+    s: Tensor
+    s_inv: Tensor = None
 
     def __init__(
         self,
-        s: Union[SparseTensor, Tensor] = None,
-        s_inv: Union[SparseTensor, Tensor] = None,
+        s: Tensor = None,
+        s_inv: Tensor = None,
         node_index: Tensor = None,
         num_nodes: int = None,
         cluster_index: Tensor = None,
@@ -89,31 +101,49 @@ class SelectOutput:
         **extra_args,
     ):
         super().__init__()
-        if isinstance(s, SparseTensor):  # Sparse assignment
-            assert cluster_index is None, (
-                "'cluster_index' cannot be set if 's' is not None"
-            )
-            assert node_index is None, "'node_index' cannot be set if 's' is not None"
-            if weight is not None:
-                s = s.set_value(weight)
-            if num_nodes is not None or num_supernodes is not None:
-                _N, _C = s.sparse_sizes()
-                size = (num_nodes or _N, num_supernodes or _C)
-                s = s.sparse_resize(size)
-        elif isinstance(s, Tensor):  # Dense assignment
-            assert cluster_index is None, (
-                "'cluster_index' cannot be set if 's' is a dense Tensor"
-            )
-            assert node_index is None, (
-                "'node_index' cannot be set if 's' is a dense Tensor"
-            )
-            assert num_nodes is None, (
-                "'num_nodes' cannot be set if 's' is a dense Tensor"
-            )
-            assert num_supernodes is None, (
-                "'num_supernodes' cannot be set if 's' is a dense Tensor"
-            )
-            assert weight is None, "'weight' cannot be set if 's' is a dense Tensor"
+        if isinstance(s, Tensor):
+            if s.is_sparse:  # Sparse assignment
+                s = s.coalesce()
+                assert cluster_index is None, (
+                    "'cluster_index' cannot be set if 's' is not None"
+                )
+                assert node_index is None, (
+                    "'node_index' cannot be set if 's' is not None"
+                )
+                if weight is not None:
+                    s = torch.sparse_coo_tensor(
+                        indices=s.indices(),
+                        values=weight,
+                        size=s.size(),
+                        dtype=s.dtype,
+                        device=s.device,
+                        is_coalesced=True,
+                    ).coalesce()
+                if num_nodes is not None or num_supernodes is not None:
+                    _N, _C = s.size()
+                    size = (num_nodes or _N, num_supernodes or _C)
+                    s = torch.sparse_coo_tensor(
+                        indices=s.indices(),
+                        values=s.values(),
+                        size=size,
+                        dtype=s.dtype,
+                        device=s.device,
+                        is_coalesced=True,
+                    ).coalesce()
+            else:  # Dense assignment (s.is_sparse is False)
+                assert cluster_index is None, (
+                    "'cluster_index' cannot be set if 's' is a dense Tensor"
+                )
+                assert node_index is None, (
+                    "'node_index' cannot be set if 's' is a dense Tensor"
+                )
+                assert num_nodes is None, (
+                    "'num_nodes' cannot be set if 's' is a dense Tensor"
+                )
+                assert num_supernodes is None, (
+                    "'num_supernodes' cannot be set if 's' is a dense Tensor"
+                )
+                assert weight is None, "'weight' cannot be set if 's' is a dense Tensor"
         elif s is None:  # Make sparse assignment from other data
             assert cluster_index is not None, (
                 "'cluster_index' cannot be None if 's' is None"
@@ -151,6 +181,10 @@ class SelectOutput:
         """
         row_sum = self.s.sum(dim=-1)
 
+        # Convert sparse tensor to dense for comparison
+        if isinstance(row_sum, Tensor) and row_sum.is_sparse:
+            row_sum = row_sum.to_dense()
+
         if "mask" in self._extra_args:
             mask = getattr(self, "mask")
             row_sum = row_sum[mask]
@@ -164,7 +198,7 @@ class SelectOutput:
 
     @property
     def is_sparse(self) -> bool:
-        return isinstance(self.s, SparseTensor)
+        return isinstance(self.s, Tensor) and self.s.is_sparse
 
     @property
     def num_nodes(self) -> int:
@@ -176,15 +210,15 @@ class SelectOutput:
 
     @property
     def node_index(self) -> Optional[Tensor]:
-        return self.s.storage.row() if self.is_sparse else None
+        return self.s.indices()[0] if self.is_sparse else None
 
     @property
     def cluster_index(self) -> Optional[Tensor]:
-        return self.s.storage.col() if self.is_sparse else None
+        return self.s.indices()[1] if self.is_sparse else None
 
     @property
     def weight(self) -> Optional[Tensor]:
-        return self.s.storage.value() if self.is_sparse else None
+        return self.s.values() if self.is_sparse else None
 
     def set_s_inv(self, method):
         if method == "transpose":
@@ -322,7 +356,7 @@ class SelectOutput:
             )
 
             # Convert adjacency to edge_index format if needed
-            if isinstance(adj, SparseTensor):
+            if is_sparsetensor(adj) or (isinstance(adj, Tensor) and adj.is_sparse):
                 edge_index, _ = connectivity_to_edge_index(adj)
             elif isinstance(adj, Tensor):
                 edge_index = adj

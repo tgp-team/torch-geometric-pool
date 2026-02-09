@@ -1,7 +1,6 @@
 import pytest
 import torch
 from torch import Tensor
-from torch_sparse import SparseTensor
 
 from tgp.poolers import DiffPool
 from tgp.utils.losses import entropy_loss, link_pred_loss
@@ -196,8 +195,12 @@ def test_diffpool_expressive_cuda_grads(small_graph_dense):
     )
 
 
+@pytest.mark.torch_sparse
 def test_preprocessing_cache(small_graph):
     """Test that preprocessing cache works correctly in DiffPool."""
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     x, edge_index, edge_weight, batch = small_graph
     N, F = x.size(0), x.size(1)
     k = 2  # number of clusters

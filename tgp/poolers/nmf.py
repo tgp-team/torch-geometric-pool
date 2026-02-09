@@ -4,13 +4,13 @@ import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import to_dense_adj
-from torch_sparse import SparseTensor
 
 from tgp.connect import DenseConnect, DenseConnectSPT
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import NMFSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput, Precoarsenable
+from tgp.utils.ops import maybe_num_nodes
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -164,11 +164,18 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         edge_weight: Optional[Tensor] = None,
         *,
         batch: Optional[Tensor] = None,
+        num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
         assert edge_index.dim() == 2, "edge_index must be a 2D list of edges."
+
+        if batch is not None:
+            num_nodes = batch.size(0)
+        else:
+            num_nodes = maybe_num_nodes(edge_index, num_nodes)
+
         adj = to_dense_adj(
-            edge_index, edge_attr=edge_weight
+            edge_index, edge_attr=edge_weight, max_num_nodes=num_nodes
         )  # has shape [1, N, N] -- Note: we do not pass batch here.
 
         so = self.select(edge_index=adj)
@@ -179,12 +186,16 @@ class NMFPooling(Precoarsenable, DenseSRCPooling):
         # Transform the select output to a sparse tensor
         s = so.s  # has shape [1, N, K]
         k = s.size(-1)
+        n = s.size(1)
+        num_graphs = batch.max().item() + 1 if batch.numel() > 0 else 1
         # Compute indices for the sparse tensor
-        row = torch.arange(s.size(1), device=s.device).repeat_interleave(k)
+        row = torch.arange(n, device=s.device).repeat_interleave(k)
         col = torch.arange(k, device=s.device)
         col = (batch.unsqueeze(-1) * k + col).view(-1)
-        # Create the sparse tensor and the SelectOutput
-        s = SparseTensor(row=row, col=col, value=s.view(-1))  # has shape (N, BK)
+        # Create the sparse tensor (torch COO) and the SelectOutput
+        s = torch.sparse_coo_tensor(
+            torch.stack([row, col]), s.view(-1), size=(n, num_graphs * k)
+        ).coalesce()  # has shape (N, BK)
         so = SelectOutput(s=s, s_inv_op=self.selector.s_inv_op)
 
         batch_pooled = self.reducer.reduce_batch(so, batch)

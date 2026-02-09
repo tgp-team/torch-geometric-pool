@@ -1,7 +1,6 @@
 import pytest
 import torch
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.mp.gtvconv import GTVConv, gtv_adj_weights
 
@@ -93,7 +92,12 @@ def test_gtvconv_forward_dense_and_mask(bias):
 
 
 @pytest.mark.parametrize("bias", [True, False])
+@pytest.mark.torch_sparse
 def test_gtvconv_forward_spt(bias):
+    """Test GTVConv with SparseTensor input. Requires torch_sparse."""
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     # Build a small sparse adjacency: 3-node path 0-1-2 + self-loops
     N, F, out_channels = 3, 2, 4
     x = torch.randn((N, F), dtype=torch.float)

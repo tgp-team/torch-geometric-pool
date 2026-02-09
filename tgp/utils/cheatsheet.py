@@ -3,7 +3,6 @@
 import re
 
 import torch
-from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
 
@@ -22,7 +21,6 @@ TEST_EDGE_INDEX = torch.tensor(
     [[0, 1, 2, 3, 4, 5, 6, 7, 8], [1, 2, 3, 4, 5, 6, 7, 8, 9]], dtype=torch.long
 )
 TEST_EDGE_WEIGHT = torch.ones(TEST_EDGE_INDEX.size(1))
-TEST_ADJ = SparseTensor.from_edge_index(TEST_EDGE_INDEX, TEST_EDGE_WEIGHT)
 
 
 def supports_sparse(pooler_name: str) -> bool:

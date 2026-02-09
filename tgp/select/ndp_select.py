@@ -12,10 +12,9 @@ from torch_geometric.utils import (
     to_undirected,
 )
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from torch_sparse import SparseTensor
 
 from tgp.select import Select, SelectOutput
-from tgp.utils import check_and_filter_edge_weights, connectivity_to_edge_index
+from tgp.utils import connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
@@ -79,11 +78,7 @@ class NDPSelect(Select):
         if num_nodes is None:
             num_nodes = maybe_num_nodes(edge_index)
 
-        if isinstance(edge_index, SparseTensor):
-            edge_index, edge_weight = connectivity_to_edge_index(
-                edge_index, edge_weight
-            )
-        edge_weight = check_and_filter_edge_weights(edge_weight)
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
         device = edge_index.device
 
         # If no batch is provided, treat everything as one subgraph (batch=0).
@@ -129,8 +124,25 @@ class NDPSelect(Select):
         global_idx_pos = torch.cat(global_idx_pos, dim=0)
         L = block_diag(global_L).tocsr()
 
-        S = SparseTensor.eye(num_nodes, device=device)
-        S = S[:, global_idx_pos]
+        # Create identity matrix as torch COO tensor and select columns
+        eye_indices = torch.arange(num_nodes, device=device)
+        S = torch.sparse_coo_tensor(
+            torch.stack([eye_indices, eye_indices]),
+            torch.ones(num_nodes, device=device),
+            size=(num_nodes, num_nodes),
+        ).coalesce()
+        # Select columns corresponding to global_idx_pos
+        S_indices = S.indices()
+        S_values = S.values()
+        mask = torch.isin(S_indices[1], global_idx_pos)
+        # Remap column indices
+        col_mapping = torch.zeros(num_nodes, dtype=torch.long, device=device)
+        col_mapping[global_idx_pos] = torch.arange(len(global_idx_pos), device=device)
+        new_indices = torch.stack([S_indices[0, mask], col_mapping[S_indices[1, mask]]])
+        S = torch.sparse_coo_tensor(
+            new_indices, S_values[mask], size=(num_nodes, len(global_idx_pos))
+        ).coalesce()
+
         so = SelectOutput(
             s=S,
             s_inv_op=self.s_inv_op,

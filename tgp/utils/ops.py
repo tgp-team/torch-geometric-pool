@@ -3,14 +3,13 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
+from torch_geometric.utils import add_remaining_self_loops as arsl
 from torch_geometric.utils import (
     get_laplacian,
-    remove_isolated_nodes,
 )
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from torch_sparse import eye as torch_sparse_eye
 
-from tgp.imports import SparseTensor
+from tgp.imports import HAS_TORCH_SPARSE, is_sparsetensor
 
 
 def rank3_trace(x):
@@ -21,22 +20,24 @@ def rank3_diag(x):
     return torch.diag_embed(x)
 
 
-def connectivity_to_row_col(edge_index: Adj) -> Tuple[Tensor, Tensor]:
-    if isinstance(edge_index, Tensor):
-        return edge_index[0], edge_index[1]
-    elif isinstance(edge_index, SparseTensor):
-        row, col, _ = edge_index.coo()
-        return row, col
-    else:
-        raise NotImplementedError()
+####### EXTERNAL FUNCTIONS - INPUT CAN BE EDGE INDEX, TORCH COO SPARSE TENSOR OR SPARSE TENSOR ###########
 
 
 def connectivity_to_edge_index(
     edge_index: Adj, edge_weight: Optional[Tensor] = None
 ) -> Tuple[Tensor, Optional[Tensor]]:
     if isinstance(edge_index, Tensor):
-        return edge_index, edge_weight
-    elif isinstance(edge_index, SparseTensor):
+        if edge_index.is_sparse:
+            # Handle torch COO sparse tensor
+            # Clone to avoid returning views that share memory with the sparse tensor
+            indices = edge_index.indices().clone()
+            values = edge_index.values().clone()
+            return indices, values
+        else:
+            # Handle regular tensor [2, E]
+            edge_weight = check_and_filter_edge_weights(edge_weight)
+            return edge_index, edge_weight
+    elif is_sparsetensor(edge_index):
         row, col, edge_weight = edge_index.coo()
         edge_index = torch.stack([row, col], dim=0)
         return edge_index, edge_weight
@@ -44,15 +45,65 @@ def connectivity_to_edge_index(
         raise NotImplementedError()
 
 
-def connectivity_to_sparse_tensor(
+def connectivity_to_torch_coo(
     edge_index: Adj,
     edge_weight: Optional[Tensor] = None,
     num_nodes: Optional[int] = None,
-) -> SparseTensor:
+) -> torch.Tensor:
+    # Validate input type first
+    if not isinstance(edge_index, Tensor) and not is_sparsetensor(edge_index):
+        raise ValueError(
+            f"Edge index must be of type Tensor or SparseTensor, got {type(edge_index)}"
+        )
+
+    num_nodes = maybe_num_nodes(edge_index, num_nodes)
+    edge_weight = check_and_filter_edge_weights(edge_weight)
+
+    if isinstance(edge_index, Tensor):
+        if edge_index.is_sparse:
+            # Already a torch COO sparse tensor
+            return edge_index
+        else:
+            # Handle regular tensor [2, E]
+            if edge_weight is None:
+                edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
+            return torch.sparse_coo_tensor(
+                edge_index, edge_weight, (num_nodes, num_nodes)
+            ).coalesce()
+    elif is_sparsetensor(edge_index):
+        row, col, value = edge_index.coo()
+        indices = torch.stack([row, col], dim=0)
+        if value is None:
+            value = torch.ones(row.size(0), device=row.device)
+        return torch.sparse_coo_tensor(
+            indices, value, (num_nodes, num_nodes)
+        ).coalesce()
+    else:
+        raise ValueError("Edge index must be a Tensor or SparseTensor.")
+
+
+def connectivity_to_sparsetensor(
+    edge_index: Adj,
+    edge_weight: Optional[Tensor] = None,
+    num_nodes: Optional[int] = None,
+):
+    if not HAS_TORCH_SPARSE:
+        raise ImportError(
+            "Cannot convert connectivity to sparse tensor: torch_sparse is not installed."
+        )
+    else:
+        from torch_sparse import SparseTensor
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
     if isinstance(edge_index, SparseTensor):
         return edge_index
     elif isinstance(edge_index, Tensor):
+        if edge_index.is_sparse:
+            # Handle torch COO sparse tensor
+            sparse_tensor = edge_index
+            edge_index = sparse_tensor.indices().clone()
+            edge_weight = sparse_tensor.values().clone()
+
+        edge_weight = check_and_filter_edge_weights(edge_weight)
         adj = SparseTensor.from_edge_index(
             edge_index, edge_weight, (num_nodes, num_nodes)
         )
@@ -61,18 +112,25 @@ def connectivity_to_sparse_tensor(
         raise NotImplementedError()
 
 
-def pseudo_inverse(edge_index: Adj) -> Tuple[Adj, Optional[Tensor]]:
-    if isinstance(edge_index, Tensor):  # Dense pooling
-        adj_inv = torch.linalg.pinv(edge_index)
+########### INTERNAL FUNCTIONS - ONLY INPUT ARE TENSORS (EDGE INDEX OR TORCH COO SPARSE TENSOR) ###########
+
+
+def pseudo_inverse(edge_index: Tensor) -> Tuple[Adj, Optional[Tensor]]:
+    if isinstance(edge_index, Tensor):
+        to_torch_coo = False
+        if edge_index.is_sparse:  # Sparse pooling with torch COO
+            to_torch_coo = True
+            edge_index = edge_index.to_dense()
+        # Convert to float for pinv computation
+        adj_inv = torch.linalg.pinv(edge_index.float())
+        if to_torch_coo:
+            adj_inv = torch.where(
+                torch.abs(adj_inv) < 1e-5, torch.zeros_like(adj_inv), adj_inv
+            )
+            adj_inv = adj_inv.to_sparse_coo()
         return adj_inv
-    elif isinstance(edge_index, SparseTensor):  # Sparse pooling
-        adj = edge_index
     else:
         raise NotImplementedError()
-    adj_inv = torch.linalg.pinv(adj.to_dense().float())
-    adj_inv = torch.where(torch.abs(adj_inv) < 1e-5, torch.zeros_like(adj_inv), adj_inv)
-    adj_inv = SparseTensor.from_dense(adj_inv)
-    return adj_inv
 
 
 def weighted_degree(
@@ -108,7 +166,7 @@ def add_remaining_self_loops(
     r"""Adds remaining self loops to the adjacency matrix.
 
     This method extends the method :obj:`~torch_geometric.utils.add_remaining_self_loops`
-    by allowing to pass a :obj:`SparseTensor` as input.
+    by allowing to pass a :obj:`SparseTensor` or torch COO sparse tensor as input.
 
     Args:
         edge_index (~torch.Tensor or SparseTensor): The edge indices.
@@ -119,11 +177,25 @@ def add_remaining_self_loops(
         num_nodes (int, optional): The number of nodes, *i.e.*
             :obj:`max_val + 1` of :attr:`edge_index`. (default: :obj:`None`)
     """
-    if isinstance(edge_index, SparseTensor):
+    if is_sparsetensor(edge_index):
         if num_nodes is not None and num_nodes != edge_index.size(0):
             edge_index = edge_index.sparse_resize((num_nodes, num_nodes))
         return edge_index.fill_diag(fill_value), None
-    from torch_geometric.utils import add_remaining_self_loops as arsl
+
+    if isinstance(edge_index, Tensor) and edge_index.is_sparse:
+        # Handle torch sparse COO adjacency matrices.
+        indices = edge_index.indices()
+        values = edge_index.values()
+        num_nodes = maybe_num_nodes(indices, num_nodes)
+        loop_index, loop_weight = arsl(indices, values, fill_value, num_nodes)
+        # Rebuild a sparse COO tensor to return the same input type.
+        adj = torch.sparse_coo_tensor(
+            loop_index,
+            loop_weight,
+            size=(num_nodes, num_nodes),
+            device=edge_index.device,
+        ).coalesce()
+        return adj, None
 
     return arsl(edge_index, edge_weight, fill_value, num_nodes)
 
@@ -166,8 +238,8 @@ def delta_gcn_matrix(
     different values.
 
     Args:
-        edge_index (~torch.Tensor or SparseTensor): Graph connectivity in COO format of shape :math:`(2, E)`
-            or as SparseTensor.
+        edge_index (~torch.Tensor or SparseTensor): Graph connectivity in COO format of shape :math:`(2, E)`,
+            as torch COO sparse tensor, or as SparseTensor.
         edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
             (default: :obj:`None`)
         delta (float, optional): Delta parameter for heterophilic message passing. When
@@ -179,10 +251,11 @@ def delta_gcn_matrix(
         tuple:
             - **edge_index** (*Tensor or SparseTensor*): Updated connectivity in the same format as input.
             - **edge_weight** (*Tensor or None*): Updated edge weights of shape :math:`(E',)` if input was Tensor,
-              or None if input was SparseTensor.
+              or None if input was SparseTensor or torch COO sparse tensor.
     """
     # Remember the input type to return the same format
-    input_is_sparse = isinstance(edge_index, SparseTensor)
+    input_is_sparsetensor = is_sparsetensor(edge_index)
+    input_is_torch_coo = isinstance(edge_index, Tensor) and edge_index.is_sparse
 
     # Convert input to edge_index, edge_weight format for processing
     edge_index_tensor, edge_weight_tensor = connectivity_to_edge_index(
@@ -200,45 +273,43 @@ def delta_gcn_matrix(
     edge_weight_scaled = -delta * edge_weight_laplacian
 
     # Create identity matrix: I
-    eye_index, eye_weight = torch_sparse_eye(
+    diag_indices = torch.arange(num_nodes, device=edge_index_tensor.device)
+    eye_index = torch.stack([diag_indices, diag_indices], dim=0)
+    eye_weight = torch.ones(
         num_nodes, device=edge_index_tensor.device, dtype=edge_weight_scaled.dtype
     )
 
     # Combine to form Delta-GCN propagation matrix: P = I - delta * L_sym
-    propagation_matrix = SparseTensor(
-        row=torch.cat([edge_index_laplacian[0], eye_index[0]]),
-        col=torch.cat([edge_index_laplacian[1], eye_index[1]]),
-        value=torch.cat([edge_weight_scaled, eye_weight]),
-        sparse_sizes=(num_nodes, num_nodes),
-    ).coalesce("sum")  # Sum weights for overlapping edges (diagonal elements)
+    # Concatenate indices and values from Laplacian and identity
+    combined_indices = torch.cat([edge_index_laplacian, eye_index], dim=1)
+    combined_values = torch.cat([edge_weight_scaled, eye_weight], dim=0)
+
+    # Create torch sparse COO tensor and coalesce to sum overlapping edges (diagonal elements)
+    propagation_matrix = torch.sparse_coo_tensor(
+        combined_indices,
+        combined_values,
+        size=(num_nodes, num_nodes),
+        device=edge_index_tensor.device,
+    ).coalesce()
 
     # Return in the same format as input
-    if input_is_sparse:
+    if input_is_sparsetensor:
+        # Convert torch COO to SparseTensor
+        propagation_matrix_spt = connectivity_to_sparsetensor(
+            propagation_matrix, None, num_nodes
+        )
+        return propagation_matrix_spt, None
+    elif input_is_torch_coo:
         return propagation_matrix, None
     else:
-        # Convert back to COO format
-        row, col, edge_weight_out = propagation_matrix.coo()
-        edge_index_out = torch.stack([row, col], dim=0)
+        # Convert back to edge_index, edge_weight format
+        edge_index_out, edge_weight_out = connectivity_to_edge_index(
+            propagation_matrix, None
+        )
         return edge_index_out, edge_weight_out
 
 
-def reset_node_numbers(edge_index, edge_attr=None):
-    """Reset node indices after removing isolated nodes.
-
-    Args:
-        edge_index (Tensor): Graph connectivity in COO format
-        edge_attr (Tensor, optional): Edge attributes. Defaults to None.
-
-    Returns:
-        tuple:
-            - Tensor: Updated edge indices
-            - Tensor: Updated edge attributes
-    """
-    edge_index, edge_attr, _ = remove_isolated_nodes(edge_index, edge_attr=edge_attr)
-    return edge_index, edge_attr
-
-
-def create_one_hot_tensor(num_nodes, kept_node_tensor, device):
+def create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=None):
     """Create one-hot encoding tensor for node assignments.
 
     Args:
@@ -254,59 +325,11 @@ def create_one_hot_tensor(num_nodes, kept_node_tensor, device):
         kept_node_tensor = kept_node_tensor.unsqueeze(0)
 
     num_kept = kept_node_tensor.size(0)
-    tensor = torch.zeros(num_nodes, num_kept + 1, device=device)
-    tensor[kept_node_tensor, 1:] = torch.eye(num_kept, device=device)
+    if dtype is None:
+        dtype = torch.float32
+    tensor = torch.zeros(num_nodes, num_kept + 1, device=device, dtype=dtype)
+    tensor[kept_node_tensor, 1:] = torch.eye(num_kept, device=device, dtype=dtype)
     return tensor
-
-
-def get_sparse_map_mask(x, edge_index, kept_node_tensor, mask):
-    """Compute sparse assignment mapping using message passing.
-
-    Args:
-        x (Tensor): Node features/assignments
-        edge_index (Tensor): Graph connectivity
-        kept_node_tensor (Tensor): Indices of kept nodes
-        mask (Tensor): Boolean mask of already assigned nodes
-
-    Returns:
-        tuple:
-            - Tensor: Propagated features
-            - Tensor: Node assignment mapping
-            - Tensor: Updated assignment mask
-    """
-    sparse_ei = SparseTensor.from_edge_index(
-        edge_index, sparse_sizes=(x.size(0), x.size(0))
-    )
-    y = sparse_ei.matmul(x)  # propagation step
-    first_internal_mask = torch.logical_not(
-        mask
-    )  # get the mask of the nodes that have not been assigned yet
-    am = torch.argmax(y, dim=1)  # get the visited nodes
-    nonzero = torch.nonzero(am, as_tuple=True)[
-        0
-    ]  # get the visited nodes that are not zero (since the zero-th node is a fake node)
-    second_internal_mask = torch.zeros_like(
-        first_internal_mask, dtype=torch.bool
-    )  # initialize the second mask
-    second_internal_mask[nonzero] = True  # set the mask to True for the visited nodes
-    final_mask = torch.logical_and(
-        first_internal_mask, second_internal_mask
-    )  # newly visited nodes that have not been assigned yet
-    indices = torch.arange(x.size(0), device=x.device)  # inizialize the indices
-    out = kept_node_tensor[
-        am - 1
-    ]  # get the supernode indices of the visited nodes (am-1 because the zero-th node is a fake node)
-
-    indices = indices[
-        final_mask
-    ]  # get the indices of the newly visited nodes that have not been assigned yet
-
-    mappa = torch.stack([indices, out[indices]])  # create the map
-    mask[indices] = (
-        True  # set the mask to True for the newly visited nodes that have not been assigned yet
-    )
-
-    return y, mappa, mask
 
 
 def get_random_map_mask(kept_nodes, mask, batch=None):
@@ -347,11 +370,59 @@ def get_random_map_mask(kept_nodes, mask, batch=None):
     return mappa
 
 
+def get_sparse_map_mask(x, sparse_adj, kept_node_tensor, mask):
+    """Compute sparse assignment mapping using message passing.
+
+    Args:
+        x (Tensor): Node features/assignments
+        edge_index (Tensor): Graph connectivity
+        kept_node_tensor (Tensor): Indices of kept nodes
+        mask (Tensor): Boolean mask of already assigned nodes
+
+    Returns:
+        tuple:
+            - Tensor: Propagated features
+            - Tensor: Node assignment mapping
+            - Tensor: Updated assignment mask
+    """
+    y = torch.sparse.mm(sparse_adj, x)  # propagation step
+
+    first_internal_mask = torch.logical_not(
+        mask
+    )  # get the mask of the nodes that have not been assigned yet
+    am = torch.argmax(y, dim=1)  # get the visited nodes
+    nonzero = torch.nonzero(am, as_tuple=True)[
+        0
+    ]  # get the visited nodes that are not zero (since the zero-th node is a fake node)
+    second_internal_mask = torch.zeros_like(
+        first_internal_mask, dtype=torch.bool
+    )  # initialize the second mask
+    second_internal_mask[nonzero] = True  # set the mask to True for the visited nodes
+    final_mask = torch.logical_and(
+        first_internal_mask, second_internal_mask
+    )  # newly visited nodes that have not been assigned yet
+    indices = torch.arange(x.size(0), device=x.device)  # inizialize the indices
+    out = kept_node_tensor[
+        am - 1
+    ]  # get the supernode indices of the visited nodes (am-1 because the zero-th node is a fake node)
+
+    indices = indices[
+        final_mask
+    ]  # get the indices of the newly visited nodes that have not been assigned yet
+
+    mappa = torch.stack([indices, out[indices]])  # create the map
+    mask[indices] = (
+        True  # set the mask to True for the newly visited nodes that have not been assigned yet
+    )
+
+    return y, mappa, mask
+
+
 def get_assignments(
     kept_node_indices, edge_index=None, max_iter=5, batch=None, num_nodes=None
 ):
     r"""Assigns all nodes in a graph to the closest kept nodes (supernodes) using
-    a hierarchical assignment strategy with message passing.
+    a hierarchical assignment strategy with message passing (torch COO version).
 
     This function implements a graph-aware node assignment algorithm that combines
     iterative message passing with random assignment fallback. It's designed to
@@ -397,20 +468,6 @@ def get_assignments(
             :obj:`None` (cannot determine graph size).
         ValueError: If :obj:`max_iter > 0` but :obj:`edge_index` is :obj:`None`
             (cannot perform graph-aware assignment).
-
-    Example:
-        >>> # Basic usage with graph connectivity
-        >>> kept_nodes = torch.tensor([0, 3])  # Keep nodes 0 and 3 as supernodes
-        >>> edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])  # Cycle graph
-        >>> assignments = get_assignments(kept_nodes, edge_index, max_iter=3)
-        >>> print(assignments)
-        tensor([[0, 1, 2, 3],
-                [0, 0, 1, 1]])  # Nodes 0,1 -> supernode 0; nodes 2,3 -> supernode 1
-
-        >>> # Random assignment only (no graph connectivity)
-        >>> assignments = get_assignments(kept_nodes, max_iter=0, num_nodes=4)
-        >>> print(assignments.shape)
-        torch.Size([2, 4])  # All 4 nodes randomly assigned to 2 supernodes
     """
     if isinstance(kept_node_indices, torch.Tensor):
         kept_node_tensor = torch.squeeze(kept_node_indices).to(torch.long)
@@ -454,14 +511,30 @@ def get_assignments(
         # Clone edge_index to avoid modifying the original
         edge_index = edge_index.clone()
 
+        dtype = torch.float16 if device.type == "cuda" else torch.float32
+        sparse_adj = None
+        if isinstance(edge_index, Tensor) and edge_index.is_sparse:
+            sparse_adj = edge_index
+            if sparse_adj.dtype != dtype:
+                sparse_adj = sparse_adj.to(dtype=dtype)
+        else:
+            edge_weight = torch.ones(
+                edge_index.size(1), device=edge_index.device, dtype=dtype
+            )
+            sparse_adj = torch.sparse_coo_tensor(
+                edge_index, edge_weight, size=(num_nodes, num_nodes)
+            ).coalesce()
+        if hasattr(sparse_adj, "to_sparse_csr"):
+            sparse_adj = sparse_adj.to_sparse_csr()
+
         # Initialize one-hot tensor for propagation
-        x = create_one_hot_tensor(num_nodes, kept_node_tensor, device)
+        x = create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=dtype)
 
         # Iterative assignment through message passing
         for _ in range(max_iter):
             if mask.all():  # All nodes assigned
                 break
-            x, _map, mask = get_sparse_map_mask(x, edge_index, kept_node_tensor, mask)
+            x, _map, mask = get_sparse_map_mask(x, sparse_adj, kept_node_tensor, mask)
             maps_list.append(_map)
 
     # Randomly assign any remaining unassigned nodes

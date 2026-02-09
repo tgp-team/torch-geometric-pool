@@ -7,14 +7,13 @@ from torch.nn import Linear
 from torch_geometric.nn.conv import LEConv
 from torch_geometric.typing import Adj
 from torch_geometric.utils import scatter, softmax
-from torch_sparse import SparseTensor
 
 from tgp.connect import SparseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import SelectOutput, TopkSelect
 from tgp.src import PoolingOutput, SRCPooling
-from tgp.utils import add_remaining_self_loops, check_and_filter_edge_weights
+from tgp.utils import add_remaining_self_loops, connectivity_to_edge_index
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
@@ -210,24 +209,17 @@ class ASAPooling(SRCPooling):
         else:
             N = x.size(0)
             x = x.unsqueeze(-1) if x.dim() == 1 else x
-
-            edge_weight = check_and_filter_edge_weights(edge_weight)
-            adj, edge_weight = add_remaining_self_loops(
-                adj, edge_weight, fill_value=1.0, num_nodes=N
+            # Convert to edge_index if needed
+            edge_index, edge_weight = connectivity_to_edge_index(adj, edge_weight)
+            edge_index, edge_weight = add_remaining_self_loops(
+                edge_index, edge_weight, fill_value=1.0, num_nodes=N
             )
 
             x_pool = x
             if self.gnn_intra_cluster is not None:
                 x_pool = self.gnn_intra_cluster(
-                    x=x, edge_index=adj, edge_weight=edge_weight
+                    x=x, edge_index=edge_index, edge_weight=edge_weight
                 )
-
-            # Convert to edge_index if needed
-            if isinstance(adj, SparseTensor):
-                row, col, edge_weight = adj.coo()
-                edge_index = torch.stack([row, col])
-            else:
-                edge_index = adj
 
             if batch is None:
                 batch = edge_index.new_zeros(x.size(0))
@@ -245,7 +237,9 @@ class ASAPooling(SRCPooling):
 
             v_j = x[edge_index[0]] * score.view(-1, 1)
             x = scatter(v_j, edge_index[1], dim=0, reduce="sum")
-            score = self.select_scorer(x, edge_index=adj, edge_weight=edge_weight)
+            score = self.select_scorer(
+                x, edge_index=edge_index, edge_weight=edge_weight
+            )
 
             # Select
             so = self.select(x=score, batch=batch)
@@ -255,7 +249,7 @@ class ASAPooling(SRCPooling):
 
             # Connect
             edge_index_pooled, pooled_edge_weight = self.connect(
-                edge_index=adj,
+                edge_index=edge_index,
                 so=so,
                 edge_weight=edge_weight,
                 batch_pooled=batch_pooled,

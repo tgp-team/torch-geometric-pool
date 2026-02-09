@@ -1,13 +1,15 @@
 import pytest
 import torch
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
 
 
 @pytest.fixture(scope="module")
 def simple_graph():
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     N = 10
     F = 2
     row = torch.arange(9, dtype=torch.long)
@@ -28,7 +30,11 @@ poolers = list(pooler_map.keys())
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
+@pytest.mark.torch_sparse
 def test_output_with_spt_adj(simple_graph, pooler_name):
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     x, adj, edge_weight, batch = simple_graph
     N, F = x.size()
 
@@ -62,7 +68,10 @@ def test_output_with_spt_adj(simple_graph, pooler_name):
     if pooler.is_dense:
         assert isinstance(out.edge_index, torch.Tensor)
     else:
-        assert isinstance(out.edge_index, SparseTensor)
+        # edge_index should be either SparseTensor or torch COO tensor
+        assert isinstance(out.edge_index, (SparseTensor, torch.Tensor))
+        if isinstance(out.edge_index, torch.Tensor) and not out.edge_index.is_sparse:
+            assert out.edge_index.shape[0] == 2
 
     # lift
     x_pool = out.x.clone()

@@ -2,7 +2,6 @@ import pytest
 import torch
 from torch_geometric.nn import DenseGCNConv, GCNConv
 from torch_geometric.utils import add_self_loops
-from torch_sparse import SparseTensor
 
 from tgp.lift.base_lift import BaseLift, Lift
 from tgp.poolers import get_pooler
@@ -38,12 +37,16 @@ def simple_graph():
     return x, edge_index, edge_weight, batch
 
 
+@pytest.mark.torch_sparse
 def test_poolers_forward_and_lifting(simple_graph):
     """For each pooling layer in pooler_map:
     1. Instantiate the pooler with a common set of kwargs
     2. Run preprocessing -> forward (pooling) -> lifting
     3. Verify that outputs have reasonable shapes and types, and no errors occur.
     """
+    pytest.importorskip("torch_sparse")
+    from torch_sparse import SparseTensor
+
     x, edge_index, edge_weight, batch = simple_graph
     N, F = x.size()
 
@@ -130,6 +133,15 @@ def test_with_tensor(simple_graph):
     2. Run preprocessing -> forward (pooling) -> lifting
     3. Verify that outputs have reasonable shapes and types, and no errors occur.
     """
+    # Try to import SparseTensor for type checking, but don't require it
+    try:
+        from torch_sparse import SparseTensor
+
+        has_sparse = True
+    except ImportError:
+        SparseTensor = type(None)  # Dummy type that won't match
+        has_sparse = False
+
     x, edge_index, edge_weight, batch = simple_graph
     N, F = x.size()
 
@@ -159,7 +171,10 @@ def test_with_tensor(simple_graph):
         edge_index=edge_input, x=x, batch=batch, use_cache=False
     )
     assert isinstance(x_pre, torch.Tensor)
-    assert isinstance(adj_pre, (SparseTensor, torch.Tensor))
+    if has_sparse:
+        assert isinstance(adj_pre, (SparseTensor, torch.Tensor))
+    else:
+        assert isinstance(adj_pre, torch.Tensor)
     if mask is not None:
         assert isinstance(mask, torch.Tensor) and mask.dtype == torch.bool
 
@@ -176,7 +191,10 @@ def test_with_tensor(simple_graph):
 
     # edge_index in out may be a SparseTensor or a Tensor
     ei = out.edge_index
-    assert isinstance(ei, (SparseTensor, torch.Tensor))
+    if has_sparse:
+        assert isinstance(ei, (SparseTensor, torch.Tensor))
+    else:
+        assert isinstance(ei, torch.Tensor)
 
     # If edge_weight present, check shape consistency
     if hasattr(out, "edge_weight") and out.edge_weight is not None:
@@ -223,6 +241,28 @@ def test_invalid_lift_op():
         so = SelectOutput(s)
         x = torch.randn((3, 2))
         BaseLift(matrix_op="invalid_op")(x, so)
+
+
+def test_lift_with_non_tensor_s_inv():
+    """Test that BaseLift raises TypeError when s_inv is not a torch.Tensor.
+
+    We use matrix_op="transpose" so that s_inv = so.s, then manually set so.s
+    to a non-Tensor value to trigger the check.
+    """
+    # Create a SelectOutput with valid s
+    s = torch.randn((3, 2))
+    so = SelectOutput(s=s)
+
+    # Manually set s to something that's not a Tensor (e.g., a list)
+    # This bypasses SelectOutput validation and simulates an edge case
+    # where s might not be a Tensor (though this shouldn't happen in practice)
+    so.s = [1, 2, 3]  # Not a Tensor
+
+    x_pool = torch.randn((2, 3))
+    lift = BaseLift(matrix_op="transpose")  # This sets s_inv = so.s
+
+    with pytest.raises(TypeError, match="Expected s_inv to be a torch.Tensor"):
+        _ = lift(x_pool, so)
 
 
 if __name__ == "__main__":

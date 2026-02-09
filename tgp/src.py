@@ -7,13 +7,12 @@ from torch import Tensor
 from torch_geometric.data import Data
 from torch_geometric.typing import Adj
 from torch_geometric.utils import to_dense_adj, to_dense_batch
-from torch_sparse import SparseTensor
 
 from tgp.connect import Connect
 from tgp.lift import Lift
 from tgp.reduce import Reduce, dense_global_reduce, global_reduce
 from tgp.select import Select, SelectOutput
-from tgp.utils import Signature, check_and_filter_edge_weights, foo_signature
+from tgp.utils import Signature, connectivity_to_edge_index, foo_signature
 from tgp.utils.typing import ReduceType
 
 
@@ -398,11 +397,9 @@ class DenseSRCPooling(SRCPooling):
             adj = self.preprocessing_cache
 
         else:
-            if isinstance(edge_index, SparseTensor):
-                row, col, edge_weight = edge_index.coo()
-                edge_index = torch.stack([row, col])
-            else:
-                edge_weight = check_and_filter_edge_weights(edge_weight)
+            edge_index, edge_weight = connectivity_to_edge_index(
+                edge_index, edge_weight
+            )
 
             adj = to_dense_adj(
                 edge_index=edge_index,

@@ -11,11 +11,15 @@ from torch_geometric.utils import (
     get_laplacian,
     to_scipy_sparse_matrix,
 )
-from torch_sparse import SparseTensor
 
 from tgp.connect import Connect
+from tgp.imports import is_sparsetensor
 from tgp.select import SelectOutput
-from tgp.utils.ops import connectivity_to_edge_index
+from tgp.utils.ops import (
+    connectivity_to_edge_index,
+    connectivity_to_sparsetensor,
+    connectivity_to_torch_coo,
+)
 
 
 class KronConnect(Connect):
@@ -64,7 +68,10 @@ class KronConnect(Connect):
             returns :obj:`None` as the edge weights.
         """
         # Remember the original input type to preserve output format
-        edge_index_is_sparse = isinstance(edge_index, SparseTensor)
+        edge_index_is_sparsetensor = is_sparsetensor(edge_index)
+        edge_index_is_torch_coo = (
+            isinstance(edge_index, Tensor) and edge_index.is_sparse
+        )
         edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
 
         # Compute the Laplacian (if not given)
@@ -138,13 +145,22 @@ class KronConnect(Connect):
         A_pool.eliminate_zeros()
         A_pool = A_pool.astype(np.float32)
 
-        if edge_index_is_sparse:
-            A_pool = SparseTensor.from_scipy(A_pool).to(edge_index.device)
+        device = edge_index.device
+        edge_index, edge_weight = from_scipy_sparse_matrix(A_pool)
+        edge_index = edge_index.to(device)
+        edge_weight = edge_weight.to(device)
+
+        num_supernodes = so.num_supernodes
+        if edge_index_is_sparsetensor:
+            A_pool = connectivity_to_sparsetensor(
+                edge_index, edge_weight, num_supernodes
+            )
+            out = (A_pool, None)
+        elif edge_index_is_torch_coo:
+            A_pool = connectivity_to_torch_coo(edge_index, edge_weight, num_supernodes)
             out = (A_pool, None)
         else:
-            device = edge_index.device
-            edge_index, edge_weight = from_scipy_sparse_matrix(A_pool)
-            out = (edge_index.to(device), edge_weight.to(device))
+            out = (edge_index, edge_weight)
 
         return out
 

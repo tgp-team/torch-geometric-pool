@@ -3,10 +3,11 @@ from typing import Callable, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch_geometric.typing import Adj, OptTensor, SparseTensor
+from torch_geometric.typing import Adj, OptTensor
 from torch_geometric.utils import scatter, softmax
 
 from tgp.select import Select, SelectOutput
+from tgp.utils.ops import connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
@@ -33,17 +34,13 @@ def maximal_matching(
 
     :rtype: :class:`ByteTensor`
     """
-    if isinstance(edge_index, SparseTensor):
-        row, col, _ = edge_index.coo()
-        device = edge_index.device()
-        n, m = edge_index.size(0), edge_index.nnz()
-    else:
-        row, col = edge_index[0], edge_index[1]
-        device = row.device
-        n, m = num_nodes, row.size(0)
+    edge_index, _ = connectivity_to_edge_index(edge_index)
+    row, col = edge_index[0], edge_index[1]
+    device = row.device
+    n, m = num_nodes, row.size(0)
 
-        if n is None:
-            n = edge_index.max().item() + 1
+    if n is None:
+        n = edge_index.max().item() + 1
 
     if perm is None:
         rank = torch.arange(m, dtype=torch.long, device=device)
@@ -96,17 +93,14 @@ def maximal_matching_cluster(
 
     :rtype: (:class:`ByteTensor`, :class:`LongTensor`)
     """
-    if isinstance(edge_index, SparseTensor):
-        row, col, _ = edge_index.coo()
-        device = edge_index.device()
-        n = edge_index.size(0)
-    else:
-        row, col = edge_index[0], edge_index[1]
-        device = row.device
-        n = num_nodes
+    edge_index, _ = connectivity_to_edge_index(edge_index)
 
-        if n is None:
-            n = edge_index.max().item() + 1
+    row, col = edge_index[0], edge_index[1]
+    device = row.device
+    n = num_nodes
+
+    if n is None:
+        n = edge_index.max().item() + 1
 
     match = maximal_matching(edge_index, num_nodes, perm)
     cluster = torch.arange(n, dtype=torch.long, device=device)

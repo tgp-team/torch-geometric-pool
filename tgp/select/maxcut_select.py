@@ -5,12 +5,10 @@ from torch import Tensor
 from torch_geometric.nn import GCNConv, Linear
 from torch_geometric.nn.resolver import activation_resolver
 from torch_geometric.typing import Adj
-from torch_sparse import SparseTensor
 
 from tgp.select.base_select import SelectOutput
 from tgp.select.topk_select import TopkSelect
 from tgp.utils.ops import (
-    check_and_filter_edge_weights,
     connectivity_to_edge_index,
     delta_gcn_matrix,
 )
@@ -269,12 +267,8 @@ class MaxCutSelect(TopkSelect):
             edge_weight = None
 
         # Convert SparseTensor to edge_index format if needed
-        if isinstance(edge_index, SparseTensor):
-            edge_index, edge_weight = connectivity_to_edge_index(
-                edge_index, edge_weight
-            )
-        if edge_weight is not None:
-            edge_weight = check_and_filter_edge_weights(edge_weight)
+
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
 
         scores = self.score_net(x, edge_index, edge_weight)  # Shape: (N, 1)
 

@@ -261,10 +261,10 @@ def _collate(
         cat_dims = (0, 1)
         repeats = [[value.s.size(dim) for dim in cat_dims] for value in values]
         slices = cumsum(torch.tensor(repeats))
-        s = torch_sparse.cat([value.s for value in values], dim=cat_dims)
+        s = cat([value.s for value in values], dim=cat_dims)
         s_inv = None
         if elem.s_inv is not None:
-            s_inv = torch_sparse.cat([value.s_inv for value in values], dim=cat_dims)
+            s_inv = cat([value.s_inv for value in values], dim=cat_dims)
         extra_args = dict()
         extra_slices = dict()
         for k in elem._extra_args:
