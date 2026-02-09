@@ -5,7 +5,7 @@ import sys
 
 eps = 1e-8
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
 
 # List of submodules you want to allow lazy importing
 _submodules = [
