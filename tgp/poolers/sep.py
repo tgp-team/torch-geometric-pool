@@ -47,7 +47,7 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         lift_red_op: ReduceType = "sum",
         cached: bool = False,
         remove_self_loops: bool = True,
-        degree_norm: bool = False,
+        degree_norm: bool = True,
         edge_weight_norm: bool = False,
     ):
         super().__init__(
