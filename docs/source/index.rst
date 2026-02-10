@@ -179,9 +179,7 @@ the :doc:`tutorials/index`, and explore our :doc:`APIs <api/tgp>`.
 Citing
 ------
 
-If you use :tgp:`tgp` for your research, please consider citing the library and the paper:
-
-**Paper:**
+If you use :tgp:`tgp` for your research, please consider citing the paper:
 
 {% raw %}
 .. code-block:: bibtex
@@ -196,16 +194,4 @@ If you use :tgp:`tgp` for your research, please consider citing the library and 
          url={https://arxiv.org/abs/2512.12642}, 
    }
 
-**Software:**
-
-.. code-block:: bibtex
-
-   @software{Bianchi_Torch_Geometric_Pool_2025,
-       author = {Bianchi, Filippo Maria and Marisca, Ivan and Abate, Carlo},
-       license = {MIT},
-       month = {3},
-       title = {{Torch Geometric Pool}},
-       url = {https://github.com/tgp-team/torch-geometric-pool},
-       year = {2025}
-   }
 {% endraw %}

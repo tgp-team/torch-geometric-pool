@@ -7,14 +7,19 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
 
 - **Unified dense pooling interface**: Dense poolers now accept raw sparse inputs and
   handle batching/densification internally when `batched=True`.
+  
 - **Explicit output format control**: A single flag, `sparse_output`, now determines
   whether pooled adjacency is returned as block‑diagonal sparse or batched dense.
+
 - **BNPool unified**: Dense and sparse BNPool variants are merged into one class with
   batched/unbatched branches and consistent outputs.
+
 - **MinCut unbatched mode**: MinCutPooling now supports `batched=False` with sparse
   losses and optional sparse outputs.
+
 - **DenseConnect consolidated**: All dense connect logic (batched and unbatched paths)
   lives in `DenseConnect`; redundant variants were removed.
+
 - **EigenPooling implemented and integrated**:
   - Added `EigenPooling` end-to-end pipeline with dedicated
     `EigenPoolSelect`, `EigenPoolReduce`, `EigenPoolConnect`, and `EigenPoolLift`.
@@ -33,14 +38,14 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
   - Supports single-graph and multi-graph sparse batches.
   - Handles edge cases robustly (e.g., small graphs / `k > N`) with consistent
     output shaping and padding behavior.
-
+  
 - **Precoarsening generalized in core SRC**:
   - Introduced/extended `BasePrecoarseningMixin` to centralize precoarsening behavior.
   - Poolers can now reuse the shared implementation instead of redefining custom
     precoarsening logic.
   - Supports automatic batch inference for select outputs and optional
     `preconnector` overrides.
-
+    
 - **PreCoarsening transform now supports per-level pooler composition**:
   - `PreCoarsening` can receive a `poolers` sequence for heterogeneous
     multi-level schedules.
@@ -134,12 +139,14 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 ## Bug Fixes
 
-- **Batched spectral loss** no longer returns NaN for graphs with zero edges;
+- **Spectral loss** (batched and unbatched) no longer returns NaN for graphs with zero edges;
   empty graphs now contribute zero loss and the result remains finite.
 - **Weighted BCE reconstruction loss** now counts edges using a boolean mask to
   avoid mismatches when adjacency is non‑binary or has clamped edges.
 - **Batched random assignment** in `get_random_map_mask` now handles graphs with
   zero kept nodes by falling back to global assignments.
+- **AsymNorm and HOSC orthogonality losses** now handle single-node / single-cluster
+  edge cases without NaNs or index errors, returning finite, well-defined values.
 
 ## Migration Notes
 

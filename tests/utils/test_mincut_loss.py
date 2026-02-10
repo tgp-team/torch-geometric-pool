@@ -10,16 +10,15 @@ the dense (batched) variants when given equivalent inputs.
 import pytest
 import torch
 
+from tests.test_utils import (
+    _dense_batched_to_sparse_unbatched,
+    _make_dense_batch_variable_sizes,
+)
 from tgp.utils.losses import (
     mincut_loss,
     orthogonality_loss,
     sparse_mincut_loss,
     unbatched_orthogonality_loss,
-)
-
-from .dense_loss_test_helpers import (
-    _dense_batched_to_sparse_unbatched,
-    _make_dense_batch_variable_sizes,
 )
 
 

@@ -531,6 +531,10 @@ def hosc_orthogonality_loss(
         ~torch.Tensor: The orthogonality loss.
     """
     _, num_nodes, num_supernodes = S.size()
+    # Edge case: single cluster — orthogonality is degenerate, return zero loss
+    if num_supernodes <= 1:
+        out = torch.zeros(S.size(0), device=S.device, dtype=S.dtype)
+        return _batch_reduce_loss(out, batch_reduction)
     norm = torch.norm(S, p="fro", dim=-2).sum(dim=-1)
     sqrt_k = math.sqrt(num_supernodes)
     sqrt_nodes = mask.sum(1).sqrt() if mask is not None else math.sqrt(num_nodes)
@@ -870,8 +874,13 @@ def asym_norm_loss(
     """
     n_nodes = S.size()[-2]
 
-    # k-quantile
-    idx = int(math.floor(n_nodes / k))
+    # Edge case: single cluster or no nodes — no balance penalty
+    if k <= 1 or n_nodes * (k - 1) == 0:
+        out = torch.zeros(S.size(0), device=S.device, dtype=S.dtype)
+        return _batch_reduce_loss(out, batch_reduction)
+
+    # k-quantile (idx must be in [0, n_nodes-1])
+    idx = min(int(math.floor(n_nodes / k)), n_nodes - 1)
     quant = torch.sort(S, dim=-2, descending=True)[0][:, idx, :]  # shape [B, K]
 
     # Asymmetric l1-norm
