@@ -8,8 +8,15 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils.losses import cluster_loss, orthogonality_loss, spectral_loss
-from tgp.utils.ops import postprocess_adj_pool_dense
+from tgp.utils.losses import (
+    cluster_loss,
+    orthogonality_loss,
+    sparse_spectral_loss,
+    spectral_loss,
+    unbatched_cluster_loss,
+    unbatched_orthogonality_loss,
+)
+from tgp.utils.ops import connectivity_to_edge_index, postprocess_adj_pool_dense
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -111,6 +118,7 @@ class DMoNPooling(DenseSRCPooling):
             selector=MLPSelect(
                 in_channels=in_channels,
                 k=k,
+                batched_representation=batched,
                 act=act,
                 dropout=dropout,
                 s_inv_op=s_inv_op,
@@ -179,57 +187,68 @@ class DMoNPooling(DenseSRCPooling):
             )
             return x_lifted
 
-        if not self.batched:
-            raise NotImplementedError("DMoN unbatched mode is not implemented yet.")
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
+            )
+            so = self.select(x=x, mask=mask)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+            adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
+            loss = self.compute_loss(adj, so.s, adj_pool, mask)
+            adj_pool = postprocess_adj_pool_dense(
+                adj_pool,
+                remove_self_loops=self.connector.remove_self_loops,
+                degree_norm=self.connector.degree_norm,
+                adj_transpose=self.connector.adj_transpose,
+                edge_weight_norm=self.connector.edge_weight_norm,
+            )
+            if self.sparse_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pool,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                    loss=loss,
+                )
+            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
-        x, adj, mask = self._ensure_batched_inputs(
-            x=x,
+        # === Unbatched (sparse-loss) path ===
+        so = self.select(x=x, batch=batch)
+        loss = self.compute_sparse_loss(adj, edge_weight, so.s, batch)
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
+        edge_index_pooled, edge_weight_pooled = self.connect(
             edge_index=adj,
+            so=so,
             edge_weight=edge_weight,
             batch=batch,
-            mask=mask,
+            batch_pooled=batch_pooled,
         )
-
-        # Select
-        so = self.select(x=x, mask=mask)
-
-        # Reduce
-        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
-
-        # Connect
-        adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
-
-        loss = self.compute_loss(adj, so.s, adj_pool, mask)
-
-        # Normalize coarsened adjacency matrix
-        adj_pool = postprocess_adj_pool_dense(
-            adj_pool,
-            remove_self_loops=self.connector.remove_self_loops,
-            degree_norm=self.connector.degree_norm,
-            adj_transpose=self.connector.adj_transpose,
-            edge_weight_norm=self.connector.edge_weight_norm,
+        return PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            loss=loss,
         )
-
-        if self.sparse_output:
-            x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_sparse_output(
-                    x_pool=x_pooled,
-                    adj_pool=adj_pool,
-                    batch=batch,
-                    batch_pooled=batch_pooled,
-                    so=so,
-                )
-            )
-            return PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-                loss=loss,
-            )
-
-        return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
     def compute_loss(
         self, adj: Tensor, S: Tensor, adj_pooled: Tensor, mask: Optional[Tensor]
@@ -252,6 +271,44 @@ class DMoNPooling(DenseSRCPooling):
         loss_2 = cluster_loss(S, mask=mask, batch_reduction="mean")
         loss_3 = orthogonality_loss(S, batch_reduction="mean")
 
+        return {
+            "spectral_loss": loss_1 * self.spectral_loss_coeff,
+            "cluster_loss": loss_2 * self.cluster_loss_coeff,
+            "ortho_loss": loss_3 * self.ortho_loss_coeff,
+        }
+
+    def compute_sparse_loss(
+        self,
+        edge_index: Adj,
+        edge_weight: Optional[Tensor],
+        S: Tensor,
+        batch: Optional[Tensor],
+    ) -> dict:
+        """Computes the auxiliary loss terms for unbatched (sparse) mode.
+
+        This method is used when :attr:`batched=False` and operates on sparse
+        adjacency matrices without requiring padding or densification.
+
+        Args:
+            edge_index (~torch_geometric.typing.Adj): Graph connectivity in sparse format.
+            edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            S (~torch.Tensor): The dense assignment matrix of shape :math:`(N, K)`.
+            batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+
+        Returns:
+            dict: A dictionary with the different terms of the auxiliary loss:
+                - :obj:`'spectral_loss'`: The sparse spectral loss.
+                - :obj:`'cluster_loss'`: The unbatched cluster loss.
+                - :obj:`'ortho_loss'`: The unbatched orthogonality loss.
+        """
+        edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
+            edge_index, edge_weight
+        )
+        loss_1 = sparse_spectral_loss(
+            edge_index_conv, S, edge_weight_conv, batch, batch_reduction="mean"
+        )
+        loss_2 = unbatched_cluster_loss(S, batch, batch_reduction="mean")
+        loss_3 = unbatched_orthogonality_loss(S, batch, batch_reduction="mean")
         return {
             "spectral_loss": loss_1 * self.spectral_loss_coeff,
             "cluster_loss": loss_2 * self.cluster_loss_coeff,

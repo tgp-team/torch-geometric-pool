@@ -8,7 +8,13 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils.losses import entropy_loss, link_pred_loss
+from tgp.utils.losses import (
+    entropy_loss,
+    link_pred_loss,
+    sparse_link_pred_loss,
+    unbatched_entropy_loss,
+)
+from tgp.utils.ops import connectivity_to_edge_index
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -112,6 +118,7 @@ class DiffPool(DenseSRCPooling):
             selector=MLPSelect(
                 in_channels=in_channels,
                 k=k,
+                batched_representation=batched,
                 act=act,
                 dropout=dropout,
                 s_inv_op=s_inv_op,
@@ -180,56 +187,75 @@ class DiffPool(DenseSRCPooling):
             )
             return x_lifted
 
-        if not self.batched:
-            raise NotImplementedError("DiffPool unbatched mode is not implemented yet.")
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
+            )
+            so = self.select(x=x, mask=mask)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+            adj_pooled, _ = self.connect(
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch=batch,
+                batch_pooled=batch_pooled,
+            )
+            num_nodes = mask.sum().item()
+            loss = self.compute_loss(adj=adj, S=so.s, num_nodes=num_nodes)
+            if self.sparse_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pooled,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                    loss=loss,
+                )
+            return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so, loss=loss)
 
-        x, adj, mask = self._ensure_batched_inputs(
-            x=x,
-            edge_index=adj,
-            edge_weight=edge_weight,
-            batch=batch,
-            mask=mask,
+        # === Unbatched (sparse-loss) path ===
+        so = self.select(x=x, batch=batch)
+        loss = self.compute_sparse_loss(adj, edge_weight, so.s, batch)
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
         )
-
-        # Select
-        so = self.select(x=x, mask=mask)
-
-        # Reduce
-        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
-
-        # Connect
-        adj_pooled, _ = self.connect(
+        edge_index_pooled, edge_weight_pooled = self.connect(
             edge_index=adj,
             so=so,
             edge_weight=edge_weight,
             batch=batch,
             batch_pooled=batch_pooled,
         )
+        return PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            loss=loss,
+        )
 
-        loss = self.compute_loss(adj=adj, S=so.s)
-
-        if self.sparse_output:
-            x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_sparse_output(
-                    x_pool=x_pooled,
-                    adj_pool=adj_pooled,
-                    batch=batch,
-                    batch_pooled=batch_pooled,
-                    so=so,
-                )
-            )
-            return PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-                loss=loss,
-            )
-
-        return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so, loss=loss)
-
-    def compute_loss(self, adj: Tensor, S: Tensor) -> dict:
+    def compute_loss(
+        self,
+        adj: Tensor,
+        S: Tensor,
+        num_nodes: int,
+    ) -> dict:
         r"""Computes the auxiliary loss terms.
 
         Args:
@@ -241,7 +267,46 @@ class DiffPool(DenseSRCPooling):
             the auxiliary loss.
         """
         link_loss = link_pred_loss(S, adj, normalize_loss=self.normalize_loss)
-        ent_loss = entropy_loss(S, batch_reduction="mean")
+        ent_loss = entropy_loss(S, num_nodes)
+        return {
+            "link_loss": link_loss * self.link_loss_coeff,
+            "entropy_loss": ent_loss * self.ent_loss_coeff,
+        }
+
+    def compute_sparse_loss(
+        self,
+        edge_index: Adj,
+        edge_weight: Optional[Tensor],
+        S: Tensor,
+        batch: Optional[Tensor],
+    ) -> dict:
+        """Computes the auxiliary loss terms for unbatched (sparse) mode.
+
+        This method is used when :attr:`batched=False` and operates on sparse
+        adjacency matrices without requiring padding or densification.
+
+        Args:
+            edge_index (~torch_geometric.typing.Adj): Graph connectivity in sparse format.
+            edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            S (~torch.Tensor): The dense assignment matrix of shape :math:`(N, K)`.
+            batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+
+        Returns:
+            dict: A dictionary with the different terms of the auxiliary loss:
+                - :obj:`'link_loss'`: The sparse link prediction loss.
+                - :obj:`'entropy_loss'`: The unbatched entropy loss.
+        """
+        edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
+            edge_index, edge_weight
+        )
+        link_loss = sparse_link_pred_loss(
+            S,
+            edge_index_conv,
+            edge_weight_conv,
+            batch,
+            normalize_loss=self.normalize_loss,
+        )
+        ent_loss = unbatched_entropy_loss(S)
         return {
             "link_loss": link_loss * self.link_loss_coeff,
             "entropy_loss": ent_loss * self.ent_loss_coeff,

@@ -108,7 +108,7 @@ class TestHOSCOrthogonalityLossDenseVsSparseEquality:
     ):
         """With variable-sized graphs, S is zero-padded; dense matches unbatched."""
         adj, S, mask = _make_dense_batch_variable_sizes(K=3, seed=42)
-        loss_dense = hosc_orthogonality_loss(S, batch_reduction="mean")
+        loss_dense = hosc_orthogonality_loss(S, mask=mask, batch_reduction="mean")
         edge_index, _, S_flat, batch = _dense_batched_to_sparse_unbatched(
             adj, S, mask=mask
         )

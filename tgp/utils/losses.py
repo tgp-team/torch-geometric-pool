@@ -943,11 +943,20 @@ def just_balance_loss(
     ss = torch.matmul(S.transpose(1, 2), S)
     ss_sqrt = torch.sqrt(ss + eps)
     loss = -rank3_trace(ss_sqrt)
+
     if normalize_loss:
         if mask is None:
-            loss = loss / torch.sqrt(torch.tensor(num_nodes * num_supernodes))
+            # All graphs have the same number of nodes: use global N * K.
+            denom = torch.tensor(
+                num_nodes * num_supernodes, dtype=loss.dtype, device=loss.device
+            ).sqrt()
+            loss = loss / denom
         else:
-            loss = loss / torch.sqrt(mask.sum() / mask.size(0) * num_supernodes)
+            # Variable-sized graphs: normalize per graph to match unbatched semantics.
+            # For each graph g, denom_g = sqrt(n_g * K).
+            n_per_graph = mask.sum(dim=1).to(loss.dtype)  # [B]
+            denom = (n_per_graph * float(num_supernodes)).sqrt()
+            loss = loss / denom
 
     return _batch_reduce_loss(loss, batch_reduction)
 

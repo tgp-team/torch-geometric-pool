@@ -130,6 +130,17 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - **MinCutPooling**: unbatched mode (`batched=False`) computes sparse losses and can
   return either dense `[B, K, K]` or block‑diagonal sparse outputs based on
   `sparse_output`.
+- **DiffPool**: unbatched mode (`batched=False` or `get_pooler("diff_u")`) uses sparse
+  connectivity and sparse losses; output format is controlled by `sparse_output`.
+- **JustBalancePooling (JBPool)**: unbatched mode (`batched=False` or `get_pooler("jb_u")`)
+  uses sparse connectivity and sparse balance loss; output format is controlled by
+  `sparse_output`.
+- **DMoNPooling**: unbatched mode (`batched=False` or `get_pooler("dmon_u")`) uses sparse
+  connectivity and sparse spectral/cluster/ortho losses; output format is controlled by
+  `sparse_output`.
+- **HOSCPooling**: unbatched mode (`batched=False` or `get_pooler("hosc_u")`) uses sparse
+  connectivity and sparse HOSC/ortho losses; output format is controlled by
+  `sparse_output`.
 - **NMFPooling**: both batched and unbatched modes are now supported.
   Unbatched mode operates on sparse connectivity without padding and can return
   dense or sparse pooled outputs. Pre‑coarsening returns sparse output by default
@@ -147,6 +158,9 @@ This flag determines the appropriate downstream MP/global pooling layers.
   zero kept nodes by falling back to global assignments.
 - **AsymNorm and HOSC orthogonality losses** now handle single-node / single-cluster
   edge cases without NaNs or index errors, returning finite, well-defined values.
+- **JustBalance (JB) loss** in batched mode now correctly applies per-graph
+  normalization when a node mask is provided (e.g. variable-sized graphs with
+  zero-padding).
 
 ## Migration Notes
 

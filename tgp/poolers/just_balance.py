@@ -10,7 +10,7 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils.losses import just_balance_loss
+from tgp.utils.losses import just_balance_loss, unbatched_just_balance_loss
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -102,6 +102,7 @@ class JustBalancePooling(DenseSRCPooling):
             selector=MLPSelect(
                 in_channels=in_channels,
                 k=k,
+                batched_representation=batched,
                 act=act,
                 dropout=dropout,
                 s_inv_op=s_inv_op,
@@ -169,56 +170,67 @@ class JustBalancePooling(DenseSRCPooling):
             )
             return x_lifted
 
-        if not self.batched:
-            raise NotImplementedError(
-                "JustBalance unbatched mode is not implemented yet."
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
             )
+            so = self.select(x=x, mask=mask)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+            adj_pooled, _ = self.connect(
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch=batch,
+                batch_pooled=batch_pooled,
+            )
+            loss = self.compute_loss(so.s, mask, so.num_nodes, so.num_supernodes)
+            if self.sparse_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pooled,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                    loss=loss,
+                )
+            return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so, loss=loss)
 
-        x, adj, mask = self._ensure_batched_inputs(
-            x=x,
-            edge_index=adj,
-            edge_weight=edge_weight,
-            batch=batch,
-            mask=mask,
+        # === Unbatched (sparse-loss) path ===
+        so = self.select(x=x, batch=batch)
+        loss = self.compute_sparse_loss(so.s, batch)
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
         )
-
-        # Select
-        so = self.select(x=x, mask=mask)
-
-        # Reduce
-        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
-
-        # Connect
-        adj_pooled, _ = self.connect(
+        edge_index_pooled, edge_weight_pooled = self.connect(
             edge_index=adj,
             so=so,
             edge_weight=edge_weight,
             batch=batch,
             batch_pooled=batch_pooled,
         )
-
-        loss = self.compute_loss(so.s, mask, so.num_nodes, so.num_supernodes)
-
-        if self.sparse_output:
-            x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_sparse_output(
-                    x_pool=x_pooled,
-                    adj_pool=adj_pooled,
-                    batch=batch,
-                    batch_pooled=batch_pooled,
-                    so=so,
-                )
-            )
-            return PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-                loss=loss,
-            )
-
-        return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so, loss=loss)
+        return PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            loss=loss,
+        )
 
     def compute_loss(
         self,
@@ -254,6 +266,29 @@ class JustBalancePooling(DenseSRCPooling):
         if torch.isnan(loss):
             raise ValueError("Loss is NaN")
 
+        return {"balance_loss": loss * self.loss_coeff}
+
+    def compute_sparse_loss(self, S: Tensor, batch: Optional[Tensor]) -> dict:
+        """Computes the auxiliary loss term for unbatched (sparse) mode.
+
+        This method is used when :attr:`batched=False`. The balance loss does not
+        require adjacency; only the assignment matrix and batch vector are used.
+
+        Args:
+            S (~torch.Tensor): The dense assignment matrix of shape :math:`(N, K)`.
+            batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+
+        Returns:
+            dict: A dictionary with :obj:`'balance_loss'`.
+        """
+        loss = unbatched_just_balance_loss(
+            S,
+            batch,
+            normalize_loss=self.normalize_loss,
+            batch_reduction="mean",
+        )
+        if torch.isnan(loss):
+            raise ValueError("Loss is NaN")
         return {"balance_loss": loss * self.loss_coeff}
 
     @staticmethod

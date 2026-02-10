@@ -108,7 +108,9 @@ class TestJustBalanceLossDenseVsSparseEquality:
     def test_just_balance_loss_dense_vs_sparse_with_variable_sizes_zero_padding(self):
         """With variable-sized graphs, S is zero-padded; dense matches unbatched."""
         adj, S, mask = _make_dense_batch_variable_sizes(K=3, seed=42)
-        loss_dense = just_balance_loss(S, normalize_loss=True, batch_reduction="mean")
+        loss_dense = just_balance_loss(
+            S, mask=mask, normalize_loss=True, batch_reduction="mean"
+        )
         edge_index, _, S_flat, batch = _dense_batched_to_sparse_unbatched(
             adj, S, mask=mask
         )

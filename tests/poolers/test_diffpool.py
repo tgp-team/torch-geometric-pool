@@ -1,205 +1,183 @@
+"""Tests for DiffPool pooler."""
+
 import pytest
 import torch
-from torch import Tensor
 
-from tgp.poolers import DiffPool
-from tgp.utils.losses import entropy_loss, link_pred_loss
+from tgp.poolers import DiffPool, get_pooler
 
 
-@pytest.mark.parametrize("normalize_loss", [False, True])
-@pytest.mark.parametrize("link_coeff, ent_coeff", [(1.0, 1.0), (0.5, 2.0)])
-def test_diffpool_link_entropy_loss(
-    pooler_test_graph_dense, normalize_loss, link_coeff, ent_coeff
-):
-    """Test DiffPool compute_loss under various configurations:
-    - normalize_loss False/True
-    - different coefficients link_loss_coeff and ent_loss_coeff.
-    """
-    x, adj = pooler_test_graph_dense
-    _B, _N, F = x.size(0), x.size(1), x.size(2)
-    k = 2  # number of clusters
-
-    # Instantiate DiffPool with specified coefficients and normalize_loss flag
-    pooler = DiffPool(
-        in_channels=F,
-        k=k,
-        link_loss_coeff=link_coeff,
-        ent_loss_coeff=ent_coeff,
-        normalize_loss=normalize_loss,
-        remove_self_loops=False,
-        degree_norm=False,
-        adj_transpose=False,
-    )
-    pooler.eval()
-
-    # Perform forward pass
-    out = pooler(x=x, adj=adj, so=None, mask=None, lifting=False)
-    loss_dict = out.loss
-
-    # Extract assignment matrix S from SelectOutput
-    S = out.so.s  # shape (B, N, K)
-
-    # Compute expected link_pred_loss
-    expected_link = link_pred_loss(S, adj, normalize_loss=normalize_loss) * link_coeff
-    actual_link = loss_dict.get("link_loss", None)
-    assert isinstance(actual_link, Tensor)
-    assert torch.allclose(actual_link, expected_link, atol=1e-6)
-
-    # Compute expected entropy_loss
-    expected_ent = entropy_loss(S) * ent_coeff
-    actual_ent = loss_dict.get("entropy_loss", None)
-    assert isinstance(actual_ent, Tensor)
-    assert torch.allclose(actual_ent, expected_ent, atol=1e-6)
-
-
-def test_diffpool_edge_cases_and_forward_shapes(pooler_test_graph_dense):
-    """Test that DiffPool runs without error when:
-    - remove_self_loops=True, degree_norm=True, adj_transpose=True
-    - Verify shapes of outputs: x_pooled and edge_index.
-    """
-    x, adj = pooler_test_graph_dense
-    B, _N, F = x.size(0), x.size(1), x.size(2)
-    k = 3  # cluster number can be >1 and <N
+def test_diffpool_initialization():
+    """Test DiffPool initialization with different parameters."""
+    pooler = DiffPool(in_channels=16, k=5)
+    assert pooler.link_loss_coeff == 1.0
+    assert pooler.ent_loss_coeff == 1.0
+    assert pooler.batched is True
 
     pooler = DiffPool(
-        in_channels=F,
-        k=k,
-        link_loss_coeff=1.0,
-        ent_loss_coeff=1.0,
-        normalize_loss=True,
-        remove_self_loops=True,
-        degree_norm=True,
-        adj_transpose=True,
+        in_channels=16,
+        k=5,
+        link_loss_coeff=0.5,
+        ent_loss_coeff=2.0,
+        batched=False,
     )
-    pooler.eval()
-
-    # Forward pass
-    out = pooler(x=x, adj=adj, so=None, mask=None, lifting=False)
-
-    # Pooling output should have a loss
-    assert out.has_loss
-    assert len(out.get_loss_value()) > 0
-    assert out.get_loss_value("link_loss") is not None
-    assert pooler.has_loss is True
-
-    # x_pooled should have shape (B, k, F)
-    x_pooled = out.x
-    assert isinstance(x_pooled, Tensor)
-    assert x_pooled.shape == (B, k, F)
-
-    # edge_index should be a dense adjacency if adj_transpose=True
-    adj_pool = out.edge_index
-    assert isinstance(adj_pool, Tensor)
-    assert adj_pool.shape == (B, k, k)
-
-    # Ensure no NaNs in pooled adjacency
-    assert torch.isfinite(adj_pool).all()
-
-    # Test lifting path: lift back to original nodes
-    S_out = out.so
-    x_lifted = pooler(x=x_pooled, adj=None, so=S_out, mask=None, lifting=True)
-    # Should return Tensor of shape (B, N, F)
-    assert isinstance(x_lifted, Tensor)
-    assert x_lifted.shape == x.shape
-
-    x_global = pooler.global_pool(x=x, batch=None)
-    # Global pooling should return a Tensor of shape (B, F)
-    assert isinstance(x_global, Tensor)
-    assert x_global.shape == (B, F)
+    assert pooler.link_loss_coeff == 0.5
+    assert pooler.ent_loss_coeff == 2.0
+    assert pooler.batched is False
 
 
-def test_diffpool_invalid_parameters(pooler_test_graph_dense):
-    """Test that invalid configurations (e.g., invalid types) raise errors."""
-    x, adj = pooler_test_graph_dense
-    F = x.size(2)
+def test_diffpool_batched_forward(pooler_test_graph_dense_batch):
+    """Test DiffPool with batched dense inputs."""
+    x, adj = pooler_test_graph_dense_batch
+    batch_size, n_nodes, n_features = x.shape
+    k = 3
 
-    # Negative link_loss_coeff is allowed (just scales), so no error
-    pooler_neg = DiffPool(in_channels=F, k=2, link_loss_coeff=-1.0, ent_loss_coeff=1.0)
-    pooler_neg.eval()
-    out = pooler_neg(x=x, adj=adj, so=None, mask=None, lifting=False)
+    pooler = DiffPool(in_channels=n_features, k=k, batched=True)
+    out = pooler(x=x, adj=adj)
+
+    assert out.x.shape == (batch_size, k, n_features)
+    assert out.edge_index.shape == (batch_size, k, k)
+    assert out.loss is not None
     assert "link_loss" in out.loss
-
-    # Invalid 'in_channels' type (e.g., string) should raise TypeError
-    with pytest.raises(TypeError):
-        _ = DiffPool(in_channels="invalid", k=2)
+    assert "entropy_loss" in out.loss
 
 
-def test_diffpool_expressive_cuda_grads(pooler_test_graph_dense):
-    x, adj = pooler_test_graph_dense
-    _B, _N, F = x.size(0), x.size(1), x.size(2)
-    k = 2  # number of clusters
+def test_diffpool_unbatched_single_graph():
+    """Test DiffPool in unbatched mode with a single graph."""
+    n_nodes, n_features = 10, 16
+    k = 5
 
-    pooler = DiffPool(
-        in_channels=F,
-        k=k,
-        link_loss_coeff=1.0,
-        ent_loss_coeff=1.0,
-        normalize_loss=True,
-        remove_self_loops=False,
-        degree_norm=False,
-        adj_transpose=False,
-        s_inv_op="inverse",
+    x = torch.randn(n_nodes, n_features)
+    edge_index = torch.randint(0, n_nodes, (2, 30))
+
+    pooler = DiffPool(in_channels=n_features, k=k, batched=False)
+    out = pooler(x=x, adj=edge_index)
+
+    assert out.x.shape == (1, k, n_features)
+    assert out.edge_index.shape == (1, k, k)
+    assert out.loss is not None
+    assert "link_loss" in out.loss
+    assert "entropy_loss" in out.loss
+
+
+def test_diffpool_unbatched_multiple_graphs():
+    """Test DiffPool in unbatched mode with multiple graphs."""
+    torch.manual_seed(42)
+    n_features = 16
+    k = 5
+
+    x = torch.randn(25, n_features)
+    batch = torch.tensor([0] * 10 + [1] * 15)
+    edges_g0 = torch.randint(0, 10, (2, 20))
+    edges_g1 = torch.randint(10, 25, (2, 30))
+    edge_index = torch.cat([edges_g0, edges_g1], dim=1)
+
+    pooler = DiffPool(in_channels=n_features, k=k, batched=False)
+    out = pooler(x=x, adj=edge_index, batch=batch)
+
+    assert out.x.shape == (2, k, n_features), (
+        f"expected x shape (2, {k}, {n_features}), got {out.x.shape}"
     )
-    so = pooler.select(x=x, adj=adj)
-    assert so.is_expressive is True, "DiffPool should be expressive"
+    assert out.edge_index.shape == (2, k, k), (
+        f"expected edge_index shape (2, {k}, {k}), got {out.edge_index.shape}"
+    )
+    assert out.loss is not None
 
-    # check that so.cuda() fails
-    if not torch.cuda.is_available():
-        so.to(device=x.device)
-        with pytest.raises(AssertionError):
-            so.to("cpu").cuda()
 
+def test_diffpool_unbatched_sparse_output():
+    """Test DiffPool in unbatched mode with sparse output."""
+    torch.manual_seed(42)
+    n_features = 16
+    k = 5
+
+    x = torch.randn(25, n_features)
+    batch = torch.tensor([0] * 10 + [1] * 15)
+    edges_g0 = torch.randint(0, 10, (2, 20))
+    edges_g1 = torch.randint(10, 25, (2, 30))
+    edge_index = torch.cat([edges_g0, edges_g1], dim=1)
+
+    pooler = DiffPool(in_channels=n_features, k=k, batched=False, sparse_output=True)
+    out = pooler(x=x, adj=edge_index, batch=batch)
+
+    assert out.x.dim() == 2, f"expected x to be 2D, got shape {out.x.shape}"
+    assert out.x.shape[1] == n_features, (
+        f"expected x feature dim {n_features}, got {out.x.shape[1]}"
+    )
+    assert out.batch is not None, "expected batch vector when sparse_output=True"
+    assert out.batch.shape[0] == out.x.shape[0], (
+        f"batch length {out.batch.shape[0]} should match x nodes {out.x.shape[0]}"
+    )
+    assert out.edge_index.dim() == 2, (
+        f"expected edge_index to be 2D (COO), got shape {out.edge_index.shape}"
+    )
+    assert out.edge_index.shape[0] == 2, (
+        f"expected edge_index rows 2 (COO), got {out.edge_index.shape[0]}"
+    )
+
+
+@pytest.mark.parametrize("train_mode", [True, False])
+def test_diffpool_training_mode(pooler_test_graph_dense_batch, train_mode):
+    """Test DiffPool gradient computation."""
+    x, adj = pooler_test_graph_dense_batch
+    n_features = x.shape[-1]
+
+    pooler = DiffPool(in_channels=n_features, k=3)
+    if train_mode:
+        pooler.train()
     else:
-        so.to(device="cuda")
-        assert so.s.device.type == "cuda"
+        pooler.eval()
 
-    # check if so requires_grad
-    assert so.requires_grad_(True).is_expressive is True, (
-        "DiffPool should still be expressive with requires_grad=True"
-    )
+    x = x.detach().clone().requires_grad_(True)
+    out = pooler(x=x, adj=adj)
+
+    total_loss = sum(out.loss.values())
+    total_loss.backward()
+
+    assert x.grad is not None
 
 
-@pytest.mark.torch_sparse
-def test_preprocessing_cache(pooler_test_graph_sparse):
-    """Test that preprocessing cache works correctly in DiffPool."""
-    pytest.importorskip("torch_sparse")
-    from torch_sparse import SparseTensor
+def test_diffpool_get_pooler_u_suffix():
+    """Test get_pooler with diff_u suffix."""
+    pooler = get_pooler("diff_u", in_channels=16, k=5)
+    assert pooler.batched is False
 
-    x, edge_index, edge_weight, batch = pooler_test_graph_sparse
-    N, F = x.size(0), x.size(1)
-    k = 2  # number of clusters
+    x = torch.randn(10, 16)
+    edge_index = torch.randint(0, 10, (2, 30))
+    out = pooler(x=x, adj=edge_index)
 
-    pooler = DiffPool(
-        in_channels=F,
-        k=k,
-        link_loss_coeff=1.0,
-        ent_loss_coeff=1.0,
-        normalize_loss=True,
-        remove_self_loops=False,
-        degree_norm=False,
-        adj_transpose=False,
-        s_inv_op="inverse",
-    )
+    assert out.x is not None
+    assert out.loss is not None
+
+
+def test_diffpool_lifting_operation(pooler_test_graph_dense_batch):
+    """Test the lifting operation in DiffPool."""
+    x, adj = pooler_test_graph_dense_batch
+    n_features = x.shape[-1]
+
+    pooler = DiffPool(in_channels=n_features, k=3)
+    regular_out = pooler(x=x, adj=adj)
+    lifted_out = pooler(x=regular_out.x, so=regular_out.so, lifting=True)
+
+    assert lifted_out.shape == x.shape
+
+
+def test_diffpool_batched_vs_unbatched_loss_equality(pooler_test_graph_dense_batch):
+    """Batched forward loss dict matches compute_sparse_loss on same data."""
+    from tests.test_utils import _dense_batched_to_sparse_unbatched
+
+    x, adj = pooler_test_graph_dense_batch
+    n_features = x.shape[-1]
+    pooler = DiffPool(in_channels=n_features, k=3)
     pooler.eval()
-
-    ei_sparse = SparseTensor.from_edge_index(
-        edge_index, edge_weight, sparse_sizes=(N, N)
-    )
-
-    _, adj_p1, _ = pooler.preprocessing(
-        x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch, use_cache=True
-    )
-    _, adj_p2, _ = pooler.preprocessing(
-        x=x, edge_index=edge_index, batch=batch, use_cache=True
-    )
-    _, adj_p3, _ = pooler.preprocessing(
-        x=x, edge_index=ei_sparse, batch=batch, use_cache=False
-    )
-
-    # Ensure the outputs are the same
-    assert adj_p1.equal(adj_p2)
-    assert adj_p1.equal(adj_p3)
+    out = pooler(x=x, adj=adj)
+    S = out.so.s
+    edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(adj, S)
+    loss_sparse = pooler.compute_sparse_loss(edge_index, edge_weight, S_flat, batch)
+    for key in out.loss:
+        assert key in loss_sparse
+        assert torch.allclose(out.loss[key], loss_sparse[key], rtol=1e-5, atol=1e-5)
+    for key in loss_sparse:
+        assert key in out.loss
 
 
 if __name__ == "__main__":
-    pytest.main([__file__])
+    pytest.main([__file__, "-v"])

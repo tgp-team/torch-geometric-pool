@@ -181,3 +181,22 @@ def test_mincut_lifting_operation(pooler_test_graph_dense_batch):
 
     # Check if lifted output has same dimensions as input
     assert lifted_out.shape == x.shape
+
+
+def test_mincut_batched_vs_unbatched_loss_equality(pooler_test_graph_dense_batch):
+    """Batched forward loss dict matches compute_sparse_loss on same data."""
+    from tests.test_utils import _dense_batched_to_sparse_unbatched
+
+    x, adj = pooler_test_graph_dense_batch
+    n_features = x.shape[-1]
+    pooler = MinCutPooling(in_channels=n_features, k=3)
+    pooler.eval()
+    out = pooler(x=x, adj=adj)
+    S = out.so.s
+    edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(adj, S)
+    loss_sparse = pooler.compute_sparse_loss(edge_index, edge_weight, S_flat, batch)
+    for key in out.loss:
+        assert key in loss_sparse
+        assert torch.allclose(out.loss[key], loss_sparse[key], rtol=1e-5, atol=1e-5)
+    for key in loss_sparse:
+        assert key in out.loss

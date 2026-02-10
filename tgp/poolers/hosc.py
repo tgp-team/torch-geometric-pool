@@ -3,14 +3,22 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
+from torch_geometric.utils import to_dense_adj, to_dense_batch
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils.losses import hosc_orthogonality_loss, mincut_loss, orthogonality_loss
-from tgp.utils.ops import postprocess_adj_pool_dense
+from tgp.utils.losses import (
+    hosc_orthogonality_loss,
+    mincut_loss,
+    orthogonality_loss,
+    sparse_mincut_loss,
+    unbatched_hosc_orthogonality_loss,
+    unbatched_orthogonality_loss,
+)
+from tgp.utils.ops import connectivity_to_edge_index, postprocess_adj_pool_dense
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -116,6 +124,7 @@ class HOSCPooling(DenseSRCPooling):
             selector=MLPSelect(
                 in_channels=in_channels,
                 k=k,
+                batched_representation=batched,
                 act=act,
                 dropout=dropout,
                 s_inv_op=s_inv_op,
@@ -185,57 +194,68 @@ class HOSCPooling(DenseSRCPooling):
             )
             return x_lifted
 
-        if not self.batched:
-            raise NotImplementedError("HOSC unbatched mode is not implemented yet.")
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
+            )
+            so = self.select(x=x, mask=mask)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+            adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
+            loss = self.compute_loss(adj, so.s, adj_pool, mask)
+            adj_pool = postprocess_adj_pool_dense(
+                adj_pool,
+                remove_self_loops=self.connector.remove_self_loops,
+                degree_norm=self.connector.degree_norm,
+                adj_transpose=self.connector.adj_transpose,
+                edge_weight_norm=self.connector.edge_weight_norm,
+            )
+            if self.sparse_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pool,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                    loss=loss,
+                )
+            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
-        x, adj, mask = self._ensure_batched_inputs(
-            x=x,
+        # === Unbatched (sparse-loss) path ===
+        so = self.select(x=x, batch=batch)
+        loss = self.compute_sparse_loss(adj, edge_weight, so.s, batch)
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
+        edge_index_pooled, edge_weight_pooled = self.connect(
             edge_index=adj,
+            so=so,
             edge_weight=edge_weight,
             batch=batch,
-            mask=mask,
+            batch_pooled=batch_pooled,
         )
-
-        # Select
-        so = self.select(x=x, mask=mask)
-
-        # Reduce
-        x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
-
-        # Connect
-        adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
-
-        loss = self.compute_loss(adj, so.s, adj_pool, mask)
-
-        # Normalize coarsened adjacency matrix
-        adj_pool = postprocess_adj_pool_dense(
-            adj_pool,
-            remove_self_loops=self.connector.remove_self_loops,
-            degree_norm=self.connector.degree_norm,
-            adj_transpose=self.connector.adj_transpose,
-            edge_weight_norm=self.connector.edge_weight_norm,
+        return PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            loss=loss,
         )
-
-        if self.sparse_output:
-            x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
-                self._finalize_sparse_output(
-                    x_pool=x_pooled,
-                    adj_pool=adj_pool,
-                    batch=batch,
-                    batch_pooled=batch_pooled,
-                    so=so,
-                )
-            )
-            return PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-                loss=loss,
-            )
-
-        return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
     def compute_loss(
         self, adj: Tensor, S: Tensor, adj_pool: Tensor, mask: Optional[Tensor] = None
@@ -281,6 +301,72 @@ class HOSCPooling(DenseSRCPooling):
         else:
             # Standard orthogonality regularization of MinCutPool
             ortho_loss = orthogonality_loss(S, batch_reduction="mean")
+
+        return {"hosc_loss": hosc_loss, "ortho_loss": self.mu * ortho_loss}
+
+    def compute_sparse_loss(
+        self,
+        edge_index: Adj,
+        edge_weight: Optional[Tensor],
+        S: Tensor,
+        batch: Optional[Tensor],
+    ) -> dict:
+        """Computes the auxiliary loss terms for unbatched (sparse) mode.
+
+        This method is used when :attr:`batched=False` and operates on sparse
+        adjacency matrices. First-order cut uses sparse ops; higher-order (motif)
+        cut is computed per graph via dense adjacency when :attr:`alpha` > 0.
+
+        Args:
+            edge_index (~torch_geometric.typing.Adj): Graph connectivity in sparse format.
+            edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            S (~torch.Tensor): The dense assignment matrix of shape :math:`(N, K)`.
+            batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+
+        Returns:
+            dict: A dictionary with :obj:`'hosc_loss'` and :obj:`'ortho_loss'`.
+        """
+        edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
+            edge_index, edge_weight
+        )
+        num_nodes = S.size(0)
+        device = S.device
+        if batch is None:
+            batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+
+        cut_loss = torch.tensor(0.0, device=device, dtype=S.dtype)
+        ho_cut_loss = torch.tensor(0.0, device=device, dtype=S.dtype)
+
+        if self.alpha < 1:
+            cut_loss = sparse_mincut_loss(
+                edge_index_conv, S, edge_weight_conv, batch, batch_reduction="mean"
+            )
+            cut_loss = cut_loss / self.k
+
+        if self.alpha > 0:
+            adj_dense = to_dense_adj(
+                edge_index_conv, edge_attr=edge_weight_conv, batch=batch
+            )
+            S_dense, _ = to_dense_batch(S, batch)
+            motif_adj = torch.matmul(torch.matmul(adj_dense, adj_dense), adj_dense)
+            motif_adj_pool = torch.matmul(
+                torch.matmul(S_dense.transpose(1, 2), motif_adj), S_dense
+            )
+            ho_cut_loss = mincut_loss(
+                motif_adj, S_dense, motif_adj_pool, batch_reduction="mean"
+            )
+            ho_cut_loss = ho_cut_loss / self.k
+
+        hosc_loss = (1 - self.alpha) * cut_loss + self.alpha * ho_cut_loss
+
+        if self.mu == 0:
+            ortho_loss = torch.tensor(0.0, device=device, dtype=S.dtype)
+        elif self.hosc_ortho:
+            ortho_loss = unbatched_hosc_orthogonality_loss(
+                S, batch, batch_reduction="mean"
+            )
+        else:
+            ortho_loss = unbatched_orthogonality_loss(S, batch, batch_reduction="mean")
 
         return {"hosc_loss": hosc_loss, "ortho_loss": self.mu * ortho_loss}
 
