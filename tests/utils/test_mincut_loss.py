@@ -17,42 +17,10 @@ from tgp.utils.losses import (
     unbatched_orthogonality_loss,
 )
 
-
-def _dense_batched_to_sparse_unbatched(adj, S):
-    """Convert dense batched (adj [B,N,N], S [B,N,K]) to sparse unbatched form.
-
-    Returns edge_index [2, E], edge_weight [E], S_flat [N_total, K], batch [N_total].
-    """
-    B, N, K = S.shape
-    device = S.device
-
-    edge_index_list = []
-    edge_weight_list = []
-    batch_list = []
-
-    for b in range(B):
-        # Nonzero entries in adj[b]; avoid self-loops if diagonal is zero
-        nz = adj[b].nonzero(as_tuple=False)  # [E_b, 2]
-        if nz.size(0) == 0:
-            edge_index_list.append(torch.zeros(2, 0, dtype=torch.long, device=device))
-            edge_weight_list.append(torch.zeros(0, device=device))
-        else:
-            row, col = nz[:, 0], nz[:, 1]
-            edge_index_b = torch.stack([row, col], dim=0)  # [2, E_b]
-            edge_weight_b = adj[b][row, col]
-            # Global node indices
-            offset = b * N
-            edge_index_b = edge_index_b + offset
-            edge_index_list.append(edge_index_b)
-            edge_weight_list.append(edge_weight_b)
-        batch_list.append(torch.full((N,), b, dtype=torch.long, device=device))
-
-    edge_index = torch.cat(edge_index_list, dim=1)
-    edge_weight = torch.cat(edge_weight_list)
-    batch = torch.cat(batch_list)
-    S_flat = S.reshape(B * N, K)
-
-    return edge_index, edge_weight, S_flat, batch
+from .dense_loss_test_helpers import (
+    _dense_batched_to_sparse_unbatched,
+    _make_dense_batch_variable_sizes,
+)
 
 
 class TestMinCutLoss:
@@ -379,6 +347,25 @@ class TestMinCutLossDenseVsSparseEquality:
         assert torch.allclose(loss_dense, loss_sparse, rtol=1e-6, atol=1e-6), (
             f"orthogonality_loss dense vs sparse mismatch (batch, {batch_reduction}): "
             f"dense={loss_dense.item()}, sparse={loss_sparse.item()}"
+        )
+
+    def test_orthogonality_loss_dense_vs_sparse_with_variable_sizes_zero_padding(self):
+        """With variable-sized graphs, S is zero-padded (as from MLPSelect); dense matches sparse.
+
+        Batched S has zero rows for padded positions, so S^T S is unchanged by padding
+        and dense orthogonality_loss matches unbatched (real nodes only).
+        """
+        adj, S, mask = _make_dense_batch_variable_sizes(K=3, seed=42)
+        loss_dense = orthogonality_loss(S, batch_reduction="mean")
+        edge_index, _, S_flat, batch = _dense_batched_to_sparse_unbatched(
+            adj, S, mask=mask
+        )
+        loss_sparse = unbatched_orthogonality_loss(
+            S_flat, batch, batch_reduction="mean"
+        )
+        assert torch.allclose(loss_dense, loss_sparse, rtol=1e-5, atol=1e-5), (
+            "With zero-padded S (as from select), dense and sparse orthogonality "
+            "should match; padding rows are zero and do not contribute to S^T S."
         )
 
     def test_mincut_loss_dense_vs_sparse_with_weighted_edges(self):

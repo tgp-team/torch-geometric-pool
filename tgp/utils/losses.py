@@ -11,14 +11,19 @@ from tgp import eps
 from tgp.utils import rank3_diag, rank3_trace
 from tgp.utils.ops import check_and_filter_edge_weights
 
+# Batched losses expect a correctly assembled S tensor: padded positions (e.g. for
+# variable-sized graphs in a batch) should have zero rows, as produced by the select
+# step (e.g. MLPSelect applies the node mask so that S has zeros at padded nodes).
 BatchReductionType = Literal["mean", "sum"]
 
 
-def _batch_reduce_loss(loss: Tensor, batch_reduction: BatchReductionType) -> Tensor:
+def _batch_reduce_loss(
+    loss: Tensor, batch_reduction: BatchReductionType, axis: int = 0
+) -> Tensor:
     if batch_reduction == "mean":
-        return torch.mean(loss)
+        return torch.mean(loss, dim=axis)
     if batch_reduction == "sum":
-        return torch.sum(loss)
+        return torch.sum(loss, dim=axis)
     raise ValueError(
         f"Batch reduction {batch_reduction} not allowed, must be one of ['mean', 'sum']."
     )
@@ -286,6 +291,211 @@ def unbatched_orthogonality_loss(
     return _batch_reduce_loss(ortho_loss, batch_reduction)
 
 
+def unbatched_hosc_orthogonality_loss(
+    S: Tensor,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Unbatched HOSC orthogonality loss for unbatched graph pooling.
+
+    This is the unbatched version of :func:`~tgp.utils.losses.hosc_orthogonality_loss`
+    used by :class:`~tgp.poolers.HOSCPooling` in unbatched mode.
+
+    Args:
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+        batch_reduction (str, optional): Reduction over the batch dimension.
+
+    Returns:
+        ~torch.Tensor: The HOSC orthogonality loss.
+    """
+    num_nodes = S.size(0)
+    num_supernodes = S.size(1)
+    device = S.device
+    sqrt_k = math.sqrt(num_supernodes)
+    if sqrt_k <= 1:
+        return torch.tensor(0.0, device=device, dtype=S.dtype)
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    losses = []
+    for g in range(batch_size):
+        mask = batch == g
+        S_g = S[mask]
+        n_g = S_g.size(0)
+        norm_g = torch.norm(S_g, p="fro", dim=0).sum()
+        sqrt_nodes = math.sqrt(n_g)
+        loss_g = (sqrt_k - norm_g / sqrt_nodes) / (sqrt_k - 1)
+        losses.append(loss_g)
+    ortho_loss = torch.stack(losses)
+    return _batch_reduce_loss(ortho_loss, batch_reduction)
+
+
+def unbatched_cluster_loss(
+    S: Tensor,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Unbatched cluster regularization loss for unbatched graph pooling.
+
+    This is the unbatched version of :func:`~tgp.utils.losses.cluster_loss`
+    used by :class:`~tgp.poolers.DMoNPooling` in unbatched mode.
+
+    Args:
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+        batch_reduction (str, optional): Reduction over the batch dimension.
+
+    Returns:
+        ~torch.Tensor: The cluster regularization loss.
+    """
+    num_nodes = S.size(0)
+    num_supernodes = S.size(1)
+    device = S.device
+    i_s = torch.eye(num_supernodes, device=device, dtype=S.dtype)
+    norm_i = torch.norm(i_s).item()
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    losses = []
+    for g in range(batch_size):
+        mask = batch == g
+        S_g = S[mask]
+        n_g = S_g.size(0)
+        cluster_size_g = S_g.sum(dim=0)
+        loss_g = torch.norm(cluster_size_g) / n_g * norm_i - 1
+        losses.append(loss_g)
+    cluster_loss_val = torch.stack(losses)
+    return _batch_reduce_loss(cluster_loss_val, batch_reduction)
+
+
+def unbatched_entropy_loss(
+    S: Tensor,
+    num_nodes: Optional[int] = None,
+) -> Tensor:
+    r"""Unbatched entropy regularization loss for unbatched graph pooling.
+
+    This is the unbatched version of :func:`~tgp.utils.losses.entropy_loss`
+    used by :class:`~tgp.poolers.DiffPool` in unbatched mode. Matches the
+    batched semantics: mean entropy per node over the batch (total entropy
+    sum / total number of nodes), then optional reduction over graphs.
+
+    Args:
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        num_nodes (int, optional): The number of nodes in the graph. If not provided,
+            it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
+
+    Returns:
+        ~torch.Tensor: The entropy regularization loss.
+    """
+    if num_nodes is None:
+        num_nodes = S.size(0)
+    entropy = -(S * torch.log(S + eps)).sum(dim=-1)
+
+    return entropy.sum() / num_nodes
+
+
+def unbatched_asym_norm_loss(
+    S: Tensor,
+    k: int,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Unbatched asymmetric norm loss for unbatched graph pooling.
+
+    This is the unbatched version of :func:`~tgp.utils.losses.asym_norm_loss`
+    used by :class:`~tgp.poolers.AsymCheegerCutPooling` in unbatched mode.
+
+    Args:
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        k (int): The number of clusters.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+        batch_reduction (str, optional): Reduction over the batch dimension.
+
+    Returns:
+        ~torch.Tensor: The asymmetrical norm regularization loss.
+    """
+    num_nodes = S.size(0)
+    device = S.device
+    if k <= 1:
+        return torch.tensor(0.0, device=device, dtype=S.dtype)
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    losses = []
+    for g in range(batch_size):
+        mask = batch == g
+        S_g = S[mask]
+        n_nodes_g = S_g.size(0)
+        idx = int(math.floor(n_nodes_g / k))
+        if idx >= n_nodes_g:
+            idx = n_nodes_g - 1
+        quant = torch.sort(S_g, dim=0, descending=True)[0][idx, :]
+        diff = S_g - quant.unsqueeze(0)
+        asym = (diff >= 0).to(S.dtype) * (k - 1) * diff + (diff < 0).to(S.dtype) * (
+            -diff
+        )
+        loss_inner = asym.sum()
+        loss_g = 1 / (n_nodes_g * (k - 1)) * (n_nodes_g * (k - 1) - loss_inner)
+        losses.append(loss_g)
+    loss = torch.stack(losses)
+    return _batch_reduce_loss(loss, batch_reduction)
+
+
+def unbatched_just_balance_loss(
+    S: Tensor,
+    batch: Optional[Tensor] = None,
+    normalize_loss: bool = True,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Unbatched balance regularization loss for unbatched graph pooling.
+
+    This is the unbatched version of :func:`~tgp.utils.losses.just_balance_loss`
+    used by :class:`~tgp.poolers.JustBalancePooling` in unbatched mode.
+
+    Args:
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+        normalize_loss (bool, optional): Whether to normalize by sqrt(N*K).
+        batch_reduction (str, optional): Reduction over the batch dimension.
+
+    Returns:
+        ~torch.Tensor: The balance regularization loss.
+    """
+    device = S.device
+    num_nodes = S.size(0)
+    num_supernodes = S.size(1)
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    losses = []
+    for g in range(batch_size):
+        mask = batch == g
+        S_g = S[mask]
+        n_g = S_g.size(0)
+        ss = torch.matmul(S_g.t(), S_g)
+        ss_sqrt = torch.sqrt(ss + eps)
+        loss_g = -torch.trace(ss_sqrt)
+        if normalize_loss:
+            loss_g = loss_g / math.sqrt(n_g * num_supernodes)
+        losses.append(loss_g)
+    loss = torch.stack(losses)
+    return _batch_reduce_loss(loss, batch_reduction)
+
+
 def hosc_orthogonality_loss(
     S: Tensor,
     mask: Optional[Tensor] = None,
@@ -367,7 +577,7 @@ def link_pred_loss(S: Tensor, adj: Tensor, normalize_loss: bool = True) -> Tenso
     return link_loss
 
 
-def entropy_loss(S: Tensor, batch_reduction: BatchReductionType = "mean") -> Tensor:
+def entropy_loss(S: Tensor, num_nodes: int) -> Tensor:
     r"""Auxiliary entropy regularization loss used by :class:`~tgp.poolers.DiffPool`
     operator from the paper `"Hierarchical Graph Representation Learning with
     Differentiable Pooling" <https://arxiv.org/abs/1806.08804>`_ (Ying et al., NeurIPS 2018).
@@ -387,16 +597,85 @@ def entropy_loss(S: Tensor, batch_reduction: BatchReductionType = "mean") -> Ten
         S (~torch.Tensor): The dense cluster assignment matrix of shape
             :math:`(B, N, K)` where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
-        reduction (str, optional): Reduction method applied to the batch dimension.
-            Can be :obj:`'mean'` or :obj:`'sum'`.
-            (default: :obj:`"mean"`)
+        num_nodes (int): The number of nodes in the graph.
 
     Returns:
         ~torch.Tensor: The entropy regularization loss.
     """
-    entropy = -S * torch.log(S + eps)
-    entropy = torch.sum(entropy, dim=-1)
-    return _batch_reduce_loss(entropy, batch_reduction)
+    S_2d = S.view(-1, S.size(-1))
+    return unbatched_entropy_loss(S_2d, num_nodes)
+
+
+def sparse_link_pred_loss(
+    S: Tensor,
+    edge_index: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    normalize_loss: bool = True,
+) -> Tensor:
+    r"""Sparse link prediction loss giving the same scalar as batched
+    :func:`~tgp.utils.losses.link_pred_loss` (global Frobenius norm over the
+    batch), without materializing :math:`(B, N, N)`.
+
+    Uses
+    :math:`\|\mathbf{A} - \mathbf{S}\mathbf{S}^\top\|_F^2 = \sum_{e}
+    (w_e - (\mathbf{S}\mathbf{S}^\top)_{e})^2 + \sum_g \|\mathbf{S}_g
+    \mathbf{S}_g^\top\|_F^2 - \sum_{e} (\mathbf{S}\mathbf{S}^\top)_{e}^2`.
+
+    Args:
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        edge_index (~torch.Tensor): Graph connectivity in COO format of shape
+            :math:`(2, E)`.
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+        normalize_loss (bool, optional): If :obj:`True`, divide by total number of
+            entries (sum over graphs of :math:`n_g^2`). (default: :obj:`True`)
+
+    Returns:
+        ~torch.Tensor: The link prediction loss (scalar, matches batched).
+    """
+    num_nodes = S.size(0)
+    device = S.device
+    dtype = S.dtype
+
+    if edge_weight is None:
+        edge_weight = torch.ones(edge_index.size(1), device=device, dtype=dtype)
+    else:
+        edge_weight = check_and_filter_edge_weights(edge_weight)
+        if edge_weight is None:
+            edge_weight = torch.ones(edge_index.size(1), device=device, dtype=dtype)
+        else:
+            edge_weight = edge_weight.view(-1).to(dtype)
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    src, dst = edge_index[0], edge_index[1]
+    ss_ij = (S[src] * S[dst]).sum(dim=-1)
+
+    # sum over edges of (w - ss_ij)^2
+    sum_edges_residual_sq = ((edge_weight - ss_ij) ** 2).sum()
+    # sum over edges of ss_ij^2
+    sum_edges_ss_sq = (ss_ij**2).sum()
+    # sum over graphs of ||S_g^T S_g||_F^2
+    total_sts_sq = torch.tensor(0.0, device=device, dtype=dtype)
+    total_numel = 0
+    for g in range(batch_size):
+        mask = batch == g
+        S_g = S[mask]
+        n_g = S_g.size(0)
+        sts = torch.matmul(S_g.t(), S_g)
+        total_sts_sq = total_sts_sq + (sts * sts).sum()
+        total_numel += n_g * n_g
+
+    # ||A - SS^T||_F^2 = sum_edges (w - ss)^2 + sum_g ||S_g S_g^T||_F^2 - sum_edges ss^2
+    squared_frob = sum_edges_residual_sq + total_sts_sq - sum_edges_ss_sq
+    link_loss = torch.sqrt(torch.clamp(squared_frob, min=0.0))
+    if normalize_loss and total_numel > 0:
+        link_loss = link_loss / total_numel
+    return link_loss
 
 
 def totvar_loss(
@@ -481,6 +760,64 @@ def totvar_loss(
     )
     loss = loss / (2 * torch.clamp(n_edges, min=1))
 
+    return _batch_reduce_loss(loss, batch_reduction)
+
+
+def sparse_totvar_loss(
+    edge_index: Tensor,
+    S: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Sparse total variation loss for unbatched graph pooling.
+
+    This is the sparse version of :func:`~tgp.utils.losses.totvar_loss`
+    used by :class:`~tgp.poolers.AsymCheegerCutPooling` in unbatched mode.
+
+    Args:
+        edge_index (~torch.Tensor): Graph connectivity in COO format of shape
+            :math:`(2, E)`.
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+        batch_reduction (str, optional): Reduction over the batch dimension.
+
+    Returns:
+        ~torch.Tensor: The total variation regularization loss.
+    """
+    num_nodes = S.size(0)
+    device = S.device
+
+    if edge_weight is None:
+        edge_weight = torch.ones(edge_index.size(1), device=device)
+    else:
+        edge_weight = check_and_filter_edge_weights(edge_weight)
+        if edge_weight is None:
+            edge_weight = torch.ones(edge_index.size(1), device=device)
+        else:
+            edge_weight = edge_weight.view(-1)
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    src, dst = edge_index[0], edge_index[1]
+    S_src = S[src]
+    S_tgt = S[dst]
+    l1_norms = torch.sum(torch.abs(S_src - S_tgt), dim=-1)
+    weighted_norms = edge_weight * l1_norms
+    edge_batch = batch[src]
+    loss = scatter(weighted_norms, edge_batch, dim=0, dim_size=batch_size, reduce="sum")
+    n_edges = scatter(
+        torch.ones_like(edge_weight, device=device),
+        edge_batch,
+        dim=0,
+        dim_size=batch_size,
+        reduce="sum",
+    )
+    loss = loss / (2 * torch.clamp(n_edges, min=1))
     return _batch_reduce_loss(loss, batch_reduction)
 
 
@@ -660,13 +997,86 @@ def spectral_loss(
     degrees = torch.einsum("bnm->bn", adj)
     degrees = degrees * mask
     m = degrees.sum(-1) / 2
-    m_expand = m.view(-1, 1, 1).expand(-1, num_supernodes, num_supernodes)
+    # Avoid division by zero for empty graphs; empty graphs contribute 0 loss
+    safe_m = torch.where(m > 0, m, torch.ones_like(m, device=m.device))
+    m_expand = safe_m.view(-1, 1, 1).expand(-1, num_supernodes, num_supernodes)
     ca = torch.einsum("bnk, bn -> bk", S, degrees)
     cb = torch.einsum("bn, bnk -> bk", degrees, S)
     normalizer = torch.einsum("bk, bm -> bkm", ca, cb) / 2 / m_expand
     decompose = adj_pooled - normalizer
-    spectral_loss = -rank3_trace(decompose) / 2 / m
-    return _batch_reduce_loss(spectral_loss, batch_reduction)
+    per_graph_loss = -rank3_trace(decompose) / 2 / safe_m
+    per_graph_loss = torch.where(
+        m > 0, per_graph_loss, torch.zeros_like(per_graph_loss)
+    )
+    return _batch_reduce_loss(per_graph_loss, batch_reduction)
+
+
+def sparse_spectral_loss(
+    edge_index: Tensor,
+    S: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Sparse spectral regularization loss for unbatched graph pooling.
+
+    This is the sparse version of :func:`~tgp.utils.losses.spectral_loss`
+    used by :class:`~tgp.poolers.DMoNPooling` in unbatched mode.
+
+    Args:
+        edge_index (~torch.Tensor): Graph connectivity in COO format of shape
+            :math:`(2, E)`.
+        S (~torch.Tensor): The dense cluster assignment matrix of shape
+            :math:`(N, K)`.
+        edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+        batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+        batch_reduction (str, optional): Reduction over the batch dimension.
+
+    Returns:
+        ~torch.Tensor: The spectral regularization loss.
+    """
+    num_nodes = S.size(0)
+    device = S.device
+
+    if edge_weight is None:
+        edge_weight = torch.ones(edge_index.size(1), device=device)
+    else:
+        edge_weight = check_and_filter_edge_weights(edge_weight)
+        if edge_weight is None:
+            edge_weight = torch.ones(edge_index.size(1), device=device)
+        else:
+            edge_weight = edge_weight.view(-1)
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    degrees = scatter(
+        edge_weight, edge_index[0], dim=0, dim_size=num_nodes, reduce="sum"
+    )
+    src, dst = edge_index[0], edge_index[1]
+    edge_contrib = edge_weight * (S[src] * S[dst]).sum(dim=-1)
+    tr_ast_per_graph = scatter(
+        edge_contrib, batch[src], dim=0, dim_size=batch_size, reduce="sum"
+    )
+    m_per_graph = (
+        scatter(edge_weight, batch[src], dim=0, dim_size=batch_size, reduce="sum") / 2
+    )
+
+    losses = []
+    for g in range(batch_size):
+        mask = batch == g
+        S_g = S[mask]
+        deg_g = degrees[mask]
+        # Avoid division by zero for empty graphs (m=0); clamp so denominator is safe
+        m_g = m_per_graph[g].clamp(min=eps)
+        ca_g = (S_g * deg_g.unsqueeze(-1)).sum(dim=0)
+        normalizer_tr = (ca_g * ca_g).sum() / (2 * m_g)
+        tr_ast_g = tr_ast_per_graph[g]
+        loss_g = -(tr_ast_g - normalizer_tr) / (2 * m_g)
+        losses.append(loss_g)
+    loss = torch.stack(losses)
+    return _batch_reduce_loss(loss, batch_reduction)
 
 
 def cluster_loss(

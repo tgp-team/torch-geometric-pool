@@ -14,7 +14,7 @@ from tgp.utils.losses import (
     sparse_mincut_loss,
     unbatched_orthogonality_loss,
 )
-from tgp.utils.ops import postprocess_adj_pool_dense
+from tgp.utils.ops import connectivity_to_edge_index, postprocess_adj_pool_dense
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -332,8 +332,6 @@ class MinCutPooling(DenseSRCPooling):
                 - :obj:`'cut_loss'`: The sparse mincut loss weighted by :attr:`cut_loss_coeff`.
                 - :obj:`'ortho_loss'`: The unbatched orthogonality loss weighted by :attr:`ortho_loss_coeff`.
         """
-        from tgp.utils.ops import connectivity_to_edge_index
-
         edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
             edge_index, edge_weight
         )
