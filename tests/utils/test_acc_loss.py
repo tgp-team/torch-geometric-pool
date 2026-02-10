@@ -246,7 +246,7 @@ class TestAsymNormLossDenseVsSparseEquality:
         """With variable-sized graphs, S is zero-padded; dense matches unbatched."""
         adj, S, mask = _make_dense_batch_variable_sizes(K=3, seed=42)
         K = 3
-        loss_dense = asym_norm_loss(S, K, batch_reduction="mean")
+        loss_dense = asym_norm_loss(S, K, mask=mask, batch_reduction="mean")
         edge_index, _, S_flat, batch = _dense_batched_to_sparse_unbatched(
             adj, S, mask=mask
         )

@@ -826,7 +826,10 @@ def sparse_totvar_loss(
 
 
 def asym_norm_loss(
-    S: Tensor, k: int, batch_reduction: BatchReductionType = "mean"
+    S: Tensor,
+    k: int,
+    mask: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
 ) -> Tensor:
     r"""Auxiliary asymmetrical norm term used by :class:`~tgp.poolers.AsymCheegerCutPooling`
     operator from the paper `"Total Variation Graph Neural Networks"
@@ -865,6 +868,9 @@ def asym_norm_loss(
         k (int): The number of clusters (:math:`K`). This is used
             internally to set :math:`\rho = K - 1` if no other
             value of :math:`\rho` is explicitly chosen.
+        mask (Optional[~torch.Tensor]): A mask matrix of shape :math:`(B, N)` with
+            :obj:`True` for valid nodes. If :obj:`None`, all nodes are used.
+            (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
@@ -872,18 +878,38 @@ def asym_norm_loss(
     Returns:
         ~torch.Tensor: The asymmetrical norm regularization loss.
     """
+    B = S.size(0)
     n_nodes = S.size()[-2]
 
     # Edge case: single cluster or no nodes — no balance penalty
-    if k <= 1 or n_nodes * (k - 1) == 0:
-        out = torch.zeros(S.size(0), device=S.device, dtype=S.dtype)
+    if k <= 1:
+        out = torch.zeros(B, device=S.device, dtype=S.dtype)
         return _batch_reduce_loss(out, batch_reduction)
 
-    # k-quantile (idx must be in [0, n_nodes-1])
+    if mask is not None:
+        # Build (S_flat, batch) from masked nodes and delegate to unbatched (same as entropy_loss pattern)
+        S_list = []
+        batch_list = []
+        for b in range(B):
+            real = mask[b].nonzero(as_tuple=True)[0]
+            S_list.append(S[b][real])
+            batch_list.append(
+                torch.full((real.size(0),), b, dtype=torch.long, device=S.device)
+            )
+        S_flat = torch.cat(S_list, dim=0)
+        batch_flat = torch.cat(batch_list, dim=0)
+        return unbatched_asym_norm_loss(
+            S_flat, k, batch=batch_flat, batch_reduction=batch_reduction
+        )
+
+    # No mask: original batched behavior
+    if n_nodes * (k - 1) == 0:
+        out = torch.zeros(B, device=S.device, dtype=S.dtype)
+        return _batch_reduce_loss(out, batch_reduction)
+
     idx = min(int(math.floor(n_nodes / k)), n_nodes - 1)
     quant = torch.sort(S, dim=-2, descending=True)[0][:, idx, :]  # shape [B, K]
 
-    # Asymmetric l1-norm
     loss = S - torch.unsqueeze(quant, dim=1)
     loss = (loss >= 0) * (k - 1) * loss + (loss < 0) * (-loss)
     loss = torch.sum(loss, dim=(-1, -2))  # shape [B]

@@ -141,6 +141,9 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - **HOSCPooling**: unbatched mode (`batched=False` or `get_pooler("hosc_u")`) uses sparse
   connectivity and sparse HOSC/ortho losses; output format is controlled by
   `sparse_output`.
+- **AsymCheegerCutPooling (ACC)**: unbatched mode (`batched=False` or `get_pooler("acc_u")`)
+  uses sparse connectivity and sparse totvar/balance losses; output format is controlled by
+  `sparse_output`.
 - **NMFPooling**: both batched and unbatched modes are now supported.
   Unbatched mode operates on sparse connectivity without padding and can return
   dense or sparse pooled outputs. Pre‑coarsening returns sparse output by default
@@ -161,6 +164,9 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - **JustBalance (JB) loss** in batched mode now correctly applies per-graph
   normalization when a node mask is provided (e.g. variable-sized graphs with
   zero-padding).
+- **AsymNorm (ACC) loss** in batched mode now computes correctly per graph when a
+  node mask is provided: the batched path builds a flat assignment and batch
+  vector from the mask and delegates to the unbatched implementation.
 
 ## Migration Notes
 
