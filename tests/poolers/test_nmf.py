@@ -5,6 +5,7 @@ from tests.test_utils import make_chain_graph_sparse
 from tgp.poolers import NMFPooling
 from tgp.select.nmf_select import NMFSelect
 
+
 def test_nmf_select_sparse_single_graph(pooler_test_graph_sparse):
     x, edge_index, edge_weight, _ = pooler_test_graph_sparse
     k = 3
