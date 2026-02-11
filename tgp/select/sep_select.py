@@ -1,7 +1,7 @@
-import copy
 import heapq
 import itertools
 import math
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
@@ -9,28 +9,33 @@ import torch
 from scipy.sparse.csgraph import connected_components
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import (
-    remove_self_loops,
-    to_dense_adj,
-    to_undirected,
-    unbatch,
-    unbatch_edge_index,
-)
+from torch_geometric.utils import remove_self_loops, to_dense_adj, to_undirected
+from torch_geometric.utils.num_nodes import maybe_num_nodes
 
 from tgp.select import Select, SelectOutput
 from tgp.utils import connectivity_to_edge_index
 from tgp.utils.typing import SinvType
 
 
-class SEPSelect(Select):
-    r"""Implements a Select operator based on a hierarchical partitioning method.
+@dataclass
+class _SubgraphData:
+    """Container for a single graph extracted from a mini-batch."""
 
-    This class builds and applies a hierarchical partitioning of nodes in a
-    graph to perform selection at varying levels of granularity. The partitioning
-    is determined using a coding tree based on adjacency structures.
+    node_ids: Tensor
+    edge_index: Tensor
+    edge_weight: Optional[Tensor]
+
+
+class SEPSelect(Select):
+    r"""Select operator for Structural Entropy Pooling (SEP).
+
+    The selector builds a coding tree per graph and uses its depth-1 partitions
+    as hard cluster assignments.
 
     Args:
-        s_inv_op (SinvType): The operation used for inverse selection.
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
+            The operation used to compute :math:`\mathbf{S}_\text{inv}` from
+            the select matrix. (default: :obj:`"transpose"`)
     """
 
     def __init__(self, s_inv_op: SinvType = "transpose"):
@@ -52,303 +57,499 @@ class SEPSelect(Select):
 
         Args:
             x (~torch.Tensor, optional):
-                The node feature matrix of shape :math:`[N, F]`,
-                where :math:`N` is the number of nodes in the batch and
-                :math:`F` is the number of node features.
-                (default: :obj:`None`)
-            edge_index (~torch.Tensor, optional):
-                The edge indices. Is a tensor of of shape  :math:`[2, E]`,
-                where :math:`E` is the number of edges in the batch.
-                (default: :obj:`None`)
+                Unused placeholder to keep interface compatibility.
+            edge_index (~torch_geometric.typing.Adj):
+                Graph connectivity.
             edge_weight (~torch.Tensor, optional):
-                A vector of shape  :math:`[E]` or  :math:`[E, 1]` containing the weights of the edges.
-                (default: :obj:`None`)
-            batch (~torch.Tensor, optional): The batch vector
-                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
-                to which graph in the batch each node belongs.
-                (default: :obj:`None`)
+                Edge weights of shape :math:`[E]` or :math:`[E, 1]`.
+            batch (~torch.Tensor, optional):
+                Batch vector assigning nodes to graphs.
             num_nodes (int, optional):
-                The total number of nodes of the graphs in the batch.
-                (default: :obj:`None`)
+                Total number of nodes in the input batch.
 
         Returns:
-            :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
+            :class:`~tgp.select.SelectOutput`: Hard assignment from nodes to
+            depth-1 SEP clusters.
         """
         edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
 
-        if batch is None:
-            # there is only one graph
-            edge_index_list = [edge_index]
-            edge_weight_list = [edge_weight] if edge_weight is not None else [None]
-            batch_size = 1
-        else:
-            edge_index_list = unbatch_edge_index(edge_index, batch)
-            batch_size = len(edge_index_list)
-            edge_weight_list = (
-                unbatch(edge_weight, batch)
-                if edge_weight is not None
-                else [None] * batch_size
+        if num_nodes is None:
+            num_nodes = (
+                int(batch.numel()) if batch is not None else maybe_num_nodes(edge_index)
             )
 
-        num_nodes = (
-            num_nodes
-            if num_nodes is not None
-            else torch.max(edge_index[1]).cpu().item() + 1
-        )
-        assignment = torch.zeros(
-            (num_nodes,), dtype=torch.long, device=edge_index.device
-        )
+        if num_nodes == 0:
+            empty = torch.empty(0, dtype=torch.long, device=edge_index.device)
+            return SelectOutput(
+                node_index=empty,
+                num_nodes=0,
+                cluster_index=empty,
+                num_supernodes=0,
+                s_inv_op=self.s_inv_op,
+            )
 
-        tot_N = 0
-        tot_clust = 0
-        for i in range(batch_size):
-            ei = edge_index_list[i]
-            ew = edge_weight_list[i]
+        if batch is None:
+            batch = torch.zeros(num_nodes, dtype=torch.long, device=edge_index.device)
+        elif batch.numel() != num_nodes:
+            raise ValueError(
+                f"Expected batch with {num_nodes} nodes, got {batch.numel()}."
+            )
 
-            # transform the edge index
-            ei, ew = remove_self_loops(ei, ew)
-            ei, ew = to_undirected(ei, ew)
+        assignment = torch.empty(num_nodes, dtype=torch.long, device=edge_index.device)
+        assignment.fill_(-1)
+        cluster_offset = 0
 
-            # make teh dense adj matrix
-            adj = to_dense_adj(ei, ew).squeeze(0).cpu().numpy()
-            N = adj.shape[0]
+        for subgraph in _split_subgraphs(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=num_nodes,
+        ):
+            local_assignment, num_local_clusters = self._cluster_subgraph(subgraph)
+            assignment[subgraph.node_ids] = local_assignment + cluster_offset
+            cluster_offset += num_local_clusters
 
-            # build the partition tree
-            tree_nodes = adj_mat_to_coding_tree(adj, tree_depth=self.tree_depth)
+        # Safety fallback for pathological cases: keep behavior deterministic.
+        unassigned = torch.nonzero(assignment < 0, as_tuple=False).view(-1)
+        if unassigned.numel() > 0:
+            assignment[unassigned] = torch.arange(
+                cluster_offset,
+                cluster_offset + unassigned.numel(),
+                device=assignment.device,
+            )
+            cluster_offset += int(unassigned.numel())
 
-            # built the partition assignment, we tooj only the first level partition, i.e. depth = 1
-            # we use tot_N to consider to sapre batch of pytorch
-            all_partitions = [
-                [tree_nodes[c].get("graphID", c) + tot_N for c in n["children"]]
-                for i, n in tree_nodes.items()
-                if n["depth"] == 1
-            ]
-
-            for i, p in enumerate(all_partitions):
-                assignment[p] = i + tot_clust
-
-            tot_clust += len(all_partitions)
-            tot_N += N
-
-        so = SelectOutput(
+        return SelectOutput(
             node_index=torch.arange(num_nodes, device=assignment.device),
             num_nodes=num_nodes,
             cluster_index=assignment,
-            num_supernodes=tot_clust,
+            num_supernodes=cluster_offset,
             s_inv_op=self.s_inv_op,
         )
 
-        return so
+    def _cluster_subgraph(self, subgraph: _SubgraphData) -> tuple[Tensor, int]:
+        """Build depth-1 SEP clusters for one graph in local node indexing."""
+        num_nodes = int(subgraph.node_ids.numel())
+        device = subgraph.node_ids.device
+
+        if num_nodes == 0:
+            return torch.empty(0, dtype=torch.long, device=device), 0
+
+        edge_index, edge_weight = remove_self_loops(
+            subgraph.edge_index, subgraph.edge_weight
+        )
+        edge_index, edge_weight = to_undirected(
+            edge_index,
+            edge_weight,
+            num_nodes=num_nodes,
+        )
+
+        if edge_index.numel() == 0:
+            isolated = torch.arange(num_nodes, dtype=torch.long, device=device)
+            return isolated, num_nodes
+
+        adj = (
+            to_dense_adj(edge_index, edge_attr=edge_weight, max_num_nodes=num_nodes)
+            .squeeze(0)
+            .cpu()
+            .numpy()
+        )
+
+        tree_nodes = _adj_mat_to_coding_tree(adj, tree_depth=self.tree_depth)
+        local_assignment = _depth_one_assignment(
+            tree_nodes=tree_nodes,
+            num_nodes=num_nodes,
+            device=device,
+        )
+        num_clusters = int(local_assignment.max().item()) + 1
+        return local_assignment, num_clusters
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(tree_depth={self.tree_depth})"
 
 
-def adj_mat_to_coding_tree(adj: np.ndarray, tree_depth: int):
+def _split_subgraphs(
+    edge_index: Tensor,
+    edge_weight: Optional[Tensor],
+    batch: Tensor,
+    num_nodes: int,
+) -> list[_SubgraphData]:
+    """Split a batched graph into per-graph local COO representations.
+
+    Unlike :func:`torch_geometric.utils.unbatch`, this function correctly
+    filters edge-level tensors (e.g., :obj:`edge_weight`) with edge masks.
+    """
+    if batch.numel() == 0:
+        return []
+
+    out: list[_SubgraphData] = []
+    batch_size = int(batch.max().item()) + 1
+
+    for graph_id in range(batch_size):
+        node_ids = torch.nonzero(batch == graph_id, as_tuple=False).view(-1)
+        if node_ids.numel() == 0:
+            continue
+
+        if edge_index.numel() == 0:
+            sub_edge_index = edge_index.new_empty((2, 0))
+            sub_edge_weight = (
+                edge_weight.new_empty((0,)) if edge_weight is not None else None
+            )
+        else:
+            edge_mask = (batch[edge_index[0]] == graph_id) & (
+                batch[edge_index[1]] == graph_id
+            )
+            sub_edge_index = edge_index[:, edge_mask]
+            sub_edge_weight = (
+                edge_weight[edge_mask] if edge_weight is not None else None
+            )
+
+            if sub_edge_index.numel() > 0:
+                node_to_local = torch.full(
+                    (num_nodes,),
+                    -1,
+                    dtype=torch.long,
+                    device=edge_index.device,
+                )
+                node_to_local[node_ids] = torch.arange(
+                    node_ids.numel(),
+                    device=edge_index.device,
+                )
+                sub_edge_index = node_to_local[sub_edge_index]
+            else:
+                sub_edge_index = edge_index.new_empty((2, 0))
+
+        out.append(
+            _SubgraphData(
+                node_ids=node_ids,
+                edge_index=sub_edge_index,
+                edge_weight=sub_edge_weight,
+            )
+        )
+
+    return out
+
+
+def _depth_one_assignment(
+    tree_nodes: dict[int, dict],
+    num_nodes: int,
+    device: torch.device,
+) -> Tensor:
+    """Convert depth-1 tree nodes into a node-to-cluster assignment vector."""
+    assignment = torch.full((num_nodes,), -1, dtype=torch.long, device=device)
+
+    # Deterministic ordering: process depth-1 nodes by id.
+    depth_one_nodes = [
+        tree_nodes[node_id]
+        for node_id in sorted(tree_nodes.keys())
+        if tree_nodes[node_id]["depth"] == 1
+    ]
+
+    cluster_id = 0
+    for node in depth_one_nodes:
+        children = node.get("children") or []
+        if not children:
+            continue
+
+        leaf_nodes = [tree_nodes[c].get("graphID", c) for c in children]
+        assignment[leaf_nodes] = cluster_id
+        cluster_id += 1
+
+    # Isolated/uncovered nodes are assigned to singleton clusters.
+    missing = torch.nonzero(assignment < 0, as_tuple=False).view(-1)
+    if missing.numel() > 0:
+        assignment[missing] = torch.arange(
+            cluster_id,
+            cluster_id + missing.numel(),
+            device=device,
+        )
+
+    return assignment
+
+
+# -----------------------------------------------------------------------------
+# Tree construction utilities
+# -----------------------------------------------------------------------------
+
+
+def _adj_mat_to_coding_tree(adj: np.ndarray, tree_depth: int) -> dict[int, dict]:
+    """Build a coding tree from an adjacency matrix.
+
+    Connected components are processed independently and then merged under a
+    single synthetic root to keep a single tree representation per graph.
+    """
     num_nodes = adj.shape[0]
+    if num_nodes == 0:
+        return {}
+
     n_components, labels = connected_components(
-        csgraph=adj, directed=False, return_labels=True
+        csgraph=adj,
+        directed=False,
+        return_labels=True,
     )
 
     if n_components == 1:
-        return trans_to_tree(adj, tree_depth)
-    else:
-        trees = []
-        for gi in range(n_components):
-            sub_nodes = set([u for u in range(num_nodes) if labels[u] == gi])
+        return _trans_to_tree(adj, tree_depth)
 
-            if len(sub_nodes) == 1:
-                node = list(sub_nodes)[0]
-                js = [
+    trees = []
+    for comp_id in range(n_components):
+        sub_nodes = [int(u) for u in np.where(labels == comp_id)[0]]
+
+        if len(sub_nodes) == 1:
+            leaf = sub_nodes[0]
+            nodes = [
+                {
+                    "ID": leaf,
+                    "parent": f"{comp_id}_1_0",
+                    "depth": 0,
+                    "children": None,
+                }
+            ]
+            for depth in range(1, tree_depth + 1):
+                nodes.append(
                     {
-                        "ID": node,
-                        "parent": "%s_%s_0" % (gi, 1),
-                        "depth": 0,
-                        "children": None,
+                        "ID": f"{comp_id}_{depth}_0",
+                        "parent": (
+                            f"{comp_id}_{depth + 1}_0" if depth < tree_depth else None
+                        ),
+                        "depth": depth,
+                        "children": [nodes[-1]["ID"]],
                     }
-                ]
-                for d in range(1, tree_depth + 1):
-                    js.append(
-                        {
-                            "ID": "%s_%s_0" % (gi, d),
-                            "parent": "%s_%s_0" % (gi, d + 1)
-                            if d < tree_depth
-                            else None,
-                            "depth": d,
-                            "children": [js[-1]["ID"]],
-                        }
-                    )
-            else:
-                sub_nodes = sorted(list(sub_nodes))
-                sub_adj = adj[np.ix_(sub_nodes, sub_nodes)]
-                # sg = g["G"].subgraph(sub_nodes)
-
-                tree = trans_to_tree(sub_adj, tree_depth)
-                js = list(tree.values())
-                rmap = {i: sub_nodes[i] for i in range(len(sub_nodes))}
-                for j in js:
-                    if j["depth"] > 0:
-                        rmap[j["ID"]] = "%s_%s_%s" % (gi, j["depth"], j["ID"])
-                for j in js:
-                    j["ID"] = rmap[j["ID"]]
-                    j["parent"] = rmap[j["parent"]] if j["depth"] < tree_depth else None
-                    j["children"] = (
-                        [rmap[c] for c in j["children"]] if j["children"] else None
-                    )
-            trees.append(js)
-        id_map = {}
-        for d in range(0, tree_depth + 1):
-            for js in trees:
-                for j in js:
-                    if j["depth"] == d:
-                        id_map[j["ID"]] = len(id_map) if d > 0 else j["ID"]
-        tree = {}
-        root_ids = []
-        for js in trees:
-            for j in js:
-                n = copy.deepcopy(j)
-                n["parent"] = id_map[n["parent"]] if n["parent"] else None
-                n["children"] = (
-                    [id_map[c] for c in n["children"]] if n["children"] else None
                 )
-                n["ID"] = id_map[n["ID"]]
-                tree[n["ID"]] = n
-                if n["parent"] is None:
-                    root_ids.append(n["ID"])
-        root_id = min(root_ids)
-        root_children = list(
-            itertools.chain.from_iterable([tree[i]["children"] for i in root_ids])
-        )
-        root_node = {
-            "ID": root_id,
-            "parent": None,
-            "children": root_children,
-            "depth": tree_depth,
-        }
-        [tree.pop(i) for i in root_ids]
-        for c in root_children:
-            tree[c]["parent"] = root_id
-        tree[root_id] = root_node
-        return tree
+            trees.append(nodes)
+            continue
+
+        sub_adj = adj[np.ix_(sub_nodes, sub_nodes)]
+        tree = _trans_to_tree(sub_adj, tree_depth)
+        nodes = [dict(node) for node in tree.values()]
+
+        # Remap local ids back to component/global ids.
+        remap = {i: sub_nodes[i] for i in range(len(sub_nodes))}
+        for node in nodes:
+            if node["depth"] > 0:
+                remap[node["ID"]] = f"{comp_id}_{node['depth']}_{node['ID']}"
+
+        for node in nodes:
+            node["ID"] = remap[node["ID"]]
+            if node["depth"] < tree_depth:
+                node["parent"] = remap[node["parent"]]
+            else:
+                node["parent"] = None
+            if node["children"] is not None:
+                node["children"] = [remap[c] for c in node["children"]]
+
+        trees.append(nodes)
+
+    # Global id remapping by depth (leaves keep their original indices).
+    id_map = {}
+    for depth in range(tree_depth + 1):
+        for nodes in trees:
+            for node in nodes:
+                if node["depth"] == depth:
+                    id_map[node["ID"]] = len(id_map) if depth > 0 else node["ID"]
+
+    tree = {}
+    root_ids = []
+    for nodes in trees:
+        for node in nodes:
+            new_node = dict(node)
+            new_node["parent"] = (
+                id_map[new_node["parent"]] if new_node["parent"] is not None else None
+            )
+            new_node["children"] = (
+                [id_map[c] for c in new_node["children"]]
+                if new_node["children"] is not None
+                else None
+            )
+            new_node["ID"] = id_map[new_node["ID"]]
+            tree[new_node["ID"]] = new_node
+
+            if new_node["parent"] is None:
+                root_ids.append(new_node["ID"])
+
+    root_ids = sorted(set(root_ids))
+    root_id = min(root_ids)
+    root_children = list(
+        itertools.chain.from_iterable(tree[rid]["children"] for rid in root_ids)
+    )
+
+    for rid in root_ids:
+        tree.pop(rid)
+
+    for child in root_children:
+        tree[child]["parent"] = root_id
+
+    tree[root_id] = {
+        "ID": root_id,
+        "parent": None,
+        "children": root_children,
+        "depth": tree_depth,
+    }
+    return tree
 
 
-def trans_to_tree(adj: np.ndarray, tree_depth: int):
-    part_tree = PartitionTree(adj_matrix=adj)
-    part_tree.build_coding_tree(tree_depth)
-    tree_nodes = update_node(part_tree.tree_node)
-    return tree_nodes
+def _trans_to_tree(adj: np.ndarray, tree_depth: int) -> dict[int, dict]:
+    tree = PartitionTree(adj_matrix=adj)
+    tree.build_coding_tree(tree_depth)
+    return _update_node(tree.tree_node)
 
 
-def update_depth(tree):
-    # set leaf depth
-    wait_update = [k for k, v in tree.items() if v.children is None]
+def _update_depth(tree: dict[int, "PartitionTreeNode"]) -> None:
+    """Populate :attr:`child_h` from leaves to root."""
+    wait_update = [node_id for node_id, node in tree.items() if node.children is None]
     while wait_update:
-        for nid in wait_update:
-            node = tree[nid]
+        next_wait = set()
+        for node_id in wait_update:
+            node = tree[node_id]
             if node.children is None:
                 node.child_h = 0
             else:
-                node.child_h = tree[list(node.children)[0]].child_h + 1
-        wait_update = set([tree[nid].parent for nid in wait_update if tree[nid].parent])
+                first_child = next(iter(node.children))
+                node.child_h = tree[first_child].child_h + 1
+
+            if node.parent is not None:
+                next_wait.add(node.parent)
+        wait_update = list(next_wait)
 
 
-def update_node(tree):
-    update_depth(tree)
-    d_id = [(v.child_h, v.ID) for k, v in tree.items()]
-    d_id.sort()
+def _update_node(tree: dict[int, "PartitionTreeNode"]) -> dict[int, dict]:
+    """Reindex tree nodes by depth and id.
+
+    This is equivalent to the legacy implementation but uses a precomputed
+    dictionary instead of repeated :obj:`list.index` scans.
+    """
+    _update_depth(tree)
+
+    depth_id_pairs = sorted((node.child_h, node.ID) for node in tree.values())
+    pair_to_new_id = {pair: idx for idx, pair in enumerate(depth_id_pairs)}
+
     new_tree = {}
-    for k, v in tree.items():
-        n = copy.deepcopy(v)
-        n.ID = d_id.index((n.child_h, n.ID))
-        if n.parent is not None:
-            n.parent = d_id.index((n.child_h + 1, n.parent))
-        if n.children is not None:
-            n.children = [d_id.index((n.child_h - 1, c)) for c in n.children]
-        n = n.__dict__
-        n["depth"] = n["child_h"]
-        new_tree[n["ID"]] = n
+    for node in tree.values():
+        child_h = node.child_h
+        new_id = pair_to_new_id[(child_h, node.ID)]
+
+        if node.parent is None:
+            new_parent = None
+        else:
+            new_parent = pair_to_new_id[(child_h + 1, node.parent)]
+
+        if node.children is None:
+            new_children = None
+        else:
+            new_children = [
+                pair_to_new_id[(child_h - 1, child_id)] for child_id in node.children
+            ]
+
+        new_tree[new_id] = {
+            "ID": new_id,
+            "partition": list(node.partition),
+            "parent": new_parent,
+            "children": new_children,
+            "vol": node.vol,
+            "g": node.g,
+            "merged": node.merged,
+            "child_h": child_h,
+            "child_cut": node.child_cut,
+            "depth": child_h,
+        }
+
     return new_tree
 
 
-def get_id():
-    i = 0
+# -----------------------------------------------------------------------------
+# Partition tree core algorithm
+# -----------------------------------------------------------------------------
+
+
+def _id_generator():
+    node_id = 0
     while True:
-        yield i
-        i += 1
+        yield node_id
+        node_id += 1
 
 
-def graph_parse(adj_matrix):
-    g_num_nodes = adj_matrix.shape[0]
-    adj_table = {}
-    VOL = 0
-    node_vol = []
-    for i in range(g_num_nodes):
-        n_v = 0
-        adj = set()
-        for j in range(g_num_nodes):
-            if adj_matrix[i, j] != 0:
-                n_v += adj_matrix[i, j]
-                VOL += adj_matrix[i, j]
-                adj.add(j)
-        adj_table[i] = adj
-        node_vol.append(n_v)
-    return g_num_nodes, VOL, node_vol, adj_table
+def _graph_parse(adj_matrix: np.ndarray):
+    """Parse dense adjacency into graph-level statistics.
+
+    This vectorized version replaces the original O(N^2) Python loops.
+    """
+    g_num_nodes = int(adj_matrix.shape[0])
+
+    node_vol = adj_matrix.sum(axis=1).tolist()
+    vol = float(sum(node_vol))
+
+    rows, cols = np.nonzero(adj_matrix)
+    adj_table = {i: set() for i in range(g_num_nodes)}
+    for row, col in zip(rows.tolist(), cols.tolist()):
+        adj_table[row].add(col)
+
+    return g_num_nodes, vol, node_vol, adj_table
 
 
-def cut_volume(adj_matrix, p1, p2):
-    c12 = 0
-    for i in range(len(p1)):
-        for j in range(len(p2)):
-            c = adj_matrix[p1[i], p2[j]]
-            if c != 0:
-                c12 += c
-    return c12
+def _cut_volume(adj_matrix: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> float:
+    """Compute the total edge weight between two node partitions."""
+    if p1.size == 0 or p2.size == 0:
+        return 0.0
+    return float(adj_matrix[np.ix_(p1, p2)].sum())
 
 
-def LayerFirst(node_dict, start_id):
-    stack = [start_id]
-    while len(stack) != 0:
-        node_id = stack.pop(0)
+def _layer_first(node_dict: dict[int, "PartitionTreeNode"], start_id: int):
+    """Breadth-first traversal over tree nodes."""
+    queue = [start_id]
+    while queue:
+        node_id = queue.pop(0)
         yield node_id
         if node_dict[node_id].children:
-            for c_id in node_dict[node_id].children:
-                stack.append(c_id)
+            queue.extend(node_dict[node_id].children)
 
 
-def merge(new_ID, id1, id2, cut_v, node_dict):
+def _merge_nodes(
+    new_id: int,
+    id1: int,
+    id2: int,
+    cut_v: float,
+    node_dict: dict[int, "PartitionTreeNode"],
+) -> None:
     new_partition = node_dict[id1].partition + node_dict[id2].partition
-    v = node_dict[id1].vol + node_dict[id2].vol
-    g = node_dict[id1].g + node_dict[id2].g - 2 * cut_v
+    vol = node_dict[id1].vol + node_dict[id2].vol
+    g_val = node_dict[id1].g + node_dict[id2].g - 2 * cut_v
     child_h = max(node_dict[id1].child_h, node_dict[id2].child_h) + 1
-    new_node = PartitionTreeNode(
-        ID=new_ID,
+
+    node_dict[new_id] = PartitionTreeNode(
+        ID=new_id,
         partition=new_partition,
         children={id1, id2},
-        g=g,
-        vol=v,
+        g=g_val,
+        vol=vol,
         child_h=child_h,
         child_cut=cut_v,
     )
-    node_dict[id1].parent = new_ID
-    node_dict[id2].parent = new_ID
-    node_dict[new_ID] = new_node
+    node_dict[id1].parent = new_id
+    node_dict[id2].parent = new_id
 
 
-def compressNode(node_dict, node_id, parent_id):
-    p_child_h = node_dict[parent_id].child_h
-    node_children = node_dict[node_id].children
+def _compress_node(
+    node_dict: dict[int, "PartitionTreeNode"],
+    node_id: int,
+    parent_id: int,
+) -> None:
+    parent_child_h = node_dict[parent_id].child_h
+    children = node_dict[node_id].children
+
     node_dict[parent_id].child_cut += node_dict[node_id].child_cut
     node_dict[parent_id].children.remove(node_id)
-    node_dict[parent_id].children = node_dict[parent_id].children.union(node_children)
-    for c in node_children:
-        node_dict[c].parent = parent_id
-    com_node_child_h = node_dict[node_id].child_h
+    node_dict[parent_id].children = node_dict[parent_id].children.union(children)
+
+    for child in children:
+        node_dict[child].parent = parent_id
+
+    compressed_child_h = node_dict[node_id].child_h
     node_dict.pop(node_id)
 
-    if (p_child_h - com_node_child_h) == 1:
+    if (parent_child_h - compressed_child_h) == 1:
         while True:
             max_child_h = max(
-                [node_dict[f_c].child_h for f_c in node_dict[parent_id].children]
+                node_dict[c].child_h for c in node_dict[parent_id].children
             )
             if node_dict[parent_id].child_h == (max_child_h + 1):
                 break
@@ -358,292 +559,312 @@ def compressNode(node_dict, node_id, parent_id):
                 break
 
 
-def child_tree_deepth(node_dict, nid):
-    node = node_dict[nid]
-    deepth = 0
+def _child_tree_depth(node_dict: dict[int, "PartitionTreeNode"], node_id: int) -> int:
+    node = node_dict[node_id]
+    depth = 0
     while node.parent is not None:
         node = node_dict[node.parent]
-        deepth += 1
-    deepth += node_dict[nid].child_h
-    return deepth
+        depth += 1
+    depth += node_dict[node_id].child_h
+    return depth
 
 
-def CompressDelta(node1, p_node):
-    a = node1.child_cut
-    v1 = node1.vol
-    v2 = p_node.vol
-    return a * math.log(v2 / v1)
+def _compress_delta(node: "PartitionTreeNode", parent: "PartitionTreeNode") -> float:
+    return node.child_cut * math.log(parent.vol / node.vol)
 
 
-def CombineDelta(node1, node2, cut_v, g_vol):
-    v1 = node1.vol
-    v2 = node2.vol
-    g1 = node1.g
-    g2 = node2.g
+def _combine_delta(
+    node1: "PartitionTreeNode",
+    node2: "PartitionTreeNode",
+    cut_v: float,
+    graph_vol: float,
+) -> float:
+    v1, v2 = node1.vol, node2.vol
+    g1, g2 = node1.g, node2.g
     v12 = v1 + v2
     return (
         (v1 - g1) * math.log(v12 / v1, 2)
         + (v2 - g2) * math.log(v12 / v2, 2)
-        - 2 * cut_v * math.log(g_vol / v12, 2)
-    ) / g_vol
+        - 2 * cut_v * math.log(graph_vol / v12, 2)
+    ) / graph_vol
 
 
+@dataclass
 class PartitionTreeNode:
-    def __init__(
-        self,
-        ID,
-        partition,
-        vol,
-        g,
-        children: set = None,
-        parent=None,
-        child_h=0,
-        child_cut=0,
-    ):
-        self.ID = ID
-        self.partition = partition
-        self.parent = parent
-        self.children = children
-        self.vol = vol
-        self.g = g
-        self.merged = False
-        self.child_h = child_h  # 不包括该节点的子树高度
-        self.child_cut = child_cut
+    """Node used by the SEP coding tree optimizer."""
 
-    def __str__(self):
-        return "{" + "{}:{}".format(self.__class__.__name__, self.gatherAttrs()) + "}"
-
-    def gatherAttrs(self):
-        return ",".join(
-            "{}={}".format(k, getattr(self, k)) for k in self.__dict__.keys()
-        )
+    ID: int
+    partition: list[int]
+    vol: float
+    g: float
+    children: Optional[set[int]] = None
+    parent: Optional[int] = None
+    child_h: int = 0
+    child_cut: float = 0.0
+    merged: bool = False
 
 
 class PartitionTree:
-    def __init__(self, adj_matrix):
+    """Internal tree optimizer used by SEPSelect."""
+
+    def __init__(self, adj_matrix: np.ndarray):
         self.adj_matrix = adj_matrix
         self.tree_node = {}
-        self.g_num_nodes, self.VOL, self.node_vol, self.adj_table = graph_parse(
+        self.g_num_nodes, self.VOL, self.node_vol, self.adj_table = _graph_parse(
             adj_matrix
         )
-        self.id_g = get_id()
+        self.id_gen = _id_generator()
         self.leaves = []
         self.build_leaves()
 
-    def build_leaves(self):
+    def build_leaves(self) -> None:
         for vertex in range(self.g_num_nodes):
-            ID = next(self.id_g)
-            v = self.node_vol[vertex]
-            leaf_node = PartitionTreeNode(ID=ID, partition=[vertex], g=v, vol=v)
-            self.tree_node[ID] = leaf_node
-            self.leaves.append(ID)
-
-    def build_sub_leaves(self, node_list, p_vol):
-        subgraph_node_dict = {}
-        ori_ent = 0
-        for vertex in node_list:
-            ori_ent += -(self.tree_node[vertex].g / self.VOL) * math.log2(
-                self.tree_node[vertex].vol / p_vol
+            node_id = next(self.id_gen)
+            vol = self.node_vol[vertex]
+            self.tree_node[node_id] = PartitionTreeNode(
+                ID=node_id,
+                partition=[vertex],
+                g=vol,
+                vol=vol,
             )
-            sub_n = set()
+            self.leaves.append(node_id)
+
+    def build_sub_leaves(self, node_list, parent_vol):
+        subgraph_node_dict = {}
+        ori_entropy = 0
+
+        for vertex in node_list:
+            ori_entropy += -(self.tree_node[vertex].g / self.VOL) * math.log2(
+                self.tree_node[vertex].vol / parent_vol
+            )
+
+            sub_neighbors = set()
             vol = 0
             for vertex_n in node_list:
-                c = self.adj_matrix[vertex, vertex_n]
-                if c != 0:
-                    vol += c
-                    sub_n.add(vertex_n)
-            sub_leaf = PartitionTreeNode(ID=vertex, partition=[vertex], g=vol, vol=vol)
-            subgraph_node_dict[vertex] = sub_leaf
-            self.adj_table[vertex] = sub_n
+                cut_val = self.adj_matrix[vertex, vertex_n]
+                if cut_val != 0:
+                    vol += cut_val
+                    sub_neighbors.add(vertex_n)
 
-        return subgraph_node_dict, ori_ent
+            subgraph_node_dict[vertex] = PartitionTreeNode(
+                ID=vertex,
+                partition=[vertex],
+                g=vol,
+                vol=vol,
+            )
+            self.adj_table[vertex] = sub_neighbors
+
+        return subgraph_node_dict, ori_entropy
 
     def build_root_down(self):
-        root_child = self.tree_node[self.root_id].children
+        root_children = self.tree_node[self.root_id].children
         subgraph_node_dict = {}
-        ori_en = 0
-        g_vol = self.tree_node[self.root_id].vol
-        for node_id in root_child:
-            node = self.tree_node[node_id]
-            ori_en += -(node.g / g_vol) * math.log2(node.vol / g_vol)
-            new_n = set()
-            for nei in self.adj_table[node_id]:
-                if nei in root_child:
-                    new_n.add(nei)
-            self.adj_table[node_id] = new_n
+        ori_entropy = 0
+        graph_vol = self.tree_node[self.root_id].vol
 
-            new_node = PartitionTreeNode(
+        for node_id in root_children:
+            node = self.tree_node[node_id]
+            ori_entropy += -(node.g / graph_vol) * math.log2(node.vol / graph_vol)
+
+            new_neighbors = set()
+            for neigh in self.adj_table[node_id]:
+                if neigh in root_children:
+                    new_neighbors.add(neigh)
+            self.adj_table[node_id] = new_neighbors
+
+            subgraph_node_dict[node_id] = PartitionTreeNode(
                 ID=node_id,
                 partition=node.partition,
                 vol=node.vol,
                 g=node.g,
                 children=node.children,
             )
-            subgraph_node_dict[node_id] = new_node
 
-        return subgraph_node_dict, ori_en
+        return subgraph_node_dict, ori_entropy
 
     def entropy(self, node_dict=None):
         if node_dict is None:
             node_dict = self.tree_node
+
         ent = 0
         for node_id, node in node_dict.items():
-            if node.parent is not None:
-                node_p = node_dict[node.parent]
-                node_vol = node.vol
-                node_g = node.g
-                node_p_vol = node_p.vol
-                ent += -(node_g / self.VOL) * math.log2(node_vol / node_p_vol)
+            if node.parent is None:
+                continue
+            parent = node_dict[node.parent]
+            ent += -(node.g / self.VOL) * math.log2(node.vol / parent.vol)
         return ent
 
-    def __build_k_tree(
-        self,
-        g_vol,
-        nodes_dict: dict,
-        k=None,
-    ):
+    def _build_k_tree(self, graph_vol, nodes_dict, k=None):
         min_heap = []
         cmp_heap = []
-        nodes_ids = nodes_dict.keys()
+        node_ids = nodes_dict.keys()
         new_id = None
-        for i in nodes_ids:
+
+        for i in node_ids:
             for j in self.adj_table[i]:
-                if j > i:
-                    n1 = nodes_dict[i]
-                    n2 = nodes_dict[j]
-                    if len(n1.partition) == 1 and len(n2.partition) == 1:
-                        cut_v = self.adj_matrix[n1.partition[0], n2.partition[0]]
-                    else:
-                        cut_v = cut_volume(
-                            self.adj_matrix,
-                            p1=np.array(n1.partition),
-                            p2=np.array(n2.partition),
-                        )
-                    diff = CombineDelta(nodes_dict[i], nodes_dict[j], cut_v, g_vol)
-                    heapq.heappush(min_heap, (diff, i, j, cut_v))
-        unmerged_count = len(nodes_ids)
+                if j <= i:
+                    continue
+
+                n1 = nodes_dict[i]
+                n2 = nodes_dict[j]
+                if len(n1.partition) == 1 and len(n2.partition) == 1:
+                    cut_v = self.adj_matrix[n1.partition[0], n2.partition[0]]
+                else:
+                    cut_v = _cut_volume(
+                        self.adj_matrix,
+                        p1=np.array(n1.partition),
+                        p2=np.array(n2.partition),
+                    )
+
+                diff = _combine_delta(nodes_dict[i], nodes_dict[j], cut_v, graph_vol)
+                heapq.heappush(min_heap, (diff, i, j, cut_v))
+
+        unmerged_count = len(node_ids)
         while unmerged_count > 1:
             if len(min_heap) == 0:
                 break
+
             diff, id1, id2, cut_v = heapq.heappop(min_heap)
             if nodes_dict[id1].merged or nodes_dict[id2].merged:
                 continue
+
             nodes_dict[id1].merged = True
             nodes_dict[id2].merged = True
-            new_id = next(self.id_g)
-            merge(new_id, id1, id2, cut_v, nodes_dict)
+
+            new_id = next(self.id_gen)
+            _merge_nodes(new_id, id1, id2, cut_v, nodes_dict)
+
             self.adj_table[new_id] = self.adj_table[id1].union(self.adj_table[id2])
-            for i in self.adj_table[new_id]:
-                self.adj_table[i].add(new_id)
-            # compress delta
+            for neigh in self.adj_table[new_id]:
+                self.adj_table[neigh].add(new_id)
+
             if nodes_dict[id1].child_h > 0:
                 heapq.heappush(
                     cmp_heap,
-                    [CompressDelta(nodes_dict[id1], nodes_dict[new_id]), id1, new_id],
+                    [_compress_delta(nodes_dict[id1], nodes_dict[new_id]), id1, new_id],
                 )
             if nodes_dict[id2].child_h > 0:
                 heapq.heappush(
                     cmp_heap,
-                    [CompressDelta(nodes_dict[id2], nodes_dict[new_id]), id2, new_id],
+                    [_compress_delta(nodes_dict[id2], nodes_dict[new_id]), id2, new_id],
                 )
+
             unmerged_count -= 1
 
-            for ID in self.adj_table[new_id]:
-                if not nodes_dict[ID].merged:
-                    n1 = nodes_dict[ID]
-                    n2 = nodes_dict[new_id]
-                    cut_v = cut_volume(
-                        self.adj_matrix, np.array(n1.partition), np.array(n2.partition)
-                    )
+            for neigh in self.adj_table[new_id]:
+                if nodes_dict[neigh].merged:
+                    continue
 
-                    new_diff = CombineDelta(
-                        nodes_dict[ID], nodes_dict[new_id], cut_v, g_vol
-                    )
-                    heapq.heappush(min_heap, (new_diff, ID, new_id, cut_v))
+                n1 = nodes_dict[neigh]
+                n2 = nodes_dict[new_id]
+                cut_v = _cut_volume(
+                    self.adj_matrix,
+                    np.array(n1.partition),
+                    np.array(n2.partition),
+                )
+                new_diff = _combine_delta(nodes_dict[neigh], n2, cut_v, graph_vol)
+                heapq.heappush(min_heap, (new_diff, neigh, new_id, cut_v))
+
         root = new_id
 
         if unmerged_count > 1:
-            # combine solitary node
-            # print('processing solitary node')
-            assert len(min_heap) == 0
-            unmerged_nodes = {i for i, j in nodes_dict.items() if not j.merged}
-            new_child_h = max([nodes_dict[i].child_h for i in unmerged_nodes]) + 1
+            unmerged_nodes = {i for i, node in nodes_dict.items() if not node.merged}
+            new_child_h = max(nodes_dict[i].child_h for i in unmerged_nodes) + 1
 
-            new_id = next(self.id_g)
-            new_node = PartitionTreeNode(
+            new_id = next(self.id_gen)
+            nodes_dict[new_id] = PartitionTreeNode(
                 ID=new_id,
-                partition=list(nodes_ids),
+                partition=list(node_ids),
                 children=unmerged_nodes,
-                vol=g_vol,
+                vol=graph_vol,
                 g=0,
                 child_h=new_child_h,
             )
-            nodes_dict[new_id] = new_node
 
-            for i in unmerged_nodes:
-                nodes_dict[i].merged = True
-                nodes_dict[i].parent = new_id
-                if nodes_dict[i].child_h > 0:
+            for node_id in unmerged_nodes:
+                nodes_dict[node_id].merged = True
+                nodes_dict[node_id].parent = new_id
+                if nodes_dict[node_id].child_h > 0:
                     heapq.heappush(
                         cmp_heap,
-                        [CompressDelta(nodes_dict[i], nodes_dict[new_id]), i, new_id],
+                        [
+                            _compress_delta(nodes_dict[node_id], nodes_dict[new_id]),
+                            node_id,
+                            new_id,
+                        ],
                     )
             root = new_id
 
         if k is not None:
             while nodes_dict[root].child_h > k:
-                diff, node_id, p_id = heapq.heappop(cmp_heap)
-                if child_tree_deepth(nodes_dict, node_id) <= k:
+                diff, node_id, parent_id = heapq.heappop(cmp_heap)
+                if _child_tree_depth(nodes_dict, node_id) <= k:
                     continue
+
                 children = nodes_dict[node_id].children
-                compressNode(nodes_dict, node_id, p_id)
+                _compress_node(nodes_dict, node_id, parent_id)
                 if nodes_dict[root].child_h == k:
                     break
-                for e in cmp_heap:
-                    if e[1] == p_id:
-                        if child_tree_deepth(nodes_dict, p_id) > k:
-                            e[0] = CompressDelta(nodes_dict[e[1]], nodes_dict[e[2]])
-                    if e[1] in children:
-                        if nodes_dict[e[1]].child_h == 0:
+
+                for entry in cmp_heap:
+                    if entry[1] == parent_id:
+                        if _child_tree_depth(nodes_dict, parent_id) > k:
+                            entry[0] = _compress_delta(
+                                nodes_dict[entry[1]], nodes_dict[entry[2]]
+                            )
+
+                    if entry[1] in children:
+                        if nodes_dict[entry[1]].child_h == 0:
                             continue
-                        if child_tree_deepth(nodes_dict, e[1]) > k:
-                            e[2] = p_id
-                            e[0] = CompressDelta(nodes_dict[e[1]], nodes_dict[p_id])
+                        if _child_tree_depth(nodes_dict, entry[1]) > k:
+                            entry[2] = parent_id
+                            entry[0] = _compress_delta(
+                                nodes_dict[entry[1]],
+                                nodes_dict[parent_id],
+                            )
+
                 heapq.heapify(cmp_heap)
+
         return root
 
     def check_balance(self, node_dict, root_id):
-        root_c = copy.deepcopy(node_dict[root_id].children)
-        for c in root_c:
-            if node_dict[c].child_h == 0:
-                self.single_up(node_dict, c)
+        root_children = set(node_dict[root_id].children)
+        for child in root_children:
+            if node_dict[child].child_h == 0:
+                self.single_up(node_dict, child)
 
     def single_up(self, node_dict, node_id):
-        new_id = next(self.id_g)
-        p_id = node_dict[node_id].parent
-        grow_node = PartitionTreeNode(
+        new_id = next(self.id_gen)
+        parent_id = node_dict[node_id].parent
+
+        node_dict[new_id] = PartitionTreeNode(
             ID=new_id,
             partition=node_dict[node_id].partition,
-            parent=p_id,
+            parent=parent_id,
             children={node_id},
             vol=node_dict[node_id].vol,
             g=node_dict[node_id].g,
         )
+
         node_dict[node_id].parent = new_id
-        node_dict[p_id].children.remove(node_id)
-        node_dict[p_id].children.add(new_id)
-        node_dict[new_id] = grow_node
+        node_dict[parent_id].children.remove(node_id)
+        node_dict[parent_id].children.add(new_id)
+
         node_dict[new_id].child_h = node_dict[node_id].child_h + 1
+
         self.adj_table[new_id] = self.adj_table[node_id]
-        for i in self.adj_table[node_id]:
-            self.adj_table[i].add(new_id)
+        for neigh in self.adj_table[node_id]:
+            self.adj_table[neigh].add(new_id)
 
     def root_down_delta(self):
         if len(self.tree_node[self.root_id].children) < 3:
             return 0, None, None
+
         subgraph_node_dict, ori_entropy = self.build_root_down()
-        g_vol = self.tree_node[self.root_id].vol
-        new_root = self.__build_k_tree(g_vol=g_vol, nodes_dict=subgraph_node_dict, k=2)
+        graph_vol = self.tree_node[self.root_id].vol
+        new_root = self._build_k_tree(
+            graph_vol=graph_vol, nodes_dict=subgraph_node_dict, k=2
+        )
         self.check_balance(subgraph_node_dict, new_root)
 
         new_entropy = self.entropy(subgraph_node_dict)
@@ -652,12 +873,13 @@ class PartitionTree:
 
     def leaf_up_entropy(self, sub_node_dict, sub_root_id, node_id):
         ent = 0
-        for sub_node_id in LayerFirst(sub_node_dict, sub_root_id):
+        for sub_node_id in _layer_first(sub_node_dict, sub_root_id):
             if sub_node_id == sub_root_id:
                 sub_node_dict[sub_root_id].vol = self.tree_node[node_id].vol
                 sub_node_dict[sub_root_id].g = self.tree_node[node_id].g
+                continue
 
-            elif sub_node_dict[sub_node_id].child_h == 1:
+            if sub_node_dict[sub_node_id].child_h == 1:
                 node = sub_node_dict[sub_node_id]
                 inner_vol = node.vol - node.g
                 partition = node.partition
@@ -665,61 +887,69 @@ class PartitionTree:
                 ori_g = ori_vol - inner_vol
                 node.vol = ori_vol
                 node.g = ori_g
-                node_p = sub_node_dict[node.parent]
-                ent += -(node.g / self.VOL) * math.log2(node.vol / node_p.vol)
+                parent = sub_node_dict[node.parent]
+                ent += -(node.g / self.VOL) * math.log2(node.vol / parent.vol)
             else:
                 node = sub_node_dict[sub_node_id]
                 node.g = self.tree_node[sub_node_id].g
                 node.vol = self.tree_node[sub_node_id].vol
-                node_p = sub_node_dict[node.parent]
-                ent += -(node.g / self.VOL) * math.log2(node.vol / node_p.vol)
+                parent = sub_node_dict[node.parent]
+                ent += -(node.g / self.VOL) * math.log2(node.vol / parent.vol)
+
         return ent
 
     def leaf_up(self):
-        h1_id = set()
+        h1_ids = {self.tree_node[leaf].parent for leaf in self.leaves}
         h1_new_child_tree = {}
         id_mapping = {}
-        for leaf in self.leaves:
-            p = self.tree_node[leaf].parent
-            h1_id.add(p)
         delta = 0
-        for node_id in h1_id:
+
+        for node_id in h1_ids:
             candidate_node = self.tree_node[node_id]
             sub_nodes = candidate_node.partition
-            if len(sub_nodes) == 1:
+
+            if len(sub_nodes) <= 2:
                 id_mapping[node_id] = None
-            if len(sub_nodes) == 2:
-                id_mapping[node_id] = None
-            if len(sub_nodes) >= 3:
-                sub_g_vol = candidate_node.vol - candidate_node.g
-                subgraph_node_dict, ori_ent = self.build_sub_leaves(
-                    sub_nodes, candidate_node.vol
-                )
-                sub_root = self.__build_k_tree(
-                    g_vol=sub_g_vol, nodes_dict=subgraph_node_dict, k=2
-                )
-                self.check_balance(subgraph_node_dict, sub_root)
-                new_ent = self.leaf_up_entropy(subgraph_node_dict, sub_root, node_id)
-                delta += ori_ent - new_ent
-                h1_new_child_tree[node_id] = subgraph_node_dict
-                id_mapping[node_id] = sub_root
+                continue
+
+            sub_graph_vol = candidate_node.vol - candidate_node.g
+            subgraph_node_dict, ori_entropy = self.build_sub_leaves(
+                sub_nodes,
+                candidate_node.vol,
+            )
+
+            sub_root = self._build_k_tree(
+                graph_vol=sub_graph_vol,
+                nodes_dict=subgraph_node_dict,
+                k=2,
+            )
+            self.check_balance(subgraph_node_dict, sub_root)
+
+            new_entropy = self.leaf_up_entropy(subgraph_node_dict, sub_root, node_id)
+            delta += ori_entropy - new_entropy
+
+            h1_new_child_tree[node_id] = subgraph_node_dict
+            id_mapping[node_id] = sub_root
+
         delta = delta / self.g_num_nodes
         return delta, id_mapping, h1_new_child_tree
 
     def leaf_up_update(self, id_mapping, leaf_up_dict):
         for node_id, h1_root in id_mapping.items():
             if h1_root is None:
-                children = copy.deepcopy(self.tree_node[node_id].children)
-                for i in children:
-                    self.single_up(self.tree_node, i)
-            else:
-                h1_dict = leaf_up_dict[node_id]
-                self.tree_node[node_id].children = h1_dict[h1_root].children
-                for h1_c in h1_dict[h1_root].children:
-                    assert h1_c not in self.tree_node
-                    h1_dict[h1_c].parent = node_id
-                h1_dict.pop(h1_root)
-                self.tree_node.update(h1_dict)
+                children = set(self.tree_node[node_id].children)
+                for child in children:
+                    self.single_up(self.tree_node, child)
+                continue
+
+            h1_dict = leaf_up_dict[node_id]
+            self.tree_node[node_id].children = h1_dict[h1_root].children
+            for h1_child in h1_dict[h1_root].children:
+                assert h1_child not in self.tree_node
+                h1_dict[h1_child].parent = node_id
+            h1_dict.pop(h1_root)
+            self.tree_node.update(h1_dict)
+
         self.tree_node[self.root_id].child_h += 1
 
     def root_down_update(self, new_id, root_down_dict):
@@ -727,6 +957,7 @@ class PartitionTree:
         for node_id in root_down_dict[new_id].children:
             assert node_id not in self.tree_node
             root_down_dict[node_id].parent = self.root_id
+
         root_down_dict.pop(new_id)
         self.tree_node.update(root_down_dict)
         self.tree_node[self.root_id].child_h += 1
@@ -734,10 +965,12 @@ class PartitionTree:
     def build_coding_tree(self, k=2, mode="v2"):
         if k == 1:
             return
+
         if mode == "v1" or k is None:
-            self.root_id = self.__build_k_tree(self.VOL, self.tree_node, k=k)
+            self.root_id = self._build_k_tree(self.VOL, self.tree_node, k=k)
+
         elif mode == "v2":
-            self.root_id = self.__build_k_tree(self.VOL, self.tree_node, k=2)
+            self.root_id = self._build_k_tree(self.VOL, self.tree_node, k=2)
             self.check_balance(self.tree_node, self.root_id)
 
             if self.tree_node[self.root_id].child_h < 2:
@@ -748,7 +981,6 @@ class PartitionTree:
                 if flag == 0:
                     leaf_up_delta, id_mapping, leaf_up_dict = self.leaf_up()
                     root_down_delta, new_id, root_down_dict = self.root_down_delta()
-
                 elif flag == 1:
                     leaf_up_delta, id_mapping, leaf_up_dict = self.leaf_up()
                 elif flag == 2:
@@ -757,51 +989,20 @@ class PartitionTree:
                     raise ValueError
 
                 if leaf_up_delta < root_down_delta:
-                    # print('root down')
-                    # root down update and recompute root down delta
                     flag = 2
                     self.root_down_update(new_id, root_down_dict)
-
                 else:
-                    # leaf up update
-                    # print('leave up')
                     flag = 1
-                    # print(self.tree_node[self.root_id].child_h)
                     self.leaf_up_update(id_mapping, leaf_up_dict)
-                    # print(self.tree_node[self.root_id].child_h)
 
-                    # update root down leave nodes' children
                     if root_down_delta != 0:
                         for root_down_id, root_down_node in root_down_dict.items():
                             if root_down_node.child_h == 0:
                                 root_down_node.children = self.tree_node[
                                     root_down_id
                                 ].children
+
         count = 0
-        for _ in LayerFirst(self.tree_node, self.root_id):
+        for _ in _layer_first(self.tree_node, self.root_id):
             count += 1
         assert len(self.tree_node) == count
-
-
-if __name__ == "__main__":
-    import torch
-    from torch_geometric.datasets import TUDataset
-    from torch_geometric.loader import DataLoader
-
-    print("hello")
-    sep_sel = SEPSelect()
-    dataset = TUDataset(
-        root="../../data/TUDataset",
-        name="MUTAG",
-        pre_transform=None,
-        force_reload=True,
-    )
-    train_loader = DataLoader(dataset[:0.9], batch_size=32, shuffle=True)
-    test_loader = DataLoader(dataset[0.9:], batch_size=32)
-
-    for data in train_loader:
-        # print(data.edge_index.shape)
-        sep_sel(
-            edge_index=data.edge_index, batch=data.batch, edge_weight=data.edge_weight
-        )
-        break

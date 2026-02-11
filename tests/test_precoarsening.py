@@ -27,7 +27,7 @@ except (ImportError, AssertionError):
     PANPooling = None
 
 
-poolers = ["ndp", "kmis", "graclus"]
+poolers = ["ndp", "kmis", "graclus", "sep", "eigen"]
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
