@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
@@ -236,9 +236,13 @@ class PreCoarsening(BaseTransform):
                 raise ValueError("`recursive_depth` must be greater than 0.")
             poolers = [pooler for _ in range(recursive_depth)]
 
-        self.poolers = tuple(self._resolve_pooler_spec(spec) for spec in poolers)
+        self._pooler_entries = tuple(
+            self._resolve_pooler_spec_with_key(spec) for spec in poolers
+        )
+        self.poolers = tuple(pooler for pooler, _ in self._pooler_entries)
         if not self.poolers:
             raise ValueError("At least one pooling level is required.")
+        self._pooler_runs = tuple(self._collapse_consecutive_runs(self._pooler_entries))
         self.pooler = self.poolers[0]  # Backward compatibility.
         self.recursive_depth = len(self.poolers)
 
@@ -248,7 +252,38 @@ class PreCoarsening(BaseTransform):
 
         return get_pooler(pooler_name, **(kwargs or {}))
 
+    @staticmethod
+    def _freeze_config_value(value: Any):
+        """Convert nested configuration values into hashable structures."""
+        if isinstance(value, Mapping):
+            return tuple(
+                sorted(
+                    (str(k), PreCoarsening._freeze_config_value(v))
+                    for k, v in value.items()
+                )
+            )
+        if isinstance(value, (list, tuple)):
+            return tuple(PreCoarsening._freeze_config_value(v) for v in value)
+        if isinstance(value, set):
+            return tuple(
+                sorted(
+                    (PreCoarsening._freeze_config_value(v) for v in value),
+                    key=repr,
+                )
+            )
+        try:
+            hash(value)
+            return value
+        except TypeError:
+            return repr(value)
+
     def _resolve_pooler_spec(self, spec: PoolerLevelSpec) -> SRCPooling:
+        pooler, _ = self._resolve_pooler_spec_with_key(spec)
+        return pooler
+
+    def _resolve_pooler_spec_with_key(
+        self, spec: PoolerLevelSpec
+    ) -> tuple[SRCPooling, tuple]:
         if isinstance(spec, dict):
             spec_dict = dict(spec)
             spec = (
@@ -257,15 +292,57 @@ class PreCoarsening(BaseTransform):
             )
 
         if isinstance(spec, tuple):
-            pooler = self._build_pooler(spec[0], spec[1])
+            pooler_or_name = spec[0]
+            if pooler_or_name is None:
+                raise ValueError("Pooler spec must include a pooler name or instance.")
+            pooler_kwargs = dict(spec[1] or {})
+            if isinstance(pooler_or_name, SRCPooling):
+                if pooler_kwargs:
+                    raise ValueError(
+                        "Cannot provide kwargs together with an instantiated pooler."
+                    )
+                pooler = pooler_or_name
+                collapse_key = ("obj", id(pooler))
+            else:
+                pooler_name = str(pooler_or_name).lower()
+                pooler = self._build_pooler(pooler_name, pooler_kwargs)
+                collapse_key = (
+                    "spec",
+                    pooler_name,
+                    self._freeze_config_value(pooler_kwargs),
+                )
         elif isinstance(spec, str):
-            pooler = self._build_pooler(spec)
+            pooler_name = spec.lower()
+            pooler = self._build_pooler(pooler_name)
+            collapse_key = ("spec", pooler_name, ())
         else:
             pooler = spec
+            collapse_key = ("obj", id(pooler))
 
         if pooler.is_trainable:
             raise ValueError("The pooler must not be trainable.")
-        return pooler
+        return pooler, collapse_key
+
+    @staticmethod
+    def _collapse_consecutive_runs(
+        entries: Sequence[tuple[SRCPooling, tuple]],
+    ) -> list[tuple[SRCPooling, int]]:
+        if len(entries) == 0:
+            return []
+
+        collapsed: list[tuple[SRCPooling, int]] = []
+        current_pooler, current_key = entries[0]
+        run_len = 1
+
+        for pooler, key in entries[1:]:
+            if key == current_key:
+                run_len += 1
+                continue
+            collapsed.append((current_pooler, run_len))
+            current_pooler, current_key = pooler, key
+            run_len = 1
+        collapsed.append((current_pooler, run_len))
+        return collapsed
 
     @torch.no_grad()
     def forward(self, data: Data) -> Data:
@@ -273,15 +350,23 @@ class PreCoarsening(BaseTransform):
         data_obj = data if self.input_key is None else getattr(data, self.input_key)
 
         pooled_out = []
-        for pooler in self.poolers:
-            data_pooled = pooler.precoarsening(
+        for pooler, run_len in self._pooler_runs:
+            run_outputs = pooler.multi_level_precoarsening(
+                levels=run_len,
                 edge_index=data_obj.edge_index,
                 edge_weight=data_obj.edge_weight,
                 batch=data_obj.batch,
                 num_nodes=data_obj.num_nodes,
             )
-            data_obj = data_pooled.as_data()
-            pooled_out.append(data_obj)
+            if len(run_outputs) != run_len:
+                raise ValueError(
+                    f"{type(pooler).__name__}.multi_level_precoarsening returned "
+                    f"{len(run_outputs)} levels, expected {run_len}."
+                )
+
+            for data_pooled in run_outputs:
+                data_obj = data_pooled.as_data()
+                pooled_out.append(data_obj)
 
         setattr(data, self.output_key, pooled_out)
 

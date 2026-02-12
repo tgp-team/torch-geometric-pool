@@ -553,11 +553,88 @@ class Precoarsenable:
         """
         raise NotImplementedError("Precoarsening is not supported by this pooler.")
 
+    def multi_level_precoarsening(
+        self,
+        levels: int,
+        edge_index: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
+        *,
+        batch: Optional[Tensor] = None,
+        num_nodes: Optional[int] = None,
+        **kwargs,
+    ) -> List[PoolingOutput]:
+        r"""Precompute multiple coarsening levels.
+
+        The default implementation performs a greedy rollout by repeatedly
+        calling :meth:`precoarsening`. Poolers can override this method to
+        implement method-specific multi-level strategies.
+        """
+        if levels < 1:
+            raise ValueError(f"'levels' must be >= 1, got {levels}.")
+
+        pooled_levels = []
+        current_edge_index = edge_index
+        current_edge_weight = edge_weight
+        current_batch = batch
+        current_num_nodes = num_nodes
+
+        for _ in range(levels):
+            pooled = self.precoarsening(
+                edge_index=current_edge_index,
+                edge_weight=current_edge_weight,
+                batch=current_batch,
+                num_nodes=current_num_nodes,
+                **kwargs,
+            )
+            pooled_levels.append(pooled)
+
+            pooled_data = pooled.as_data()
+            current_edge_index = pooled_data.edge_index
+            current_edge_weight = pooled_data.edge_weight
+            current_batch = pooled_data.batch
+            current_num_nodes = pooled_data.num_nodes
+
+        return pooled_levels
+
 
 class BasePrecoarseningMixin(Precoarsenable):
     r"""A mixin class for pooling layers that implements the
     pre-coarsening strategy.
     """
+
+    def _precoarsening_from_select_output(
+        self,
+        so: SelectOutput,
+        edge_index: Adj,
+        edge_weight: Optional[Tensor] = None,
+        *,
+        batch: Optional[Tensor] = None,
+        **kwargs,
+    ) -> PoolingOutput:
+        if batch is None:
+            batch = so.batch if getattr(so, "batch", None) is not None else None
+            if batch is None:
+                n_nodes = so.num_nodes
+                batch = torch.zeros(n_nodes, dtype=torch.long, device=so.s.device)
+            so.batch = batch
+
+        batch_pooled = self.reducer.reduce_batch(select_output=so, batch=batch)
+
+        connector = getattr(self, "preconnector", self.connector)
+        edge_index_pooled, edge_weight_pooled = connector(
+            so=so,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
+            **kwargs,
+        )
+        return PoolingOutput(
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+        )
 
     def precoarsening(
         self,
@@ -579,26 +656,10 @@ class BasePrecoarseningMixin(Precoarsenable):
             **kwargs,
         )
 
-        if batch is None:
-            batch = so.batch if getattr(so, "batch", None) is not None else None
-            if batch is None:
-                n_nodes = so.num_nodes
-                batch = torch.zeros(n_nodes, dtype=torch.long, device=so.s.device)
-            so.batch = batch
-
-        batch_pooled = self.reducer.reduce_batch(select_output=so, batch=batch)
-
-        connector = getattr(self, "preconnector", self.connector)
-        edge_index_pooled, edge_weight_pooled = connector(
+        return self._precoarsening_from_select_output(
             so=so,
             edge_index=edge_index,
             edge_weight=edge_weight,
             batch=batch,
-            batch_pooled=batch_pooled,
-        )
-        return PoolingOutput(
-            edge_index=edge_index_pooled,
-            edge_weight=edge_weight_pooled,
-            batch=batch_pooled,
-            so=so,
+            **kwargs,
         )

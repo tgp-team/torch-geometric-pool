@@ -19,8 +19,6 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
     SEP performs graph pooling by **optimizing cluster assignments globally**, in a single
     shot, with the goal of minimizing **structural entropy** over the whole graph.
 
-    WARNING: This pooling operator works only if it is the only pooling operator in the pipeline.
-
     Args:
         cached (bool, optional):
             If :obj:`True`, cache :class:`~tgp.select.SelectOutput`. (default: :obj:`False`)
@@ -133,6 +131,77 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
             so=so,
         )
         return out
+
+    def multi_level_precoarsening(
+        self,
+        levels: int,
+        edge_index: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
+        *,
+        batch: Optional[Tensor] = None,
+        num_nodes: Optional[int] = None,
+        **kwargs,
+    ) -> list[PoolingOutput]:
+        """Compute multiple SEP pre-coarsening levels from a single tree hierarchy."""
+        if levels < 1:
+            raise ValueError(f"'levels' must be >= 1, got {levels}.")
+        if edge_index is None:
+            raise ValueError("edge_index cannot be None for pre-coarsening.")
+        if levels == 1:
+            return [
+                self.precoarsening(
+                    edge_index=edge_index,
+                    edge_weight=edge_weight,
+                    batch=batch,
+                    num_nodes=num_nodes,
+                    **kwargs,
+                )
+            ]
+
+        so_levels = self.selector.multi_level_select(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=num_nodes,
+            levels=levels,
+            **kwargs,
+        )
+        if len(so_levels) != levels:
+            raise RuntimeError(
+                f"SEPSelect returned {len(so_levels)} levels, expected {levels}."
+            )
+
+        pooled_levels = []
+        current_edge_index = edge_index
+        current_edge_weight = edge_weight
+        current_batch = batch
+        current_num_nodes = num_nodes
+
+        for so in so_levels:
+            if current_num_nodes is not None and int(current_num_nodes) != int(
+                so.num_nodes
+            ):
+                raise RuntimeError(
+                    "Inconsistent hierarchy sizes in multi-level SEP pre-coarsening: "
+                    f"expected {int(current_num_nodes)} nodes, got {int(so.num_nodes)}."
+                )
+
+            pooled = self._precoarsening_from_select_output(
+                so=so,
+                edge_index=current_edge_index,
+                edge_weight=current_edge_weight,
+                batch=current_batch,
+                **kwargs,
+            )
+            pooled_levels.append(pooled)
+
+            pooled_data = pooled.as_data()
+            current_edge_index = pooled_data.edge_index
+            current_edge_weight = pooled_data.edge_weight
+            current_batch = pooled_data.batch
+            current_num_nodes = pooled_data.num_nodes
+
+        return pooled_levels
 
     def extra_repr_args(self) -> dict:
         # TODO: i am not sure  what we should put here
