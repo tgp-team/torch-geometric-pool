@@ -147,8 +147,13 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
             raise ValueError(f"'levels' must be >= 1, got {levels}.")
         if edge_index is None:
             raise ValueError("edge_index cannot be None for pre-coarsening.")
+
+        clear_cache = getattr(self, "clear_cache", None)
+        if callable(clear_cache):
+            clear_cache()
+
         if levels == 1:
-            return [
+            pooled_levels = [
                 self.precoarsening(
                     edge_index=edge_index,
                     edge_weight=edge_weight,
@@ -157,6 +162,9 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
                     **kwargs,
                 )
             ]
+            if callable(clear_cache):
+                clear_cache()
+            return pooled_levels
 
         so_levels = self.selector.multi_level_select(
             edge_index=edge_index,
@@ -201,6 +209,8 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
             current_batch = pooled_data.batch
             current_num_nodes = pooled_data.num_nodes
 
+        if callable(clear_cache):
+            clear_cache()
         return pooled_levels
 
     def extra_repr_args(self) -> dict:

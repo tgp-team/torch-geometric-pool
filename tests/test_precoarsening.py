@@ -148,6 +148,30 @@ def test_precoarsening_with_mixed_level_poolers():
     assert len(data_t.pooled_data) == 2
 
 
+def test_precoarsening_collapsed_cached_pooler_recomputes_levels():
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3, 3, 4, 4, 5], [1, 0, 2, 1, 3, 2, 4, 3, 5, 4]],
+        dtype=torch.long,
+    )
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
+    x = torch.randn((6, 3))
+    batch = torch.zeros(6, dtype=torch.long)
+    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
+    data.num_nodes = 6
+
+    # Repeated identical configs collapse into one multi-level run on one pooler
+    # instance. With cached=True this must still recompute each level.
+    transform = PreCoarsening(
+        poolers=[("ndp", {"cached": True}), ("ndp", {"cached": True})]
+    )
+    data_t = transform(data)
+
+    assert len(data_t.pooled_data) == 2
+    level_0 = data_t.pooled_data[0]
+    level_1 = data_t.pooled_data[1]
+    assert level_1.so.num_nodes == level_0.so.num_supernodes
+
+
 def test_precoarsening_eigen_fixed_k_collates_across_graph_sizes():
     # One graph with 4 nodes (< k) and one with 6 nodes (> k)
     edge_small = torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long)

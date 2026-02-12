@@ -568,10 +568,16 @@ class Precoarsenable:
         The default implementation performs a greedy rollout by repeatedly
         calling :meth:`precoarsening`. Poolers can override this method to
         implement method-specific multi-level strategies.
+
+        Notes:
+            The rollout clears pooling caches before each level when available.
+            This avoids stale :class:`~tgp.select.SelectOutput` reuse when
+            :obj:`cached=True` and the graph size changes between levels.
         """
         if levels < 1:
             raise ValueError(f"'levels' must be >= 1, got {levels}.")
 
+        clear_cache = getattr(self, "clear_cache", None)
         pooled_levels = []
         current_edge_index = edge_index
         current_edge_weight = edge_weight
@@ -579,6 +585,8 @@ class Precoarsenable:
         current_num_nodes = num_nodes
 
         for _ in range(levels):
+            if callable(clear_cache):
+                clear_cache()
             pooled = self.precoarsening(
                 edge_index=current_edge_index,
                 edge_weight=current_edge_weight,
@@ -593,6 +601,9 @@ class Precoarsenable:
             current_edge_weight = pooled_data.edge_weight
             current_batch = pooled_data.batch
             current_num_nodes = pooled_data.num_nodes
+
+        if callable(clear_cache):
+            clear_cache()
 
         return pooled_levels
 
