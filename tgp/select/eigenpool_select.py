@@ -349,9 +349,7 @@ def eigenpool_select(
 
         if edge_index_i.numel() == 0:
             # Graph has nodes but no edges: use all-zero adjacency.
-            adj_dense = torch.zeros(
-                (n_nodes, n_nodes), dtype=out_dtype, device=device
-            )
+            adj_dense = torch.zeros((n_nodes, n_nodes), dtype=out_dtype, device=device)
         else:
             node_start = int(node_ptr[i].item())
             # Convert global node indices to per-graph local indexing [0, n_nodes).
