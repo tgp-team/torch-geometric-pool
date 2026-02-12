@@ -611,15 +611,16 @@ class BasePrecoarseningMixin(Precoarsenable):
         batch: Optional[Tensor] = None,
         **kwargs,
     ) -> PoolingOutput:
+        # Reduce batch vector according to the select output.
         if batch is None:
             batch = so.batch if getattr(so, "batch", None) is not None else None
             if batch is None:
                 n_nodes = so.num_nodes
                 batch = torch.zeros(n_nodes, dtype=torch.long, device=so.s.device)
             so.batch = batch
-
         batch_pooled = self.reducer.reduce_batch(select_output=so, batch=batch)
 
+        # Compute pooled adj matrix through the connect operator.
         connector = getattr(self, "preconnector", self.connector)
         edge_index_pooled, edge_weight_pooled = connector(
             so=so,
@@ -629,6 +630,7 @@ class BasePrecoarseningMixin(Precoarsenable):
             batch_pooled=batch_pooled,
             **kwargs,
         )
+
         return PoolingOutput(
             edge_index=edge_index_pooled,
             edge_weight=edge_weight_pooled,

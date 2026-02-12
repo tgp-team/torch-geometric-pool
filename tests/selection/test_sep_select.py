@@ -19,6 +19,7 @@ from tgp.select.sep_select import (
     _graph_parse,
     _id_generator,
     _layer_first,
+    _make_select_output,
     _merge_nodes,
     _split_subgraphs,
     _trans_to_tree,
@@ -118,19 +119,14 @@ def test_split_subgraphs_and_cluster_branches():
     assert len(subgraphs) == 2
 
     selector = SEPSelect()
-    local_empty, k_empty = selector._cluster_subgraph(
-        subgraphs[0].__class__(
-            node_ids=torch.empty((0,), dtype=torch.long),
-            edge_index=torch.empty((2, 0), dtype=torch.long),
-            edge_weight=None,
-        )
+    out = selector(
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        batch=batch,
+        num_nodes=3,
     )
-    assert local_empty.numel() == 0
-    assert k_empty == 0
-
-    local_iso, k_iso = selector._cluster_subgraph(subgraphs[0])
-    assert torch.equal(local_iso, torch.arange(subgraphs[0].node_ids.numel()))
-    assert k_iso == subgraphs[0].node_ids.numel()
+    assert out.cluster_index.tolist() == [0, 1, 2]
+    assert out.num_supernodes == 3
 
     # Cover branch where a graph id has no nodes.
     split_with_gap = _split_subgraphs(
@@ -446,7 +442,7 @@ def test_update_depth_and_update_node():
     assert all("depth" in node for node in new_tree.values())
 
 
-def test_partition_tree_modes_and_forward_fallback(monkeypatch):
+def test_partition_tree_modes_and_helpers():
     adj = np.array(
         [
             [0.0, 1.0, 0.0, 0.0],
@@ -479,19 +475,13 @@ def test_partition_tree_modes_and_forward_fallback(monkeypatch):
     tree.build_root_down()
     assert isinstance(tree.root_down_delta(), tuple)
 
-    selector = SEPSelect()
-
-    def fake_cluster(self, _subgraph):
-        # Trigger forward fallback for unassigned nodes.
-        return torch.tensor([-1, 0], dtype=torch.long), 1
-
-    monkeypatch.setattr(SEPSelect, "_cluster_subgraph", fake_cluster)
-    out = selector(
-        edge_index=torch.empty((2, 0), dtype=torch.long),
-        num_nodes=2,
+    filled = _make_select_output(
+        assignment=torch.tensor([-1, 0, -1], dtype=torch.long),
+        num_supernodes=1,
+        s_inv_op="transpose",
     )
-    assert torch.all(out.cluster_index >= 0)
-    assert out.num_supernodes == 2
+    assert filled.cluster_index.tolist() == [1, 0, 2]
+    assert filled.num_supernodes == 3
 
 
 def test_partition_tree_leaf_and_root_update_paths(monkeypatch):

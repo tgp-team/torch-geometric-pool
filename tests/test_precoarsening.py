@@ -27,15 +27,19 @@ except (ImportError, AssertionError):
     PANPooling = None
 
 
-poolers = ["ndp", "kmis", "graclus", "sep", "eigen"]
+precoarsening_poolers = [
+    ("ndp", {}),
+    ("kmis", {"scorer": "degree"}),
+    ("graclus", {}),
+    ("sep", {}),
+    ("eigen", {"k": 4, "num_modes": 2}),
+    ("nmf", {"k": 4}),
+]
 
 
-@pytest.mark.parametrize("pooler_name", poolers)
-def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name):
-    PARAMS = {
-        "scorer": "degree",
-    }
-    pooler = get_pooler(pooler_name, **PARAMS)
+@pytest.mark.parametrize(("pooler_name", "pooler_kwargs"), precoarsening_poolers)
+def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name, pooler_kwargs):
+    pooler = get_pooler(pooler_name, **pooler_kwargs)
 
     data_batch = pooler_test_graph_sparse_batch
     num_nodes = data_batch.num_nodes
@@ -50,6 +54,11 @@ def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name):
 
     assert pooling_out.so.s.size(0) == num_nodes
     assert pooling_out.batch is not None
+
+
+def test_get_pooler_missing_required_args_error():
+    with pytest.raises(TypeError, match=r"Missing required argument\(s\).+eigen.+k"):
+        get_pooler("eigen")
 
 
 def test_normalizeadj_on_simple_data():

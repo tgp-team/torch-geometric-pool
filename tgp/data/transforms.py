@@ -13,12 +13,14 @@ from torch_geometric.utils import (
 
 from tgp.src import SRCPooling
 
-PoolerLevelSpec = Union[
+PoolerLevelConfig = Union[
     SRCPooling,
     str,
     Tuple[str, Dict[str, Any]],
     Dict[str, Any],
 ]
+ResolvedLevelEntry = tuple[SRCPooling, tuple[Any, ...]]
+CollapsedLevelRun = tuple[SRCPooling, int]
 
 
 class NormalizeAdj(BaseTransform):
@@ -179,11 +181,22 @@ class PreCoarsening(BaseTransform):
     r"""A transform that precomputes a hierarchy of pooled (coarsened) graphs
     and attaches them to the input :class:`~torch_geometric.data.Data` object.
 
-    Takes a pooling operator from :class:`~tgp.src.SRCPooling` to build
-    a multi-level pooling hierarchy. The pooling operator should implement the
-    function :meth:`~tgp.src.SRCPooling.precoarsening`, which computes the pooled graph
-    from the original graph. The pooling operator must not be trainable,
-    i.e., it should not have learnable parameters.
+    Takes one or more pooling operators from :class:`~tgp.src.SRCPooling` to
+    build a multi-level pooling hierarchy. Each pooler must implement
+    :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening`.
+    The default implementation is greedy repeated
+    :meth:`~tgp.src.SRCPooling.precoarsening`.
+
+    Some poolers override :meth:`~tgp.src.Precoarsenable.precoarsening` to
+    enforce method-specific behavior at each level (e.g.,
+    :meth:`~tgp.poolers.nmf.NMFPooling.precoarsening` and
+    :meth:`~tgp.poolers.eigenpool.EigenPooling.precoarsening` keep a fixed
+    assignment width), while others override
+    :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening` to implement a
+    custom hierarchy rollout (e.g.,
+    :meth:`~tgp.poolers.sep.SEPPooling.multi_level_precoarsening`).
+    Poolers must be non-trainable, i.e., they should not have learnable
+    parameters.
     The graph is recursively coarsened for :obj:`recursive_depth` levels.
     At each level, a coarsened adjacency matrix and, optionally, a pooled batch
     is computed. The result is stored as a list of intermediate pooled subgraphs
@@ -192,7 +205,7 @@ class PreCoarsening(BaseTransform):
     Args:
         pooler (~tgp.src.SRCPooling, optional):
             A non-trainable pooling operator that implements
-            :meth:`~tgp.src.SRCPooling.precoarsening`.
+            :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening`.
             Used for every level when :obj:`poolers` is not provided.
         input_key (str, optional):
             The key in the data object from which to read the graph data.
@@ -204,7 +217,7 @@ class PreCoarsening(BaseTransform):
             Number of recursive coarsening levels when using :obj:`pooler`.
             Must be greater than 0.
         poolers (Sequence, optional):
-            Optional per-level pooler specification. If provided, it overrides
+            Optional per-level pooler configuration. If provided, it overrides
             :obj:`pooler` and :obj:`recursive_depth`.
             Each entry can be one of:
 
@@ -218,10 +231,10 @@ class PreCoarsening(BaseTransform):
     def __init__(
         self,
         pooler: Optional[SRCPooling] = None,
-        input_key: str = None,
+        input_key: Optional[str] = None,
         output_key: str = "pooled_data",
         recursive_depth: int = 1,
-        poolers: Optional[Sequence[PoolerLevelSpec]] = None,
+        poolers: Optional[Sequence[PoolerLevelConfig]] = None,
     ) -> None:
         super().__init__()
         self.input_key = input_key
@@ -236,25 +249,37 @@ class PreCoarsening(BaseTransform):
                 raise ValueError("`recursive_depth` must be greater than 0.")
             poolers = [pooler for _ in range(recursive_depth)]
 
-        self._pooler_entries = tuple(
-            self._resolve_pooler_spec_with_key(spec) for spec in poolers
+        # Resolve each level config into an instantiated pooler plus a
+        # deterministic "collapse key" used to merge adjacent equal levels.
+        self._resolved_level_entries = tuple(
+            self._resolve_level_config_with_key(level_config)
+            for level_config in poolers
         )
-        self.poolers = tuple(pooler for pooler, _ in self._pooler_entries)
+        self.poolers = tuple(pooler for pooler, _ in self._resolved_level_entries)
         if not self.poolers:
             raise ValueError("At least one pooling level is required.")
-        self._pooler_runs = tuple(self._collapse_consecutive_runs(self._pooler_entries))
-        self.pooler = self.poolers[0]  # Backward compatibility.
+        self._collapsed_level_runs = tuple(
+            self._collapse_consecutive_runs(self._resolved_level_entries)
+        )
+
         self.recursive_depth = len(self.poolers)
 
     @staticmethod
     def _build_pooler(pooler_name: str, kwargs: Optional[Dict[str, Any]] = None):
+        """Instantiate a pooler from its registered alias and kwargs.
+
+        Note:
+            The import is intentionally local to avoid importing all poolers
+            at module import time (which can trigger optional dependency
+            imports even when not needed).
+        """
         from tgp.poolers import get_pooler
 
         return get_pooler(pooler_name, **(kwargs or {}))
 
     @staticmethod
-    def _freeze_config_value(value: Any):
-        """Convert nested configuration values into hashable structures."""
+    def _freeze_config_value(value: Any) -> Any:
+        """Convert nested config values into hashable, deterministic keys."""
         if isinstance(value, Mapping):
             return tuple(
                 sorted(
@@ -277,47 +302,71 @@ class PreCoarsening(BaseTransform):
         except TypeError:
             return repr(value)
 
-    def _resolve_pooler_spec(self, spec: PoolerLevelSpec) -> SRCPooling:
-        pooler, _ = self._resolve_pooler_spec_with_key(spec)
-        return pooler
+    def _resolve_level_config_with_key(
+        self, level_config: PoolerLevelConfig
+    ) -> ResolvedLevelEntry:
+        """Resolve one level config into `(pooler, collapse_key)`.
 
-    def _resolve_pooler_spec_with_key(
-        self, spec: PoolerLevelSpec
-    ) -> tuple[SRCPooling, tuple]:
-        if isinstance(spec, dict):
-            spec_dict = dict(spec)
-            spec = (
-                spec_dict.pop("pooler", spec_dict.pop("name", None)),
-                spec_dict,
+        Collapse key policy:
+        - declarative configs (`str`, tuple, dict) collapse by normalized
+          pooler name + kwargs;
+        - instantiated objects collapse only by object identity.
+
+        Examples:
+            - ``"ndp"`` -> ``("config", "ndp", ())``
+            - ``("eigen", {"k": 8})`` -> ``("config", "eigen", (("k", 8),))``
+            - ``{"pooler": "sep", "s_inv_op": "inverse"}`` ->
+              ``("config", "sep", (("s_inv_op", "inverse"),))``
+            - ``NDPPooling()`` -> ``("instance", id(pooler_instance))``
+        """
+        if isinstance(level_config, dict):
+            config_dict = dict(level_config)
+            level_config = (
+                config_dict.pop("pooler", config_dict.pop("name", None)),
+                config_dict,
             )
 
-        if isinstance(spec, tuple):
-            pooler_or_name = spec[0]
+        if isinstance(level_config, tuple):
+            # Common config mistake: malformed tuples from CLI/YAML parsing.
+            if len(level_config) != 2:
+                raise ValueError(
+                    "Tuple pooler configs must be '(pooler_or_name, kwargs_dict)'."
+                )
+            pooler_or_name = level_config[0]
             if pooler_or_name is None:
-                raise ValueError("Pooler spec must include a pooler name or instance.")
-            pooler_kwargs = dict(spec[1] or {})
+                raise ValueError(
+                    "Pooler config must include a pooler name or instance."
+                )
+            pooler_kwargs = dict(level_config[1] or {})
             if isinstance(pooler_or_name, SRCPooling):
                 if pooler_kwargs:
                     raise ValueError(
                         "Cannot provide kwargs together with an instantiated pooler."
                     )
                 pooler = pooler_or_name
-                collapse_key = ("obj", id(pooler))
+                collapse_key = ("instance", id(pooler))
             else:
                 pooler_name = str(pooler_or_name).lower()
                 pooler = self._build_pooler(pooler_name, pooler_kwargs)
                 collapse_key = (
-                    "spec",
+                    "config",
                     pooler_name,
                     self._freeze_config_value(pooler_kwargs),
                 )
-        elif isinstance(spec, str):
-            pooler_name = spec.lower()
+        elif isinstance(level_config, str):
+            pooler_name = level_config.lower()
             pooler = self._build_pooler(pooler_name)
-            collapse_key = ("spec", pooler_name, ())
+            collapse_key = ("config", pooler_name, ())
         else:
-            pooler = spec
-            collapse_key = ("obj", id(pooler))
+            # Keep error explicit instead of relying on obscure attribute errors
+            # later in the coarsening pipeline.
+            if not isinstance(level_config, SRCPooling):
+                raise TypeError(
+                    "Pooler config must be an SRCPooling, alias string, "
+                    "('name', kwargs) tuple, or {'pooler'/'name', ...} dict."
+                )
+            pooler = level_config
+            collapse_key = ("instance", id(pooler))
 
         if pooler.is_trainable:
             raise ValueError("The pooler must not be trainable.")
@@ -325,12 +374,21 @@ class PreCoarsening(BaseTransform):
 
     @staticmethod
     def _collapse_consecutive_runs(
-        entries: Sequence[tuple[SRCPooling, tuple]],
-    ) -> list[tuple[SRCPooling, int]]:
+        entries: Sequence[ResolvedLevelEntry],
+    ) -> list[CollapsedLevelRun]:
+        """Collapse consecutive equal pooler configs into `(pooler, run_len)`.
+
+        Example:
+            Input keys:
+            ``[("config", "ndp", ()), ("config", "ndp", ()), ("config", "sep", ())]``
+
+            Output runs:
+            ``[(ndp_pooler, 2), (sep_pooler, 1)]``
+        """
         if len(entries) == 0:
             return []
 
-        collapsed: list[tuple[SRCPooling, int]] = []
+        collapsed: list[CollapsedLevelRun] = []
         current_pooler, current_key = entries[0]
         run_len = 1
 
@@ -346,16 +404,29 @@ class PreCoarsening(BaseTransform):
 
     @torch.no_grad()
     def forward(self, data: Data) -> Data:
-        """Precomputes the select and connect operations for a graph."""
-        data_obj = data if self.input_key is None else getattr(data, self.input_key)
+        """Attach pooled levels to ``data[self.output_key]``.
 
-        pooled_out = []
-        for pooler, run_len in self._pooler_runs:
+        Execution is run-based: adjacent identical pooler configs are collapsed
+        and each run is executed once via
+        :meth:`tgp.src.Precoarsenable.multi_level_precoarsening`.
+        Returned levels are still appended one-by-one, preserving the original
+        external contract (`len(pooled_data) == number of requested levels`).
+
+        Example:
+            With ``poolers=["ndp", "ndp", "sep", "sep", "graclus"]``,
+            internal execution collapses to runs
+            ``[(ndp, 2), (sep, 2), (graclus, 1)]``.
+            The output still contains five levels in order:
+            ``data.pooled_data = [lvl1, lvl2, lvl3, lvl4, lvl5]``.
+        """
+        data_obj = data if self.input_key is None else getattr(data, self.input_key)
+        pooled_levels = []
+        for pooler, run_len in self._collapsed_level_runs:
             run_outputs = pooler.multi_level_precoarsening(
                 levels=run_len,
                 edge_index=data_obj.edge_index,
-                edge_weight=data_obj.edge_weight,
-                batch=data_obj.batch,
+                edge_weight=getattr(data_obj, "edge_weight", None),
+                batch=getattr(data_obj, "batch", None),
                 num_nodes=data_obj.num_nodes,
             )
             if len(run_outputs) != run_len:
@@ -364,10 +435,10 @@ class PreCoarsening(BaseTransform):
                     f"{len(run_outputs)} levels, expected {run_len}."
                 )
 
-            for data_pooled in run_outputs:
-                data_obj = data_pooled.as_data()
-                pooled_out.append(data_obj)
+            for pooled_output in run_outputs:
+                data_obj = pooled_output.as_data()
+                pooled_levels.append(data_obj)
 
-        setattr(data, self.output_key, pooled_out)
+        setattr(data, self.output_key, pooled_levels)
 
         return data

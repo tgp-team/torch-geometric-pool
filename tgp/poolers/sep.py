@@ -204,5 +204,4 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         return pooled_levels
 
     def extra_repr_args(self) -> dict:
-        # TODO: i am not sure  what we should put here
         return {"cached": self.cached}

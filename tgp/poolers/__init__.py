@@ -1,3 +1,5 @@
+import inspect
+
 from .asap import ASAPooling
 from .asym_cheeger_cut import AsymCheegerCutPooling
 from .bnpool import BNPool
@@ -69,6 +71,23 @@ pooler_map = {
 }
 
 
+def _missing_required_init_kwargs(pooler_cls, provided_kwargs: dict) -> list[str]:
+    """Return required ``__init__`` kwargs not present in ``provided_kwargs``."""
+    missing = []
+    init_sig = inspect.signature(pooler_cls.__init__)
+    for name, param in init_sig.parameters.items():
+        if name == "self":
+            continue
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        if param.default is inspect.Parameter.empty and name not in provided_kwargs:
+            missing.append(name)
+    return missing
+
+
 def get_pooler(pooler_name: str, **kwargs):
     """Return a pooling operator initialized with filtered **kwargs.
 
@@ -101,10 +120,28 @@ def get_pooler(pooler_name: str, **kwargs):
     signature = pooler_cls.get_signature()
 
     if signature.has_kwargs:
-        return pooler_cls(**kwargs)
+        init_kwargs = kwargs
+    else:
+        # Filter out any kwargs that aren't in the signature:
+        init_kwargs = {k: v for k, v in kwargs.items() if k in signature.args}
 
-    # Filter out any kwargs that aren't in the signature:
-    filtered_kwargs = {k: v for k, v in kwargs.items() if k in signature.args}
+    missing_required = _missing_required_init_kwargs(pooler_cls, init_kwargs)
+    if missing_required:
+        required = ", ".join(missing_required)
+        raise TypeError(
+            f"Missing required argument(s) for pooler '{pooler_name}' "
+            f"({pooler_cls.__name__}): {required}"
+        )
 
-    # Instantiate the pooler:
-    return pooler_cls(**filtered_kwargs)
+    try:
+        return pooler_cls(**init_kwargs)
+    except TypeError as exc:
+        # Re-check after constructor call in case dynamic signatures differ.
+        missing_required = _missing_required_init_kwargs(pooler_cls, init_kwargs)
+        if missing_required:
+            required = ", ".join(missing_required)
+            raise TypeError(
+                f"Missing required argument(s) for pooler '{pooler_name}' "
+                f"({pooler_cls.__name__}): {required}"
+            ) from exc
+        raise

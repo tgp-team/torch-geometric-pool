@@ -40,7 +40,6 @@ class SEPSelect(Select):
 
     def __init__(self, s_inv_op: SinvType = "transpose"):
         super().__init__()
-        self.tree_depth = 2
         self.s_inv_op = s_inv_op
 
     def forward(
@@ -71,21 +70,27 @@ class SEPSelect(Select):
             :class:`~tgp.select.SelectOutput`: Hard assignment from nodes to
             depth-1 SEP clusters.
         """
-        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
+        return self.multi_level_select(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=num_nodes,
+            levels=1,
+            **kwargs,
+        )[0]  # Return only the leaves of the tree
 
+    def _normalize_select_inputs(
+        self,
+        edge_index: Optional[Adj],
+        edge_weight: Optional[Tensor],
+        batch: Optional[Tensor],
+        num_nodes: Optional[int],
+    ) -> tuple[Tensor, Optional[Tensor], Tensor, int]:
+        """Normalize connectivity and batch tensors for selection."""
+        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
         if num_nodes is None:
             num_nodes = (
                 int(batch.numel()) if batch is not None else maybe_num_nodes(edge_index)
-            )
-
-        if num_nodes == 0:
-            empty = torch.empty(0, dtype=torch.long, device=edge_index.device)
-            return SelectOutput(
-                node_index=empty,
-                num_nodes=0,
-                cluster_index=empty,
-                num_supernodes=0,
-                s_inv_op=self.s_inv_op,
             )
 
         if batch is None:
@@ -95,84 +100,19 @@ class SEPSelect(Select):
                 f"Expected batch with {num_nodes} nodes, got {batch.numel()}."
             )
 
-        assignment = torch.empty(num_nodes, dtype=torch.long, device=edge_index.device)
-        assignment.fill_(-1)
-        cluster_offset = 0
+        return edge_index, edge_weight, batch, int(num_nodes)
 
-        for subgraph in _split_subgraphs(
-            edge_index=edge_index,
-            edge_weight=edge_weight,
-            batch=batch,
-            num_nodes=num_nodes,
-        ):
-            local_assignment, num_local_clusters = self._cluster_subgraph(subgraph)
-            assignment[subgraph.node_ids] = local_assignment + cluster_offset
-            cluster_offset += num_local_clusters
-
-        # Safety fallback for pathological cases: keep behavior deterministic.
-        unassigned = torch.nonzero(assignment < 0, as_tuple=False).view(-1)
-        if unassigned.numel() > 0:
-            assignment[unassigned] = torch.arange(
-                cluster_offset,
-                cluster_offset + unassigned.numel(),
-                device=assignment.device,
-            )
-            cluster_offset += int(unassigned.numel())
-
-        return SelectOutput(
-            node_index=torch.arange(num_nodes, device=assignment.device),
-            num_nodes=num_nodes,
-            cluster_index=assignment,
-            num_supernodes=cluster_offset,
-            s_inv_op=self.s_inv_op,
-        )
-
-    def _cluster_subgraph(self, subgraph: _SubgraphData) -> tuple[Tensor, int]:
-        """Build depth-1 SEP clusters for one graph in local node indexing."""
-        num_nodes = int(subgraph.node_ids.numel())
-        device = subgraph.node_ids.device
-
-        if num_nodes == 0:
-            return torch.empty(0, dtype=torch.long, device=device), 0
-
-        edge_index, edge_weight = remove_self_loops(
-            subgraph.edge_index, subgraph.edge_weight
-        )
-        edge_index, edge_weight = to_undirected(
-            edge_index,
-            edge_weight,
-            num_nodes=num_nodes,
-        )
-
-        if edge_index.numel() == 0:
-            isolated = torch.arange(num_nodes, dtype=torch.long, device=device)
-            return isolated, num_nodes
-
-        adj = (
-            to_dense_adj(edge_index, edge_attr=edge_weight, max_num_nodes=num_nodes)
-            .squeeze(0)
-            .cpu()
-            .numpy()
-        )
-
-        tree_nodes = _adj_mat_to_coding_tree(adj, tree_depth=self.tree_depth)
-        local_assignment = _depth_one_assignment(
-            tree_nodes=tree_nodes,
-            num_nodes=num_nodes,
-            device=device,
-        )
-        num_clusters = int(local_assignment.max().item()) + 1
-        return local_assignment, num_clusters
-
-    def _cluster_subgraph_multilevel(
-        self, subgraph: _SubgraphData, levels: int
+    def _cluster_subgraph_hierarchy(
+        self,
+        subgraph: _SubgraphData,
+        levels: int,
     ) -> tuple[list[Tensor], list[int]]:
-        """Build sequential local assignments for multiple SEP levels."""
-        num_nodes = int(subgraph.node_ids.numel())
-        device = subgraph.node_ids.device
-
+        """Compute local SEP assignments for one graph across ``levels``."""
         if levels < 1:
             raise ValueError(f"'levels' must be >= 1, got {levels}.")
+
+        num_nodes = int(subgraph.node_ids.numel())
+        device = subgraph.node_ids.device
         if num_nodes == 0:
             empty = torch.empty(0, dtype=torch.long, device=device)
             return [empty for _ in range(levels)], [0 for _ in range(levels)]
@@ -181,23 +121,15 @@ class SEPSelect(Select):
             subgraph.edge_index, subgraph.edge_weight
         )
         edge_index, edge_weight = to_undirected(
-            edge_index,
-            edge_weight,
+            edge_index=edge_index,
+            edge_attr=edge_weight,
             num_nodes=num_nodes,
         )
 
-        if num_nodes == 1 or edge_index.numel() == 0:
-            # Keep edgeless/trivial graphs deterministic and avoid unnecessary
-            # deep-tree construction on paths where legacy code is unstable.
-            first_level = torch.arange(num_nodes, dtype=torch.long, device=device)
-            sequential = [first_level]
-            num_supernodes = [num_nodes]
-            for _ in range(1, levels):
-                sequential.append(
-                    torch.arange(num_supernodes[-1], dtype=torch.long, device=device)
-                )
-                num_supernodes.append(num_supernodes[-1])
-            return sequential, num_supernodes
+        if edge_index.numel() == 0:
+            return _identity_hierarchy(
+                num_nodes=num_nodes, levels=levels, device=device
+            )
 
         adj = (
             to_dense_adj(edge_index, edge_attr=edge_weight, max_num_nodes=num_nodes)
@@ -205,8 +137,16 @@ class SEPSelect(Select):
             .cpu()
             .numpy()
         )
-
         tree_nodes = _adj_mat_to_coding_tree(adj, tree_depth=levels + 1)
+
+        if levels == 1:
+            depth_one = _depth_one_assignment(
+                tree_nodes=tree_nodes,
+                num_nodes=num_nodes,
+                device=device,
+            )
+            return [depth_one], [int(depth_one.max().item()) + 1]
+
         absolute_assignments = [
             _depth_assignment(
                 tree_nodes=tree_nodes,
@@ -217,6 +157,71 @@ class SEPSelect(Select):
             for depth in range(1, levels + 1)
         ]
         return _absolute_to_sequential_assignments(absolute_assignments)
+
+    def _build_global_hierarchy(
+        self,
+        local_hierarchies: list[tuple[_SubgraphData, list[Tensor], list[int]]],
+        num_nodes: int,
+        levels: int,
+        device: torch.device,
+    ) -> list[SelectOutput]:
+        """Merge per-graph local assignments into batched global assignments."""
+        global_assignments: list[Tensor] = []
+        global_num_supernodes: list[int] = []
+
+        # Level 1: original nodes -> first-level supernodes.
+        level_assignment = torch.full((num_nodes,), -1, dtype=torch.long, device=device)
+        prev_offsets: list[int] = []
+        cluster_offset = 0
+
+        for subgraph, level_assignments, level_num_supernodes in local_hierarchies:
+            local_assignment = level_assignments[0]
+            level_assignment[subgraph.node_ids] = local_assignment + cluster_offset
+            prev_offsets.append(cluster_offset)
+            cluster_offset += level_num_supernodes[0]
+
+        global_assignments.append(level_assignment)
+        global_num_supernodes.append(cluster_offset)
+
+        # Level d: supernodes(d-1) -> supernodes(d).
+        for level_idx in range(1, levels):
+            prev_num_nodes = global_num_supernodes[level_idx - 1]
+            level_assignment = torch.full(
+                (prev_num_nodes,),
+                -1,
+                dtype=torch.long,
+                device=device,
+            )
+
+            next_offsets = []
+            cluster_offset = 0
+            for (
+                _subgraph,
+                level_assignments,
+                level_num_supernodes,
+            ), prev_offset in zip(local_hierarchies, prev_offsets):
+                local_assignment = level_assignments[level_idx]
+                local_size = local_assignment.numel()
+                level_assignment[prev_offset : prev_offset + local_size] = (
+                    local_assignment + cluster_offset
+                )
+                next_offsets.append(cluster_offset)
+                cluster_offset += level_num_supernodes[level_idx]
+
+            global_assignments.append(level_assignment)
+            global_num_supernodes.append(cluster_offset)
+            prev_offsets = next_offsets
+
+        return [
+            _make_select_output(
+                assignment=assignment,
+                num_supernodes=num_supernodes,
+                s_inv_op=self.s_inv_op,
+            )
+            for assignment, num_supernodes in zip(
+                global_assignments, global_num_supernodes
+            )
+        ]
 
     def multi_level_select(
         self,
@@ -232,34 +237,18 @@ class SEPSelect(Select):
         if levels < 1:
             raise ValueError(f"'levels' must be >= 1, got {levels}.")
 
-        edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
-
-        if num_nodes is None:
-            num_nodes = (
-                int(batch.numel()) if batch is not None else maybe_num_nodes(edge_index)
-            )
+        edge_index, edge_weight, batch, num_nodes = self._normalize_select_inputs(
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=num_nodes,
+        )
 
         if num_nodes == 0:
-            out = []
-            for _ in range(levels):
-                empty = torch.empty(0, dtype=torch.long, device=edge_index.device)
-                out.append(
-                    SelectOutput(
-                        node_index=empty,
-                        num_nodes=0,
-                        cluster_index=empty,
-                        num_supernodes=0,
-                        s_inv_op=self.s_inv_op,
-                    )
-                )
-            return out
-
-        if batch is None:
-            batch = torch.zeros(num_nodes, dtype=torch.long, device=edge_index.device)
-        elif batch.numel() != num_nodes:
-            raise ValueError(
-                f"Expected batch with {num_nodes} nodes, got {batch.numel()}."
-            )
+            return [
+                _empty_select_output(edge_index.device, self.s_inv_op)
+                for _ in range(levels)
+            ]
 
         subgraphs = _split_subgraphs(
             edge_index=edge_index,
@@ -267,97 +256,86 @@ class SEPSelect(Select):
             batch=batch,
             num_nodes=num_nodes,
         )
-        if len(subgraphs) == 0:
+        local_hierarchies = [
+            (
+                subgraph,
+                *self._cluster_subgraph_hierarchy(subgraph=subgraph, levels=levels),
+            )
+            for subgraph in subgraphs
+        ]
+        if len(local_hierarchies) == 0:
             raise RuntimeError("Could not split any non-empty subgraph.")
 
-        local_hierarchies = []
-        for subgraph in subgraphs:
-            level_assignments, level_num_supernodes = self._cluster_subgraph_multilevel(
-                subgraph, levels
-            )
-            local_hierarchies.append(
-                (subgraph, level_assignments, level_num_supernodes)
-            )
-
-        global_assignments = []
-        global_num_supernodes = []
-
-        # Level 1: original nodes -> first supernodes.
-        level_assignment = torch.empty(
-            num_nodes, dtype=torch.long, device=edge_index.device
+        outputs = self._build_global_hierarchy(
+            local_hierarchies=local_hierarchies,
+            num_nodes=num_nodes,
+            levels=levels,
+            device=edge_index.device,
         )
-        level_assignment.fill_(-1)
-        prev_offsets = []
-        cluster_offset = 0
-
-        for subgraph, level_assignments, level_num_supernodes in local_hierarchies:
-            local_assignment = level_assignments[0]
-            level_assignment[subgraph.node_ids] = local_assignment + cluster_offset
-            prev_offsets.append(cluster_offset)
-            cluster_offset += level_num_supernodes[0]
-
-        global_assignments.append(level_assignment)
-        global_num_supernodes.append(cluster_offset)
-
-        # Next levels: level d-1 supernodes -> level d supernodes.
-        for level_idx in range(1, levels):
-            prev_num_nodes = global_num_supernodes[level_idx - 1]
-            level_assignment = torch.empty(
-                prev_num_nodes, dtype=torch.long, device=edge_index.device
+        if len(outputs) != levels:
+            raise RuntimeError(
+                f"Expected {levels} level outputs, found {len(outputs)}."
             )
-            level_assignment.fill_(-1)
-
-            next_offsets = []
-            cluster_offset = 0
-
-            for (
-                _subgraph,
-                level_assignments,
-                level_num_supernodes,
-            ), prev_offset in zip(local_hierarchies, prev_offsets):
-                local_assignment = level_assignments[level_idx]
-                level_assignment[
-                    prev_offset : prev_offset + local_assignment.numel()
-                ] = local_assignment + cluster_offset
-                next_offsets.append(cluster_offset)
-                cluster_offset += level_num_supernodes[level_idx]
-
-            global_assignments.append(level_assignment)
-            global_num_supernodes.append(cluster_offset)
-            prev_offsets = next_offsets
-
-        out = []
-        for level_assignment, num_supernodes in zip(
-            global_assignments, global_num_supernodes
-        ):
-            missing = torch.nonzero(level_assignment < 0, as_tuple=False).view(-1)
-            if missing.numel() > 0:
-                level_assignment[missing] = torch.arange(
-                    num_supernodes,
-                    num_supernodes + missing.numel(),
-                    device=level_assignment.device,
-                )
-                num_supernodes += int(missing.numel())
-
-            out.append(
-                SelectOutput(
-                    node_index=torch.arange(
-                        level_assignment.numel(),
-                        device=level_assignment.device,
-                    ),
-                    num_nodes=int(level_assignment.numel()),
-                    cluster_index=level_assignment,
-                    num_supernodes=int(num_supernodes),
-                    s_inv_op=self.s_inv_op,
-                )
-            )
-
-        if len(out) != levels:
-            raise RuntimeError(f"Expected {levels} level outputs, found {len(out)}.")
-        return out
+        return outputs
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(tree_depth={self.tree_depth})"
+        return f"{self.__class__.__name__}()"
+
+
+def _identity_hierarchy(
+    num_nodes: int,
+    levels: int,
+    device: torch.device,
+) -> tuple[list[Tensor], list[int]]:
+    """Return deterministic identity mappings for edgeless hierarchies."""
+    first_level = torch.arange(num_nodes, dtype=torch.long, device=device)
+    assignments = [first_level]
+    num_supernodes = [num_nodes]
+
+    for _ in range(1, levels):
+        prev_num_nodes = num_supernodes[-1]
+        assignments.append(
+            torch.arange(prev_num_nodes, dtype=torch.long, device=device)
+        )
+        num_supernodes.append(prev_num_nodes)
+
+    return assignments, num_supernodes
+
+
+def _make_select_output(
+    assignment: Tensor,
+    num_supernodes: int,
+    s_inv_op: SinvType,
+) -> SelectOutput:
+    """Build a :class:`SelectOutput` and deterministically fill missing labels."""
+    missing = torch.nonzero(assignment < 0, as_tuple=False).view(-1)
+    if missing.numel() > 0:
+        assignment[missing] = torch.arange(
+            num_supernodes,
+            num_supernodes + missing.numel(),
+            device=assignment.device,
+        )
+        num_supernodes += int(missing.numel())
+
+    return SelectOutput(
+        node_index=torch.arange(assignment.numel(), device=assignment.device),
+        num_nodes=int(assignment.numel()),
+        cluster_index=assignment,
+        num_supernodes=int(num_supernodes),
+        s_inv_op=s_inv_op,
+    )
+
+
+def _empty_select_output(device: torch.device, s_inv_op: SinvType) -> SelectOutput:
+    """Build an empty :class:`SelectOutput`."""
+    empty = torch.empty(0, dtype=torch.long, device=device)
+    return SelectOutput(
+        node_index=empty,
+        num_nodes=0,
+        cluster_index=empty,
+        num_supernodes=0,
+        s_inv_op=s_inv_op,
+    )
 
 
 def _split_subgraphs(
