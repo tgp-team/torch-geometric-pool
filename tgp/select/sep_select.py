@@ -6,7 +6,6 @@ from typing import Optional
 
 import numpy as np
 import torch
-from scipy.sparse.csgraph import connected_components
 from torch import Tensor
 from torch_geometric.typing import Adj
 from torch_geometric.utils import remove_self_loops, to_dense_adj, to_undirected
@@ -15,6 +14,23 @@ from torch_geometric.utils.num_nodes import maybe_num_nodes
 from tgp.select import Select, SelectOutput
 from tgp.utils import connectivity_to_edge_index
 from tgp.utils.typing import SinvType
+
+
+def _connected_components_undirected(adj: np.ndarray) -> tuple[int, np.ndarray]:
+    """Return connected components for an undirected adjacency matrix.
+
+    SciPy is imported lazily so importing :mod:`tgp.select.sep_select` does not
+    require SciPy unless SEP tree construction is actually used.
+    """
+    try:
+        from scipy.sparse.csgraph import connected_components
+    except ImportError as exc:
+        raise ImportError(
+            "SEPSelect requires SciPy for connected-components computation. "
+            "Install with `pip install scipy` or the SEP extra."
+        ) from exc
+
+    return connected_components(csgraph=adj, directed=False, return_labels=True)
 
 
 @dataclass
@@ -533,11 +549,7 @@ def _adj_mat_to_coding_tree(adj: np.ndarray, tree_depth: int) -> dict[int, dict]
     if num_nodes == 0:
         return {}
 
-    n_components, labels = connected_components(
-        csgraph=adj,
-        directed=False,
-        return_labels=True,
-    )
+    n_components, labels = _connected_components_undirected(adj)
 
     if n_components == 1:
         return _trans_to_tree(adj, tree_depth)

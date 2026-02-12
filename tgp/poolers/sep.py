@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 from torch import Tensor
 from torch_geometric.typing import Adj
@@ -29,8 +29,9 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         edge_weight_norm (bool, optional):
             Whether to normalize pooled edge weights. (default: :obj:`False`)
         lift (~tgp.utils.typing.LiftType, optional):
-            Kept for API compatibility. EigenPooling always uses eigenvector-based
-            lifting and ignores this option. (default: :obj:`"precomputed"`)
+            Operation used by :class:`~tgp.lift.BaseLift` to compute
+            :math:`\\mathbf{S}_\\text{inv}` during lifting.
+            (default: :obj:`"precomputed"`)
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             Operation used to compute :math:`\\mathbf{S}_\text{inv}` in
             :class:`~tgp.select.SelectOutput`. (default: :obj:`"transpose"`)
@@ -70,7 +71,7 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         batch: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
-    ) -> PoolingOutput:
+    ) -> Union[PoolingOutput, Tensor]:
         r"""Forward pass.
 
         Args:
@@ -95,7 +96,8 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
                 (default: :obj:`False`)
 
         Returns:
-            PoolingOutput: The output of the pooling operator.
+            ~tgp.src.PoolingOutput or ~torch.Tensor:
+                Pooled output if :obj:`lifting=False`, otherwise lifted features.
         """
         if lifting:
             # Lift
