@@ -4,7 +4,7 @@ import scipy.sparse.csgraph as csgraph
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import get_laplacian, to_scipy_sparse_matrix
+from torch_geometric.utils import get_laplacian, scatter, to_scipy_sparse_matrix
 from torch_scatter import scatter_mul
 
 from tgp.select import Select, SelectOutput
@@ -277,8 +277,29 @@ class LaPoolSelect(Select):
         kronecker_delta[leader_idx, leader_cols] = 1.0
         s = s_non_leader + kronecker_delta
 
-        s = s * mask.reshape(-1, 1).to(s.dtype)
-        return s.reshape(batch_size, num_nodes, -1)
+        leaders_per_graph = scatter(
+            leader_flat.float(), batch_flat, dim=0, dim_size=batch_size, reduce="sum"
+        ).long()
+        K_max = int(leaders_per_graph.max().item())
+        cum_leaders = torch.cat(
+            [
+                leaders_per_graph.new_zeros(1),
+                torch.cumsum(leaders_per_graph, dim=0),
+            ]
+        ).long()
+        s_new = torch.zeros(
+            batch_size * num_nodes, K_max, device=x.device, dtype=s.dtype
+        )
+        for b in range(batch_size):
+            start = cum_leaders[b].item()
+            end = cum_leaders[b + 1].item()
+            k_b = end - start
+            if k_b > 0:
+                s_new[b * num_nodes : (b + 1) * num_nodes, :k_b] = s[
+                    b * num_nodes : (b + 1) * num_nodes, start:end
+                ]
+        s = s_new * mask.reshape(-1, 1).to(s.dtype)
+        return s.reshape(batch_size, num_nodes, K_max)
 
     def _forward_unbatched(
         self,
