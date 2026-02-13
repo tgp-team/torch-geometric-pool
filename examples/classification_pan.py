@@ -77,7 +77,9 @@ class Net(torch.nn.Module):
         x = F.relu(x)
 
         # Global pooling
-        x = self.pooler.global_pool(x, reduce_op="sum", batch=out.batch)
+        x = self.pooler.global_pool(
+            x, reduce_op="sum", batch=out.batch, mask=getattr(out, "mask", None)
+        )
 
         # Readout layer
         x = self.lin(x)

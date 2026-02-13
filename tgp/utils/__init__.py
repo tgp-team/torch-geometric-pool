@@ -9,6 +9,7 @@ from .ops import (
     connectivity_to_sparsetensor,
     connectivity_to_torch_coo,
     dense_to_block_diag,
+    get_mask_from_dense_s,
     is_dense_adj,
     postprocess_adj_pool_dense,
     postprocess_adj_pool_sparse,

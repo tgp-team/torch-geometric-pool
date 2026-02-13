@@ -99,16 +99,19 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                     x=x, adj=edge_index, edge_weight=edge_weight, batch=batch
                 )
                 x_pool, adj_pool = out.x, out.edge_index
+                mask_pool = getattr(out, "mask", None)
 
                 # Second MP layer
                 if self.use_dense_pool_adj:
-                    x = self.conv2(x_pool, adj_pool)
+                    x = self.conv2(x_pool, adj_pool, mask=mask_pool)
                 else:
                     x = self.conv2(x_pool, adj_pool, out.edge_weight)
                 x = F.relu(x)
 
                 # Global pooling
-                x = self.pooler.global_pool(x, reduce_op="sum", batch=out.batch)
+                x = self.pooler.global_pool(
+                    x, reduce_op="sum", batch=out.batch, mask=mask_pool
+                )
 
                 # Readout layer
                 x = self.lin(x)

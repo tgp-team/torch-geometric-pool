@@ -101,10 +101,11 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                     out.x,
                     out.edge_index,
                 )
+                mask_pool = getattr(out, "mask", None)
 
                 # Bottleneck
                 if self.use_dense_pool_adj:
-                    x_pool = self.conv_pool(x_pool, adj_pool)
+                    x_pool = self.conv_pool(x_pool, adj_pool, mask=mask_pool)
                 else:
                     x_pool = self.conv_pool(x_pool, adj_pool, out.edge_weight)
                 x_pool = F.relu(x_pool)

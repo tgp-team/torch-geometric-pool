@@ -13,6 +13,7 @@ from tgp.src import DenseSRCPooling, PoolingOutput
 from tgp.utils import (
     batched_negative_edge_sampling,
     connectivity_to_edge_index,
+    get_mask_from_dense_s,
     negative_edge_sampling,
 )
 from tgp.utils.losses import (
@@ -295,6 +296,7 @@ class BNPool(DenseSRCPooling):
             loss = self.compute_loss(adj, mask, so)
 
             if self.sparse_output:
+                mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
                 x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
                     self._finalize_sparse_output(
                         x_pool=x_pooled,
@@ -302,6 +304,7 @@ class BNPool(DenseSRCPooling):
                         batch=batch,
                         batch_pooled=batch_pooled,
                         so=so,
+                        mask=mask_pool,
                     )
                 )
                 return PoolingOutput(
@@ -313,7 +316,10 @@ class BNPool(DenseSRCPooling):
                     loss=loss,
                 )
 
-            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
+            mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
+            return PoolingOutput(
+                x=x_pooled, edge_index=adj_pool, so=so, loss=loss, mask=mask_pool
+            )
 
         # === Unbatched (sparse-loss) path ===
         # Select
@@ -336,6 +342,11 @@ class BNPool(DenseSRCPooling):
             batch_pooled=batch_pooled,
         )
 
+        mask_pool = (
+            get_mask_from_dense_s(s=so.s, batch=batch)
+            if not self.sparse_output
+            else None
+        )
         return PoolingOutput(
             x=x_pooled,
             edge_index=edge_index_pooled,
@@ -343,6 +354,7 @@ class BNPool(DenseSRCPooling):
             batch=batch_pooled,
             so=so,
             loss=loss,
+            mask=mask_pool,
         )
 
     def compute_loss(self, adj, mask, so) -> dict:

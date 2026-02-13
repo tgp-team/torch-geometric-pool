@@ -11,6 +11,11 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
 - **Explicit output format control**: A single flag, `sparse_output`, now determines
   whether pooled adjacency is returned as block‑diagonal sparse or batched dense.
 
+- **PoolingOutput mask and global pool**: For variable supernode counts (e.g. LaPool,
+  BNPool), `PoolingOutput` can include an optional `mask` `[B, K]`; global pool and
+  dense conv layers use it so only valid supernodes are aggregated. Unbatched dense
+  output can also return a mask for consistency.
+
 - **BNPool unified**: Dense and sparse BNPool variants are merged into one class with
   batched/unbatched branches and consistent outputs.
 
@@ -90,6 +95,25 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - **External masks are supported only when inputs are already dense/padded**.
 - When inputs are sparse, masks are produced internally during preprocessing.
 - Dense poolers that accept `mask` document that it is only honored for pre‑padded inputs.
+
+### PoolingOutput mask (variable supernode counts)
+
+- **`PoolingOutput.mask`** is an optional boolean tensor of shape `[B, K]` indicating
+  which supernodes are valid when the pooler uses **batched dense** output with
+  variable supernode counts per graph (e.g. LaPool, BNPool).
+- When `sparse_output=False`, the batched path may return `out.mask` so that
+  downstream layers (e.g. `DenseGCNConv`, global pool) can ignore padded positions.
+- When the **unbatched** path of a dense pooler returns dense output
+  (`sparse_output=False`), it can also set `out.mask` (e.g. via
+  `get_mask_from_dense_s`) so that variable-K behavior is consistent with
+  the batched path.
+
+### Global pool with mask
+
+- **`dense_global_reduce`** and the poolers’ **`global_pool(...)`** now accept an
+  optional `mask` argument. When provided (e.g. `out.mask` from a variable-K
+  pooler), only valid nodes are aggregated, so global pooling is correct for
+  LaPool/BNPool and other poolers that pad to `K_max` per graph.
 
 ## API / Behavior Changes
 

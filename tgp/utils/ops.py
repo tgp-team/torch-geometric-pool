@@ -76,6 +76,49 @@ def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
     return edge_index, edge_weight
 
 
+def get_mask_from_dense_s(
+    s: Tensor,
+    batch: Optional[Tensor] = None,
+) -> Tensor:
+    r"""Build a dense boolean mask of shape :math:`[B, K]` indicating which
+    supernodes have at least one assigned node.
+
+    Use this when returning a dense :class:`~tgp.src.PoolingOutput`
+    (e.g. :obj:`sparse_output=False`) so that downstream layers and global
+    pooling can ignore padding. Works for both batched and unbatched paths,
+    and for both dense and sparse assignment matrices :obj:`s`.
+
+    Args:
+        s (~torch.Tensor): Assignment matrix of shape :math:`[N, K]` or :math:`[B, N, K]`.
+        batch: Batch vector of shape :math:`[N]` when multiple graphs are
+            present (unbatched path with batch). If :obj:`None`, returns
+            mask of shape :math:`[1, K]`.
+
+    Returns:
+        Boolean tensor of shape :math:`[B, K]` with :math:`B=1` when
+        :obj:`batch` is :obj:`None`.
+    """
+    K = s.size(-1)
+    device = s.device
+
+    assert not s.is_sparse, "s must be a dense tensor"
+    # Dense S: [N, K] or [B, N, K]
+    if s.dim() == 3:
+        mask = s.sum(dim=-2) > 0
+        return mask
+    # 2D [N, K]: single graph (batch None) or multi-graph (batch provided)
+    if batch is None:
+        mask = (s.sum(dim=-2) > 0).unsqueeze(0)
+        return mask
+    batch_size = int(batch.max().item()) + 1
+    mask = torch.zeros(batch_size, K, dtype=torch.bool, device=device)
+    for b in range(batch_size):
+        node_mask = batch == b
+        if node_mask.any():
+            mask[b] = s[node_mask].sum(dim=0) > 0
+    return mask
+
+
 def is_dense_adj(edge_index: Adj) -> bool:
     r"""Return :obj:`True` if :attr:`edge_index` looks like a dense adjacency matrix.
 

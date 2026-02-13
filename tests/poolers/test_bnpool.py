@@ -115,3 +115,24 @@ def test_bnpool_lifting_operation(pooler_test_graph_dense_batch):
 
     # Check if lifted output has same dimensions as input
     assert lifted_out.shape == x.shape
+
+
+def test_bnpool_batched_dense_output_mask(pooler_test_graph_dense_batch):
+    """Batched dense output: out.mask is not None and has shape [B, K_max]."""
+    x, adj = pooler_test_graph_dense_batch
+    pooler = BNPool(in_channels=x.shape[-1], k=3, batched=True, sparse_output=False)
+    pooler.eval()
+    out = pooler(x=x, adj=adj)
+    assert out.mask is not None
+    assert out.mask.dim() == 2
+    assert out.mask.shape[0] == out.x.shape[0]
+    assert out.mask.shape[1] == out.x.shape[1]
+
+
+def test_bnpool_batched_sparse_output_no_mask(pooler_test_graph_dense_batch):
+    """Batched sparse output: out.mask is None."""
+    x, adj = pooler_test_graph_dense_batch
+    pooler = BNPool(in_channels=x.shape[-1], k=3, batched=True, sparse_output=True)
+    pooler.eval()
+    out = pooler(x=x, adj=adj)
+    assert out.mask is None

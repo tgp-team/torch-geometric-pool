@@ -4,7 +4,13 @@ import scipy.sparse.csgraph as csgraph
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import get_laplacian, scatter, to_scipy_sparse_matrix
+from torch_geometric.utils import (
+    get_laplacian,
+    scatter,
+    to_scipy_sparse_matrix,
+    unbatch,
+    unbatch_edge_index,
+)
 from torch_scatter import scatter_mul
 
 from tgp.select import Select, SelectOutput
@@ -309,6 +315,52 @@ class LaPoolSelect(Select):
         batch: Optional[Tensor],
         num_nodes: int,
     ) -> Tensor:
+        # Multi-graph: run single-graph path per graph, pad to K_max, concatenate
+        if (
+            batch is not None
+            and batch.numel() > 0
+            and int(batch.min().item()) != int(batch.max().item())
+        ):
+            edge_index, edge_weight = connectivity_to_edge_index(
+                edge_index, edge_weight
+            )
+            batch_size = int(batch.max().item()) + 1
+            unbatched_x = unbatch(x, batch)
+            unbatched_ei = unbatch_edge_index(edge_index, batch)
+            unbatched_ew = []
+            for b in range(batch_size):
+                mask = batch[edge_index[0]] == b
+                ew = edge_weight[mask] if edge_weight is not None else None
+                unbatched_ew.append(
+                    ew.squeeze(-1) if ew is not None and ew.dim() > 1 else ew
+                )
+            s_list = [
+                self._forward_unbatched(
+                    x=x_i,
+                    edge_index=ei_i,
+                    edge_weight=ew_i,
+                    batch=None,
+                    num_nodes=x_i.size(0),
+                )
+                for x_i, ei_i, ew_i in zip(unbatched_x, unbatched_ei, unbatched_ew)
+            ]
+            K_max = max(s_i.size(-1) for s_i in s_list)
+            return torch.cat(
+                [
+                    s_i
+                    if s_i.size(-1) == K_max
+                    else torch.cat(
+                        [
+                            s_i,
+                            s_i.new_zeros(s_i.size(0), K_max - s_i.size(-1)),
+                        ],
+                        dim=-1,
+                    )
+                    for s_i in s_list
+                ],
+                dim=0,
+            )
+
         edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
         edge_weight = check_and_filter_edge_weights(edge_weight)
 

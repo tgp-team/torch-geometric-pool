@@ -106,7 +106,12 @@ for schedule_name, level_specs in pooling_schedules.items():
                 x = F.relu(x)
 
             # Global pooling
-            x = global_reduce(x, reduce_op="sum", batch=pooled.batch)
+            x = global_reduce(
+                x,
+                reduce_op="sum",
+                batch=pooled.batch,
+                mask=getattr(pooled, "mask", None),
+            )
 
             # Readout layer
             x = self.lin(x)

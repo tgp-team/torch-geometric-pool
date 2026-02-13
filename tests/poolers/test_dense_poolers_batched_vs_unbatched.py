@@ -28,10 +28,9 @@ DENSE_POOLER_CONFIGS = [
 
 
 # Pooler names used for batched vs unbatched PoolingOutput comparison.
-# Only poolers that support batched dense and unbatched sparse with the same
-# (B, N, K) / (N, K) semantics (mincut, acc, diff, dmon, hosc, jb). Other
-# dense poolers (eigen, lap, nmf, bnpool) have different outputs or signatures.
-POOLING_OUTPUT_POOLER_NAMES = [c[0] for c in DENSE_POOLER_CONFIGS]
+# Same as DENSE_POOLER_CONFIGS plus LaPool (lap). LaPool has no auxiliary loss
+# so it is not in DENSE_POOLER_CONFIGS, but batched vs unbatched outputs can be compared.
+POOLING_OUTPUT_POOLER_NAMES = [c[0] for c in DENSE_POOLER_CONFIGS] + ["lap"]
 
 
 @pytest.mark.parametrize(
@@ -85,22 +84,24 @@ def test_dense_pooler_batched_vs_unbatched_pooling_output(
     """For each dense pooler, batched and unbatched PoolingOutput coincide after reshaping."""
     x, adj = pooler_test_graph_dense_batch
     B, N, F = x.shape
-    K = 3
+    # K=3 for fixed-K poolers; LaPool and others use variable K from output
+    K_request = 3
 
     pooler_batched = get_pooler(
         pooler_name,
         in_channels=F,
-        k=K,
+        k=K_request,
         batched=True,
     )
     pooler_batched.eval()
 
     out_b = pooler_batched(x=x, adj=adj)
+    K = out_b.x.shape[1]
 
     pooler_unbatched = get_pooler(
         pooler_name + "_u",
         in_channels=F,
-        k=K,
+        k=K_request,
     )
     pooler_unbatched.load_state_dict(pooler_batched.state_dict())
     pooler_unbatched.eval()
@@ -160,14 +161,16 @@ def test_dense_pooler_batched_vs_unbatched_pooling_output(
         f"{pooler_name}: batched and unbatched pooled adj should match"
     )
 
-    # loss: same keys and values
-    assert set(out_b.loss.keys()) == set(out_u.loss.keys()), (
+    # loss: same keys and values (some poolers e.g. LaPool have no loss)
+    loss_b = out_b.loss or {}
+    loss_u = out_u.loss or {}
+    assert set(loss_b.keys()) == set(loss_u.keys()), (
         f"{pooler_name}: batched and unbatched loss keys should match"
     )
-    for key in out_b.loss:
-        assert torch.allclose(out_b.loss[key], out_u.loss[key], rtol=1e-5, atol=1e-5), (
-            f"{pooler_name}: loss key {key!r} batched={out_b.loss[key].item()} "
-            f"vs unbatched={out_u.loss[key].item()}"
+    for key in loss_b:
+        assert torch.allclose(loss_b[key], loss_u[key], rtol=1e-5, atol=1e-5), (
+            f"{pooler_name}: loss key {key!r} batched={loss_b[key].item()} "
+            f"vs unbatched={loss_u[key].item()}"
         )
 
 
