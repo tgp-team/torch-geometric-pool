@@ -13,12 +13,10 @@ from tgp.utils.typing import ConnectionType, LiftType, ReduceType, SinvType
 
 class SEPPooling(BasePrecoarseningMixin, SRCPooling):
     r"""The SEPPooling operator from the paper
-    "Structural Entropy Guided Graph Hierarchical Pooling"
-    <https://proceedings.mlr.press/v162/wu22b/wu22b.pdf>`_ (Wu et al., ICML 2022).
+    `"Structural Entropy Guided Graph Hierarchical Pooling" <https://proceedings.mlr.press/v162/wu22b/wu22b.pdf>`_ (Wu et al., ICML 2022).
 
     SEP performs graph pooling by optimizing cluster assignments globally with
     the goal of minimizing structural entropy.
-
     SEP internally builds a coding tree. In standard pooling mode
     (:meth:`forward`), only the first partition above the original nodes is
     exposed, i.e., node-to-depth-1 clusters.
@@ -33,7 +31,8 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         :class:`~tgp.data.transforms.PreCoarsening` with repeated ``"sep"``
         levels).
 
-    Example:
+    .. admonition:: Example
+
         Standard one-level forward (returns only depth-1 assignments):
 
         .. code-block:: python
@@ -84,10 +83,10 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
             Whether to normalize pooled edge weights. (default: :obj:`False`)
         lift (~tgp.utils.typing.LiftType, optional):
             Operation used by :class:`~tgp.lift.BaseLift` to compute
-            :math:`\\mathbf{S}_\\text{inv}` during lifting.
+            :math:`\mathbf{S}_\text{inv}` during lifting.
             (default: :obj:`"precomputed"`)
         s_inv_op (~tgp.utils.typing.SinvType, optional):
-            Operation used to compute :math:`\\mathbf{S}_\text{inv}` in
+            Operation used to compute :math:`\mathbf{S}_\text{inv}` in
             :class:`~tgp.select.SelectOutput`. (default: :obj:`"transpose"`)
     """
 

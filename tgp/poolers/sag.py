@@ -14,8 +14,7 @@ from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
 class SAGPooling(SRCPooling):
-    r"""The self-attention pooling operator from the paper `"Self-Attention Graph
-    Pooling" <https://arxiv.org/abs/1904.08082>`_ (Lee et al., ICML 2019).
+    r"""The self-attention pooling operator from the paper `"Self-Attention Graph Pooling" <https://arxiv.org/abs/1904.08082>`_ (Lee et al., ICML 2019).
 
     It computes the attention scores :math:`\mathbf{a}` top-:math:`k` selector as:
 
@@ -110,15 +109,15 @@ class SAGPooling(SRCPooling):
         self,
         in_channels: int,
         ratio: Union[float, int] = 0.5,
-        GNN: torch.nn.Module = GraphConv,
+        GNN: Optional["torch.nn.Module"] = None,
         min_score: Optional[float] = None,
         multiplier: float = 1.0,
-        nonlinearity: Union[str, Callable] = "tanh",
-        lift: LiftType = "precomputed",
-        s_inv_op: SinvType = "transpose",
-        reduce_red_op: ReduceType = "sum",
-        connect_red_op: ReduceType = "sum",
-        lift_red_op: ReduceType = "sum",
+        nonlinearity: Union[str, "Callable"] = "tanh",
+        lift: "LiftType" = "precomputed",
+        s_inv_op: "SinvType" = "transpose",
+        reduce_red_op: "ReduceType" = "sum",
+        connect_red_op: "ReduceType" = "sum",
+        lift_red_op: "ReduceType" = "sum",
         remove_self_loops: bool = True,
         degree_norm: bool = False,
         edge_weight_norm: bool = False,
@@ -143,7 +142,7 @@ class SAGPooling(SRCPooling):
             k: v for k, v in kwargs.items() if k in GNN.__init__.__code__.co_varnames
         }
 
-        self.gnn = GNN(in_channels, 1, **kwargs)
+        self.gnn = (GNN or GraphConv)(in_channels, 1, **kwargs)
         self.multiplier = multiplier
 
     def reset_parameters(self):
