@@ -16,8 +16,62 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
     "Structural Entropy Guided Graph Hierarchical Pooling"
     <https://proceedings.mlr.press/v162/wu22b/wu22b.pdf>`_ (Wu et al., ICML 2022).
 
-    SEP performs graph pooling by **optimizing cluster assignments globally**, in a single
-    shot, with the goal of minimizing **structural entropy** over the whole graph.
+    SEP performs graph pooling by optimizing cluster assignments globally with
+    the goal of minimizing structural entropy.
+
+    SEP internally builds a coding tree. In standard pooling mode
+    (:meth:`forward`), only the first partition above the original nodes is
+    exposed, i.e., node-to-depth-1 clusters.
+
+    Note:
+        A single call to :meth:`forward` only returns the finest pooled
+        partition (the bottom non-leaf level of the SEP tree). This corresponds
+        to using only a depth-2 tree view (nodes -> first supernodes -> root). To use
+        deeper SEP hierarchies (depth > 2) as intended by the original method,
+        use pre-coarsening via
+        :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening` (or
+        :class:`~tgp.data.transforms.PreCoarsening` with repeated ``"sep"``
+        levels).
+
+    Example:
+        Standard one-level forward (returns only depth-1 assignments):
+
+        .. code-block:: python
+
+            pool = SEPPooling()
+            out = pool(
+                x=x,
+                adj=edge_index,
+                edge_weight=edge_weight,
+                batch=batch,
+            )
+            # out.so maps original nodes -> first-level SEP clusters only.
+
+        Multi-level SEP pre-coarsening (returns hierarchy levels):
+
+        .. code-block:: python
+
+            pool = SEPPooling()
+            levels = pool.multi_level_precoarsening(
+                levels=3,
+                edge_index=edge_index,
+                edge_weight=edge_weight,
+                batch=batch,
+                num_nodes=x.size(0),
+            )
+            # levels[0].so: nodes -> level-1
+            # levels[1].so: level-1 -> level-2
+            # levels[2].so: level-2 -> level-3
+
+        Equivalent transform-level usage:
+
+        .. code-block:: python
+
+            from tgp.data.transforms import PreCoarsening
+
+            transform = PreCoarsening(poolers=["sep", "sep", "sep"])
+            data = transform(data)
+            # data.pooled_data contains 3 pooled levels in order.
 
     Args:
         cached (bool, optional):

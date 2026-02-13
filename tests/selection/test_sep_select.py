@@ -546,9 +546,9 @@ def test_partition_tree_leaf_and_root_update_paths(monkeypatch):
     monkeypatch.setattr(
         PartitionTree,
         "_build_k_tree",
-        lambda self, *_args, **_kwargs: self.root_id
-        if hasattr(self, "root_id")
-        else max(self.tree_node),
+        lambda self, *_args, **_kwargs: (
+            self.root_id if hasattr(self, "root_id") else max(self.tree_node)
+        ),
     )
 
     # Ensure we enter the while-loop.
