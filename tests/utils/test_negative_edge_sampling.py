@@ -10,7 +10,7 @@ from torch_geometric.utils import (
 
 from tests.test_utils import set_random_seed as _set_random_seed
 from tgp.utils import batched_negative_edge_sampling, negative_edge_sampling
-from tgp.utils.negative_edge_sampling import (
+from tgp.utils.ops import (
     edge_index_to_vector_id,
     sample_almost_k_edges,
     vector_id_to_edge_index,

@@ -1,9 +1,6 @@
-from .negative_edge_sampling import (
-    batched_negative_edge_sampling,
-    negative_edge_sampling,
-)
 from .ops import (
     add_remaining_self_loops,
+    batched_negative_edge_sampling,
     check_and_filter_edge_weights,
     connectivity_to_edge_index,
     connectivity_to_sparsetensor,
@@ -11,6 +8,7 @@ from .ops import (
     dense_to_block_diag,
     get_mask_from_dense_s,
     is_dense_adj,
+    negative_edge_sampling,
     postprocess_adj_pool_dense,
     postprocess_adj_pool_sparse,
     pseudo_inverse,

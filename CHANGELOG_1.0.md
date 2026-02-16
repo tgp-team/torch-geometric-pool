@@ -61,6 +61,9 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
   - `extra_repr` output for dense poolers now consistently reports
     `batched` and `sparse_output`, improving debuggability and config visibility.
 
+- **Ops in docs**: The :mod:`tgp.utils.ops` utilities are now included in the API
+  documentation under Utils.
+
 ## Dense Pooling Modes (Intended Usage)
 
 Dense poolers implement **two internal processing modes**:
