@@ -33,6 +33,12 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
   - Added sparse multi-graph support via `edge_index` + `batch`, including
     pre-coarsening support through the shared mixin.
 
+- **SEP pooling added** (Wu et al., ICML 2022 — Structural Entropy Guided Graph
+  Hierarchical Pooling):
+  - `SEPPooling` and `SEPSelect` implement topology-driven clustering via a
+    coding tree; single-level forward returns the depth-1 partition.
+  - Non-trainable; integrated with `get_pooler("sep")` and the SRC pipeline.
+
 - **NMF unbatched path implemented**:
   - `NMFPooling(batched=False)` is now supported.
   - Works with sparse connectivity in unbatched mode and supports both dense
@@ -43,19 +49,20 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
   - Supports single-graph and multi-graph sparse batches.
   - Handles edge cases robustly (e.g., small graphs / `k > N`) with consistent
     output shaping and padding behavior.
-  
-- **Precoarsening generalized in core SRC**:
-  - Introduced/extended `BasePrecoarseningMixin` to centralize precoarsening behavior.
-  - Poolers can now reuse the shared implementation instead of redefining custom
-    precoarsening logic.
-  - Supports automatic batch inference for select outputs and optional
-    `preconnector` overrides.
-    
-- **PreCoarsening transform now supports per-level pooler composition**:
-  - `PreCoarsening` can receive a `poolers` sequence for heterogeneous
-    multi-level schedules.
-  - Each level can be configured independently (pooler aliases and per-level kwargs),
-    enabling mixed pooler stacks and different args per level.
+
+- **PreCoarsening transform — multiple poolers and multilevel behavior**:
+  - `PreCoarsening` takes a single `poolers` argument: either one pooler/config
+    (one level) or a sequence of per-level configs (pooler instance, alias string,
+    `(name, kwargs)` tuple, or dict). The same pooler can be repeated for multiple
+    levels (e.g. `["sep", "sep", "sep"]`).
+  - Supports multilevel precoarsening: building several coarsened graphs in one go
+    (level 1 = first pooling, level 2 = pool again, etc.). For poolers like SEP
+    that naturally produce a hierarchy (e.g. one coding tree with multiple levels),
+    the transform uses that internal hierarchy instead of applying a single-level
+    step repeatedly, so the result is a proper multilevel coarsening with one entry
+    in `pooled_data` per level.
+  - Enables mixed schedules (e.g. NDP then SEP then Graclus) and per-level options,
+    all via the `poolers` sequence.
 
 - **Dense pooler repr fixes**:
   - `extra_repr` output for dense poolers now consistently reports
@@ -177,6 +184,9 @@ This flag determines the appropriate downstream MP/global pooling layers.
   for efficient downstream use.
 - **EigenPooling**: added as a new pooling method with dedicated select/reduce/connect/lift
   operators for spectral-clustering-based hierarchical pooling.
+- **SEP (Structural Entropy Guided Pooling)**: non-trainable, topology-driven clustering via
+  coding tree; single-level forward yields depth-1 partition. Available via
+  `get_pooler("sep")` and SRC pipeline; supports multilevel hierarchy in precoarsening.
 
 ## Bug Fixes
 
@@ -202,3 +212,10 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - Use `_u` pooler names (e.g., `bnpool_u`, `lap_u`) to select unbatched dense modes.
 - Dense poolers should no longer require explicit calls to `preprocessing(...)`
   in user code; they perform it internally when `batched=True`.
+- The PreCoarsening transform now takes a single argument, `poolers` (one
+  pooler/config or a sequence for multilevel); update any code that passed
+  pooler configuration under a different parameter name. The recursive
+  depth argument is no longer supported: the number of levels is given by
+  the length of `poolers`, so for three levels use e.g.
+  `poolers=["ndp", "ndp", "ndp"]` instead of a
+  depth parameter.
