@@ -10,6 +10,7 @@ from .maxcut_select import MaxCutScoreNet, MaxCutSelect
 from .mlp_select import MLPSelect
 from .ndp_select import NDPSelect
 from .nmf_select import NMFSelect
+from .sep_select import SEPSelect
 from .topk_select import TopkSelect
 
 select_functions = [
@@ -32,6 +33,7 @@ select_classes = [
     "NDPSelect",
     "NMFSelect",
     "TopkSelect",
+    "SEPSelect",
 ]
 
 __all__ = ["SelectOutput"] + select_classes + select_functions

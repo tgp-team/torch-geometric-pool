@@ -27,15 +27,19 @@ except (ImportError, AssertionError):
     PANPooling = None
 
 
-poolers = ["ndp", "kmis", "graclus"]
+precoarsening_poolers = [
+    ("ndp", {}),
+    ("kmis", {"scorer": "degree"}),
+    ("graclus", {}),
+    ("sep", {}),
+    ("eigen", {"k": 4, "num_modes": 2}),
+    ("nmf", {"k": 4}),
+]
 
 
-@pytest.mark.parametrize("pooler_name", poolers)
-def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name):
-    PARAMS = {
-        "scorer": "degree",
-    }
-    pooler = get_pooler(pooler_name, **PARAMS)
+@pytest.mark.parametrize(("pooler_name", "pooler_kwargs"), precoarsening_poolers)
+def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name, pooler_kwargs):
+    pooler = get_pooler(pooler_name, **pooler_kwargs)
 
     data_batch = pooler_test_graph_sparse_batch
     num_nodes = data_batch.num_nodes
@@ -50,6 +54,11 @@ def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name):
 
     assert pooling_out.so.s.size(0) == num_nodes
     assert pooling_out.batch is not None
+
+
+def test_get_pooler_missing_required_args_error():
+    with pytest.raises(TypeError, match=r"Missing required argument\(s\).+eigen.+k"):
+        get_pooler("eigen")
 
 
 def test_normalizeadj_on_simple_data():
@@ -86,7 +95,7 @@ def test_precoarsening_attaches_single_level():
     data.num_nodes = 4
 
     dummy = NDPPooling()
-    transform = PreCoarsening(pooler=dummy, recursive_depth=1)
+    transform = PreCoarsening(dummy)
     data_t = transform(data)
 
     # After one level of pre‐coarsening, attribute "pooled_data" should exist
@@ -106,7 +115,7 @@ def test_precoarsening_multiple_levels_returns_list():
     data.num_nodes = 3
 
     pooler = NDPPooling()
-    transform = PreCoarsening(pooler=pooler, recursive_depth=2)
+    transform = PreCoarsening([pooler, pooler])
     data_t = transform(data)
 
     # Now pooled_data should be a list of two Data objects
@@ -137,6 +146,30 @@ def test_precoarsening_with_mixed_level_poolers():
     assert isinstance(transform.poolers[1], KMISPooling)
     assert isinstance(data_t.pooled_data, list)
     assert len(data_t.pooled_data) == 2
+
+
+def test_precoarsening_collapsed_cached_pooler_recomputes_levels():
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3, 3, 4, 4, 5], [1, 0, 2, 1, 3, 2, 4, 3, 5, 4]],
+        dtype=torch.long,
+    )
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
+    x = torch.randn((6, 3))
+    batch = torch.zeros(6, dtype=torch.long)
+    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
+    data.num_nodes = 6
+
+    # Repeated identical configs collapse into one multi-level run on one pooler
+    # instance. With cached=True this must still recompute each level.
+    transform = PreCoarsening(
+        poolers=[("ndp", {"cached": True}), ("ndp", {"cached": True})]
+    )
+    data_t = transform(data)
+
+    assert len(data_t.pooled_data) == 2
+    level_0 = data_t.pooled_data[0]
+    level_1 = data_t.pooled_data[1]
+    assert level_1.so.num_nodes == level_0.so.num_supernodes
 
 
 def test_precoarsening_eigen_fixed_k_collates_across_graph_sizes():
@@ -212,15 +245,16 @@ def test_precoarsening_nmf_fixed_k_collates_across_graph_sizes():
     assert batch.pooled_data[0].so.s.size(1) == k
 
 
-def test_precoarsening_poolers_take_priority_over_pooler_and_depth():
-    transform = PreCoarsening(
-        pooler=NDPPooling(),
-        recursive_depth=4,
-        poolers=["ndp", ("kmis", {"scorer": "degree"})],
-    )
-    assert len(transform.poolers) == 2
-    assert isinstance(transform.poolers[0], NDPPooling)
-    assert isinstance(transform.poolers[1], KMISPooling)
+def test_precoarsening_poolers_accepts_single_or_sequence():
+    # Single pooler (one level)
+    t1 = PreCoarsening(NDPPooling())
+    assert len(t1.poolers) == 1
+    assert isinstance(t1.poolers[0], NDPPooling)
+    # Sequence of level configs
+    t2 = PreCoarsening(["ndp", ("kmis", {"scorer": "degree"})])
+    assert len(t2.poolers) == 2
+    assert isinstance(t2.poolers[0], NDPPooling)
+    assert isinstance(t2.poolers[1], KMISPooling)
 
 
 def test_pooledbatch_from_data_list_and_get_example():

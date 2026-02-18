@@ -12,6 +12,7 @@ from tgp.reduce import global_reduce
 seed_everything(8)
 
 pooling_schedules = {
+    "sep->sep": ["sep", "sep"],
     "nopool->nopool": ["nopool", "nopool"],
     "ndp->ndp": ["ndp", "ndp"],
     "graclus->graclus": ["graclus", "graclus"],
@@ -33,7 +34,7 @@ pooling_schedules = {
 }
 
 for schedule_name, level_specs in pooling_schedules.items():
-    pre_transform = PreCoarsening(poolers=level_specs)
+    pre_transform = PreCoarsening(level_specs)
     level_poolers = pre_transform.poolers
     num_levels = len(level_poolers)
 
@@ -52,7 +53,8 @@ for schedule_name, level_specs in pooling_schedules.items():
     print(dataset[0])
     next_batch = next(iter(train_loader))
     print(next_batch)
-    print(next_batch.pooled_data[0])
+    for level_idx, pooled_graph in enumerate(next_batch.pooled_data):
+        print(f"pooled_data[{level_idx}] -> {pooled_graph}")
 
     # EigenPooling expands features: [K, H*d]; others use num_modes=1
     level_num_modes = [getattr(pooler, "num_modes", 1) for pooler in level_poolers]
