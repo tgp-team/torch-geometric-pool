@@ -1,3 +1,4 @@
+import inspect
 from typing import Callable, Optional, Union
 
 import torch
@@ -137,10 +138,13 @@ class SAGPooling(SRCPooling):
             ),
         )
 
-        # keep only the kwargs that are used in the GNN
-        kwargs = {
-            k: v for k, v in kwargs.items() if k in GNN.__init__.__code__.co_varnames
-        }
+        # keep only the kwargs that are used in the GNN (signature works when __code__ is not available)
+        _gnn_cls = GNN or GraphConv
+        try:
+            _params = set(inspect.signature(_gnn_cls).parameters.keys())
+        except (ValueError, TypeError):
+            _params = set()
+        kwargs = {k: v for k, v in kwargs.items() if k in _params}
 
         self.gnn = (GNN or GraphConv)(in_channels, 1, **kwargs)
         self.multiplier = multiplier

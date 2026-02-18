@@ -34,7 +34,7 @@ pooling_schedules = {
 }
 
 for schedule_name, level_specs in pooling_schedules.items():
-    pre_transform = PreCoarsening(poolers=level_specs)
+    pre_transform = PreCoarsening(level_specs)
     level_poolers = pre_transform.poolers
     num_levels = len(level_poolers)
 

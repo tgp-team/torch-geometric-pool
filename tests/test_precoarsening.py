@@ -95,7 +95,7 @@ def test_precoarsening_attaches_single_level():
     data.num_nodes = 4
 
     dummy = NDPPooling()
-    transform = PreCoarsening(pooler=dummy, recursive_depth=1)
+    transform = PreCoarsening(dummy)
     data_t = transform(data)
 
     # After one level of pre‐coarsening, attribute "pooled_data" should exist
@@ -115,7 +115,7 @@ def test_precoarsening_multiple_levels_returns_list():
     data.num_nodes = 3
 
     pooler = NDPPooling()
-    transform = PreCoarsening(pooler=pooler, recursive_depth=2)
+    transform = PreCoarsening([pooler, pooler])
     data_t = transform(data)
 
     # Now pooled_data should be a list of two Data objects
@@ -245,15 +245,16 @@ def test_precoarsening_nmf_fixed_k_collates_across_graph_sizes():
     assert batch.pooled_data[0].so.s.size(1) == k
 
 
-def test_precoarsening_poolers_take_priority_over_pooler_and_depth():
-    transform = PreCoarsening(
-        pooler=NDPPooling(),
-        recursive_depth=4,
-        poolers=["ndp", ("kmis", {"scorer": "degree"})],
-    )
-    assert len(transform.poolers) == 2
-    assert isinstance(transform.poolers[0], NDPPooling)
-    assert isinstance(transform.poolers[1], KMISPooling)
+def test_precoarsening_poolers_accepts_single_or_sequence():
+    # Single pooler (one level)
+    t1 = PreCoarsening(NDPPooling())
+    assert len(t1.poolers) == 1
+    assert isinstance(t1.poolers[0], NDPPooling)
+    # Sequence of level configs
+    t2 = PreCoarsening(["ndp", ("kmis", {"scorer": "degree"})])
+    assert len(t2.poolers) == 2
+    assert isinstance(t2.poolers[0], NDPPooling)
+    assert isinstance(t2.poolers[1], KMISPooling)
 
 
 def test_pooledbatch_from_data_list_and_get_example():

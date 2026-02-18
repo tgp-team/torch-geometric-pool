@@ -19,6 +19,8 @@ PoolerLevelConfig = Union[
     Tuple[str, Dict[str, Any]],
     Dict[str, Any],
 ]
+# First argument to PreCoarsening: a single pooler/config or a sequence of them.
+PoolersArg = Union[PoolerLevelConfig, Sequence[PoolerLevelConfig]]
 ResolvedLevelEntry = tuple[SRCPooling, tuple[Any, ...]]
 CollapsedLevelRun = tuple[SRCPooling, int]
 
@@ -197,63 +199,54 @@ class PreCoarsening(BaseTransform):
     :meth:`~tgp.poolers.sep.SEPPooling.multi_level_precoarsening`).
     Poolers must be non-trainable, i.e., they should not have learnable
     parameters.
-    The graph is recursively coarsened for :obj:`recursive_depth` levels.
+    The graph is recursively coarsened for as many levels as given in :obj:`poolers`.
     At each level, a coarsened adjacency matrix and, optionally, a pooled batch
     is computed. The result is stored as a list of intermediate pooled subgraphs
     in :class:`~torch_geometric.data.Data`, which downstream GNN models can consume.
 
     Args:
-        pooler (~tgp.src.SRCPooling, optional):
-            A non-trainable pooling operator that implements
-            :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening`.
-            Used for every level when :obj:`poolers` is not provided.
+        poolers (PoolersArg):
+            Per-level pooler configuration. Can be a single pooler or a
+            sequence of level configs. A single value is treated as one level.
+            Each entry can be one of:
+
+            - a pre-instantiated pooler instance;
+            - a pooler alias string, e.g. :obj:`"ndp"`;
+            - a tuple :obj:`("eigen", {"k": 5})`;
+            - a dictionary with keys :obj:`{"pooler": "<name>", ...kwargs}`
+              or :obj:`{"name": "<name>", ...kwargs}`.
+
+            To use the same pooler for multiple levels, pass a sequence
+            (e.g. :obj:`[pooler, pooler, pooler]` or :obj:`["ndp", "ndp", "ndp"]`).
         input_key (str, optional):
             The key in the data object from which to read the graph data.
             If :obj:`None`, uses the default data object.
         output_key (str, optional):
             The key in the data object where the pooled graphs will be stored.
             Defaults to :obj:`"pooled_data"`.
-        recursive_depth (int):
-            Number of recursive coarsening levels when using :obj:`pooler`.
-            Must be greater than 0.
-        poolers (Sequence, optional):
-            Optional per-level pooler configuration. If provided, it overrides
-            :obj:`pooler` and :obj:`recursive_depth`.
-            Each entry can be one of:
-
-            - a pre-instantiated pooler object;
-            - a pooler alias string, e.g. :obj:`"ndp"`;
-            - a tuple :obj:`("eigen", {"k": 5})`;
-            - a dictionary with keys :obj:`{"pooler": "<name>", ...kwargs}`
-              or :obj:`{"name": "<name>", ...kwargs}`.
     """
 
     def __init__(
         self,
-        pooler: Optional[SRCPooling] = None,
+        poolers: PoolersArg,
         input_key: Optional[str] = None,
         output_key: str = "pooled_data",
-        recursive_depth: int = 1,
-        poolers: Optional[Sequence[PoolerLevelConfig]] = None,
     ) -> None:
         super().__init__()
         self.input_key = input_key
         self.output_key = output_key
 
-        if poolers is None:
-            if pooler is None:
-                raise ValueError(
-                    "`pooler` must be provided when `poolers` is not specified."
-                )
-            if recursive_depth <= 0:
-                raise ValueError("`recursive_depth` must be greater than 0.")
-            poolers = [pooler for _ in range(recursive_depth)]
+        levels_list = self._normalize_poolers_arg(poolers)
+        if not levels_list:
+            raise ValueError(
+                "`poolers` must be a non-empty pooler, level config, or sequence."
+            )
 
         # Resolve each level config into an instantiated pooler plus a
         # deterministic "collapse key" used to merge adjacent equal levels.
         self._resolved_level_entries = tuple(
             self._resolve_level_config_with_key(level_config)
-            for level_config in poolers
+            for level_config in levels_list
         )
         self.poolers = tuple(pooler for pooler, _ in self._resolved_level_entries)
         if not self.poolers:
@@ -262,7 +255,25 @@ class PreCoarsening(BaseTransform):
             self._collapse_consecutive_runs(self._resolved_level_entries)
         )
 
-        self.recursive_depth = len(self.poolers)
+
+    @staticmethod
+    def _normalize_poolers_arg(
+        poolers: PoolersArg,
+    ) -> list[PoolerLevelConfig]:
+        """Convert poolers (single pooler/config or sequence) to a list of level configs."""
+        if isinstance(poolers, SRCPooling):
+            return [poolers]
+        if isinstance(poolers, str):
+            return [poolers]
+        if isinstance(poolers, dict):
+            return [poolers]
+        if (
+            isinstance(poolers, tuple)
+            and len(poolers) == 2
+            and isinstance(poolers[1], (dict, type(None)))
+        ):
+            return [poolers]
+        return list(poolers)
 
     @staticmethod
     def _build_pooler(pooler_name: str, kwargs: Optional[Dict[str, Any]] = None):
