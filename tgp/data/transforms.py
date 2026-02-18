@@ -255,7 +255,6 @@ class PreCoarsening(BaseTransform):
             self._collapse_consecutive_runs(self._resolved_level_entries)
         )
 
-
     @staticmethod
     def _normalize_poolers_arg(
         poolers: PoolersArg,
