@@ -118,12 +118,25 @@ This flag determines the appropriate downstream MP/global pooling layers.
   `get_mask_from_dense_s`) so that variable-K behavior is consistent with
   the batched path.
 
-### Global pool with mask
+### Readout (graph-level aggregation)
 
-- **`dense_global_reduce`** and the poolers’ **`global_pool(...)`** now accept an
-  optional `mask` argument. When provided (e.g. `out.mask` from a variable-K
-  pooler), only valid nodes are aggregated, so global pooling is correct for
-  LaPool/BNPool and other poolers that pad to `K_max` per graph.
+- **`global_reduce`** and **`dense_global_reduce`** are replaced by a single
+  function **`readout(...)`**. Import from `tgp.reduce`: `from tgp.reduce import readout`.
+  The function infers sparse vs dense from the tensor shape: 2D `[N, F]` is
+  treated as sparse (use `batch` for grouping); 3D `[B, N, F]` as dense (reduce
+  over node dimension). Optional `mask` is supported for both; `node_dim` is
+  internal (default `-2`) and only in `readout`, not on poolers.
+- **Poolers:** **`pooler.global_pool(x, ...)`** is replaced by
+  **`pooler.readout(x, ...)`** with the same arguments (`reduce_op`, `batch`,
+  `size`, `mask`). No `node_dim` on `SRCPooling` or `DenseSRCPooling`.
+- **KMIS:** The `node_dim` argument is removed from `KMISPooling` and
+  `KMISSelect` (it was unused in select; the pooler now uses `dim=0` in the
+  single `index_select`). Remove it from the KMIS constructor if you passed it.
+- **PyG aggregators:** You can pass a `torch_geometric.nn.aggr.Aggregation`
+  instance (e.g. `aggr.MeanAggregation()`) as `reduce_op` to `readout(...)`.
+- **AggrReduce:** New reduce class `AggrReduce(aggr)` wraps a PyG Aggregation
+  for per-cluster reduce, so the same aggregators work for both readout and
+  pooler reduce.
 
 ## API / Behavior Changes
 
@@ -207,6 +220,10 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 ## Migration Notes
 
+- **Readout:** Replace `global_reduce(x, ...)` and `dense_global_reduce(x, ...)`
+  with `readout(x, ...)`. Replace `pooler.global_pool(x, ...)` with
+  `pooler.readout(x, ...)`. Remove `node_dim` from pooler constructors and from
+  KMIS if you used it.
 - If you previously relied on `block_diags_output` or `unbatched_output`,
   update to `sparse_output`.
 - Use `_u` pooler names (e.g., `bnpool_u`, `lap_u`) to select unbatched dense modes.

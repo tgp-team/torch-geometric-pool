@@ -108,8 +108,8 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                     x = self.conv2(x_pool, adj_pool, out.edge_weight)
                 x = F.relu(x)
 
-                # Global pooling
-                x = self.pooler.global_pool(
+                # Readout
+                x = self.pooler.readout(
                     x, reduce_op="sum", batch=out.batch, mask=mask_pool
                 )
 

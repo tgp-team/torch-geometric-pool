@@ -20,7 +20,7 @@ def test_graclus_forward(pooler_test_graph_sparse):
     assert isinstance(next(iter(out)), torch.Tensor)
     assert out.has_loss is False
     assert out.get_loss_value() == 0.0
-    assert isinstance(pooler.global_pool(x, batch), torch.Tensor)
+    assert isinstance(pooler.readout(x, batch=batch), torch.Tensor)
     assert pooler.get_forward_signature() is not None
     assert pooler.data_transforms() is None
 

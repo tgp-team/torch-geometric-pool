@@ -7,7 +7,7 @@ from torch_geometric.datasets import TUDataset
 from torch_geometric.nn import ARMAConv
 
 from tgp.data import PoolDataLoader, PreCoarsening
-from tgp.reduce import global_reduce
+from tgp.reduce import readout
 
 seed_everything(8)
 
@@ -107,8 +107,8 @@ for schedule_name, level_specs in pooling_schedules.items():
                 x = conv(x, pooled.edge_index, pooled.edge_weight)
                 x = F.relu(x)
 
-            # Global pooling
-            x = global_reduce(
+            # Readout
+            x = readout(
                 x,
                 reduce_op="sum",
                 batch=pooled.batch,

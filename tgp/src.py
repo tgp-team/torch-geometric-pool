@@ -10,7 +10,8 @@ from torch_geometric.utils import to_dense_adj, to_dense_batch
 
 from tgp.connect import Connect
 from tgp.lift import Lift
-from tgp.reduce import Reduce, dense_global_reduce, global_reduce
+from tgp.reduce import Reduce
+from tgp.reduce import readout as readout_fn
 from tgp.select import Select, SelectOutput
 from tgp.utils import Signature, connectivity_to_edge_index, foo_signature
 from tgp.utils.ops import dense_to_block_diag, is_dense_adj
@@ -125,8 +126,6 @@ class SRCPooling(torch.nn.Module):
         cached (bool, optional): If set to :obj:`True`, will cache the
             :class:`~tgp.select.Select` output and the :class:`~tgp.connect.Connect`
             output. (default: :obj:`False`)
-        node_dim (int, optional): The dimension of the node features.
-            (default: :obj:`-2`)
     """
 
     def __init__(
@@ -136,14 +135,12 @@ class SRCPooling(torch.nn.Module):
         lifter: Lift = None,
         connector: Connect = None,
         cached: bool = False,
-        node_dim: int = -2,
     ):
         super().__init__()
         self.selector = selector
         self.reducer = reducer
         self.lifter = lifter
         self.connector = connector
-        self.node_dim = node_dim
         self.cached = cached
         self._so_cached = None
         self._pooled_edge_index = None
@@ -225,7 +222,7 @@ class SRCPooling(torch.nn.Module):
         """Preprocess inputs, if needed."""
         return x, edge_index, None
 
-    def global_pool(
+    def readout(
         self,
         x: Tensor,
         reduce_op: ReduceType = "sum",
@@ -233,11 +230,12 @@ class SRCPooling(torch.nn.Module):
         size: Optional[int] = None,
         mask: Optional[Tensor] = None,
     ) -> Tensor:
-        r"""Global pooling operation.
+        r"""Graph-level readout: aggregate node features to one vector per graph.
 
-        It is just a wrapper for :func:`~tgp.reduce.global_reduce`.
+        Delegates to :func:`~tgp.reduce.readout`. Infers sparse vs dense from
+        ``x.ndim`` (2 vs 3).
         """
-        return global_reduce(x, reduce_op, batch, size, self.node_dim, mask=mask)
+        return readout_fn(x, reduce_op, batch=batch, size=size, mask=mask)
 
     @property
     def is_dense(self) -> bool:
@@ -319,8 +317,8 @@ class DenseSRCPooling(SRCPooling):
 
     It provides a preprocessing function that transform a batch of graphs in
     sparse representation into a batch of dense graphs.
-    It also specifies how to perform global pooling through the
-    :func:`~tgp.reduce.dense_global_reduce` function.
+    Graph-level readout is performed via :func:`~tgp.reduce.readout` (format
+    is inferred from the tensor shape).
 
     When :attr:`batched=True`, dense poolers accept either raw sparse inputs
     (which are converted internally) or already-dense padded tensors. In the
@@ -340,8 +338,6 @@ class DenseSRCPooling(SRCPooling):
             :meth:`~tgp.src.DenseSRCPooling.preprocessing`. This should only be
             enabled when the same graph is reused across iterations (e.g.,
             transductive single-graph tasks). (default: :obj:`False`)
-        node_dim (int, optional): The dimension of the node features.
-            (default: :obj:`-2`)
         adj_transpose (bool, optional):
             If :obj:`True`, the preprocessing step and
             the :class:`~tgp.connect.DenseConnect` operation returns transposed
@@ -365,7 +361,6 @@ class DenseSRCPooling(SRCPooling):
         lifter: Lift = None,
         connector: Connect = None,
         cached: bool = False,
-        node_dim: int = -2,
         adj_transpose: bool = False,
         batched: bool = True,
         sparse_output: bool = False,
@@ -377,7 +372,6 @@ class DenseSRCPooling(SRCPooling):
             lifter=lifter,
             connector=connector,
             cached=cached,
-            node_dim=node_dim,
         )
         self.batched = batched
         self.sparse_output = sparse_output
@@ -569,7 +563,7 @@ class DenseSRCPooling(SRCPooling):
 
         return x_pool, edge_index, edge_weight, batch_pooled
 
-    def global_pool(
+    def readout(
         self,
         x: Tensor,
         reduce_op: ReduceType = "sum",
@@ -577,16 +571,13 @@ class DenseSRCPooling(SRCPooling):
         size: Optional[int] = None,
         mask: Optional[Tensor] = None,
     ) -> Tensor:
-        r"""Global pooling operation for dense pooling methods.
-
-        When :obj:`mask` is provided (e.g. :obj:`out.mask` from variable-size
-        batched dense poolers like LaPool/BNPool), only valid nodes are aggregated.
+        r"""Graph-level readout. Delegates to :func:`~tgp.reduce.readout`; format
+        is inferred from ``x.ndim``. When :obj:`mask` is provided (e.g. from
+        variable-size batched dense poolers), only valid nodes are aggregated.
         """
-        if not self.sparse_output:
-            if x.dim() == 2:
-                x = x.unsqueeze(0)
-            return dense_global_reduce(x, reduce_op, self.node_dim, mask=mask)
-        return global_reduce(x, reduce_op, batch, size, self.node_dim)
+        if not self.sparse_output and x.dim() == 2:
+            x = x.unsqueeze(0)
+        return readout_fn(x, reduce_op, batch=batch, size=size, mask=mask)
 
 
 class Precoarsenable:

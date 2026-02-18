@@ -124,8 +124,6 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
             operations will be cached, so that they do not need to be recomputed.
             If :obj:`True`, the scorer cannot be :obj:`"linear"`.
             (default: :obj:`False`)
-        node_dim (int, optional):
-            The node dimension in the input feature matrix. (default: :obj:`-2`)
     """
 
     def __init__(
@@ -144,7 +142,6 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         degree_norm: bool = False,
         edge_weight_norm: bool = False,
         cached: bool = False,
-        node_dim: int = -2,
     ):
         super().__init__(
             selector=KMISSelect(
@@ -154,7 +151,6 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
                 score_heuristic=score_heuristic,
                 force_undirected=force_undirected,
                 s_inv_op=s_inv_op,
-                node_dim=node_dim,
             ),
             reducer=BaseReduce(
                 reduce_op=reduce_red_op if reduce_red_op is not None else "sum"
@@ -226,7 +222,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
 
             # Reduce
             if self.reduce_red_op is None:
-                x_pooled = torch.index_select(x, index=so.mis, dim=self.node_dim)
+                x_pooled = torch.index_select(x, index=so.mis, dim=0)
                 x_pooled = x_pooled * so.weight[so.mis].view(-1, 1)
                 batch_pooled = None if batch is None else batch[so.mis]
             else:
