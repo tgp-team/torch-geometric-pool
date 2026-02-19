@@ -1,6 +1,7 @@
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -87,6 +88,7 @@ class SelectOutput:
 
     s: Tensor
     s_inv: Tensor = None
+    batch: Optional[Tensor] = None
 
     def __init__(
         self,
@@ -98,6 +100,7 @@ class SelectOutput:
         num_supernodes: int = None,
         weight: Optional[Tensor] = None,
         s_inv_op: Optional[str] = "transpose",
+        batch: Optional[Tensor] = None,
         **extra_args,
     ):
         super().__init__()
@@ -168,6 +171,8 @@ class SelectOutput:
         if s_inv is None:
             self.set_s_inv(s_inv_op)
 
+        self.batch = batch
+
         self._extra_args = set()
         for k, v in extra_args.items():
             setattr(self, k, v)
@@ -199,6 +204,10 @@ class SelectOutput:
     @property
     def is_sparse(self) -> bool:
         return isinstance(self.s, Tensor) and self.s.is_sparse
+
+    @property
+    def is_dense(self) -> bool:
+        return isinstance(self.s, Tensor) and not self.s.is_sparse
 
     @property
     def num_nodes(self) -> int:
@@ -242,11 +251,27 @@ class SelectOutput:
         out += ")"
         return out
 
+    @staticmethod
+    def _apply_to_value(value: Any, func: Callable) -> Any:
+        if isinstance(value, Tensor):
+            return func(value)
+        if isinstance(value, list):
+            return [SelectOutput._apply_to_value(v, func) for v in value]
+        if isinstance(value, tuple):
+            return tuple(SelectOutput._apply_to_value(v, func) for v in value)
+        if isinstance(value, Mapping):
+            return {k: SelectOutput._apply_to_value(v, func) for k, v in value.items()}
+        return value
+
     def apply(self, func: Callable) -> "SelectOutput":
-        r"""Applies the function :obj:`func` to both :obj:`s` and :obj:`s_inv`."""
+        r"""Applies :obj:`func` to tensors in :obj:`s`, :obj:`s_inv`, and tensor-valued extra attributes."""
         self.s = func(self.s)
         if self.s_inv is not None:
             self.s_inv = func(self.s_inv)
+        for attr_name in self._extra_args:
+            if hasattr(self, attr_name):
+                value = getattr(self, attr_name)
+                setattr(self, attr_name, self._apply_to_value(value, func))
         return self
 
     def clone(self) -> "SelectOutput":
@@ -257,17 +282,26 @@ class SelectOutput:
         r"""Performs tensor dtype and/or device conversion for both :obj:`s` and
         :obj:`s_inv`.
         """
-        return self.apply(lambda x: x.to(device=device, non_blocking=non_blocking))
+        self.apply(lambda x: x.to(device=device, non_blocking=non_blocking))
+        if self.batch is not None:
+            self.batch = self.batch.to(device=device, non_blocking=non_blocking)
+        return self
 
     def cpu(self) -> "SelectOutput":
         r"""Copies attributes to CPU memory for both :obj:`s` and :obj:`s_inv`."""
-        return self.apply(lambda x: x.cpu())
+        self.apply(lambda x: x.cpu())
+        if self.batch is not None:
+            self.batch = self.batch.cpu()
+        return self
 
     def cuda(
         self, device: Optional[Union[int, str]] = None, non_blocking: bool = False
     ) -> "SelectOutput":
         r"""Copies attributes to CUDA memory for both :obj:`s` and :obj:`s_inv`."""
-        return self.apply(lambda x: x.cuda(device, non_blocking=non_blocking))
+        self.apply(lambda x: x.cuda(device, non_blocking=non_blocking))
+        if self.batch is not None:
+            self.batch = self.batch.cuda(device, non_blocking=non_blocking)
+        return self
 
     def detach_(self) -> "SelectOutput":
         r"""Detaches attributes from the computation graph for both :obj:`s`

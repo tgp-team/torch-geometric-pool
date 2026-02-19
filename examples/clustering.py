@@ -12,9 +12,10 @@ from tgp.poolers import get_pooler, pooler_map
 
 seed_everything(8)
 
-poolers = ["acc", "bnpool", "diff", "dmon", "hosc", "jb", "mincut"]
+poolers = ["acc", "bnpool_u", "bnpool", "diff", "dmon", "hosc", "jb", "mincut"]
 for POOLER in poolers:
-    pooler_cls = pooler_map[POOLER]
+    pooler_key = POOLER[:-2] if POOLER.endswith("_u") else POOLER
+    pooler_cls = pooler_map[pooler_key]
     print(f"Using pooler: {POOLER}")
 
     ### Get the data
@@ -33,6 +34,7 @@ for POOLER in poolers:
         "k": dataset.num_classes,
         "normalize_loss": True,
         "adj_transpose": True,
+        "cache_preprocessing": True,
         "in_channels": [16],
         "act": "ReLU",
     }
@@ -76,15 +78,14 @@ for POOLER in poolers:
                 else:
                     x = self.mp[i](x)
 
-            _, adj, _ = self.pooler.preprocessing(
-                x=x, edge_index=edge_index, edge_attr=edge_weight, use_cache=True
-            )
-
-            out = self.pooler(x=x, adj=adj)
-            s = out.so.s[0]
+            out = self.pooler(x=x, adj=edge_index, edge_weight=edge_weight)
+            s_out = out.so.s
+            # check if s_out has batch dimension
+            if s_out.dim() == 3:
+                s_out = s_out[0]
             aux_loss = sum(out.get_loss_value())
 
-            return s, aux_loss
+            return s_out, aux_loss
 
     ### Model setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

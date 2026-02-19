@@ -1,41 +1,18 @@
 import pytest
 import torch
-from torch_geometric.utils import add_self_loops
 
 from tgp.poolers import get_pooler, pooler_map
-
-
-@pytest.fixture(scope="module")
-def simple_graph():
-    pytest.importorskip("torch_sparse")
-    from torch_sparse import SparseTensor
-
-    N = 10
-    F = 2
-    row = torch.arange(9, dtype=torch.long)
-    col = row + 1
-    edge_index = torch.stack([torch.cat([row, col]), torch.cat([col, row])], dim=0)
-    E = edge_index.size(1)
-    x = torch.randn((N, F), dtype=torch.float)
-    edge_weight = torch.ones((E), dtype=torch.float)
-    edge_index, edge_weight = add_self_loops(
-        edge_index, edge_attr=edge_weight, num_nodes=N
-    )
-    batch = torch.zeros(N, dtype=torch.long)
-    adj = SparseTensor.from_edge_index(edge_index, edge_attr=edge_weight)
-    return x, adj, edge_weight, batch
-
 
 poolers = list(pooler_map.keys())
 
 
 @pytest.mark.parametrize("pooler_name", poolers)
 @pytest.mark.torch_sparse
-def test_output_with_spt_adj(simple_graph, pooler_name):
+def test_output_with_spt_adj(pooler_test_graph_sparse_spt, pooler_name):
     pytest.importorskip("torch_sparse")
     from torch_sparse import SparseTensor
 
-    x, adj, edge_weight, batch = simple_graph
+    x, adj, edge_weight, batch = pooler_test_graph_sparse_spt
     N, F = x.size()
 
     PARAMS = {
@@ -54,19 +31,21 @@ def test_output_with_spt_adj(simple_graph, pooler_name):
     pooler = get_pooler(pooler_name, **PARAMS)
     pooler.eval()
 
-    # Preprocessing data
-    x_pre, adj_pre, mask = pooler.preprocessing(
-        edge_index=adj, edge_weight=edge_weight, x=x, batch=batch, use_cache=False
-    )
-    if pooler.is_dense:
+    use_batched_dense = pooler.is_dense and getattr(pooler, "batched", False)
+    if use_batched_dense:
+        x_pre, adj_pre, mask = pooler.preprocessing(
+            edge_index=adj, edge_weight=edge_weight, x=x, batch=batch, use_cache=False
+        )
         assert isinstance(adj_pre, torch.Tensor) and adj_pre.ndim == 3
     else:
+        x_pre, adj_pre, mask = x, adj, None
         assert isinstance(adj_pre, SparseTensor)
 
     # Pooling operation
     out = pooler(x=x_pre, adj=adj_pre, batch=batch, mask=mask)
-    if pooler.is_dense:
-        assert isinstance(out.edge_index, torch.Tensor)
+    use_dense_output = pooler.is_dense and not getattr(pooler, "sparse_output", False)
+    if use_dense_output:
+        assert isinstance(out.edge_index, torch.Tensor) and out.edge_index.ndim == 3
     else:
         # edge_index should be either SparseTensor or torch COO tensor
         assert isinstance(out.edge_index, (SparseTensor, torch.Tensor))
@@ -78,7 +57,11 @@ def test_output_with_spt_adj(simple_graph, pooler_name):
     x_lifted = pooler(x=x_pool, so=out.so, lifting=True)
     assert isinstance(x_lifted, torch.Tensor)
     assert x_lifted.size(-2) == N
-    assert x_lifted.size(-1) == x_pool.size(-1)
+    # EigenPooling contracts feature dimension during lifting (H*d -> d)
+    if pooler_name == "eigen":
+        assert x_lifted.size(-1) == F  # EigenPooling lifts back to original dimension
+    else:
+        assert x_lifted.size(-1) == x_pool.size(-1)
 
     # reset params check
     if hasattr(pooler, "reset_parameters"):

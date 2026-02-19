@@ -1,13 +1,20 @@
 from typing import List, Optional, Union
 
 from torch import Tensor
+from torch_geometric.typing import Adj
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import DenseSelect, SelectOutput
+from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils.losses import entropy_loss, link_pred_loss
+from tgp.utils.losses import (
+    entropy_loss,
+    link_pred_loss,
+    sparse_link_pred_loss,
+    unbatched_entropy_loss,
+)
+from tgp.utils.ops import connectivity_to_edge_index
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -16,7 +23,7 @@ class DiffPool(DenseSRCPooling):
     Representation Learning with Differentiable Pooling"
     <https://arxiv.org/abs/1806.08804>`_ (Ying et al., NeurIPS 2018).
 
-    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.DenseSelect`.
+    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.MLPSelect`.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
@@ -64,6 +71,10 @@ class DiffPool(DenseSRCPooling):
             adjacency matrices, so that they could be passed "as is" to the dense
             message-passing layers.
             (default: :obj:`True`)
+        cache_preprocessing (bool, optional):
+            If :obj:`True`, caches the dense adjacency produced during preprocessing.
+            This should only be enabled when the same graph is reused across iterations.
+            (default: :obj:`False`)
         lift (~tgp.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
@@ -99,11 +110,15 @@ class DiffPool(DenseSRCPooling):
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
+        batched: bool = True,
+        sparse_output: bool = False,
+        cache_preprocessing: bool = False,
     ):
         super().__init__(
-            selector=DenseSelect(
+            selector=MLPSelect(
                 in_channels=in_channels,
                 k=k,
+                batched_representation=batched,
                 act=act,
                 dropout=dropout,
                 s_inv_op=s_inv_op,
@@ -115,8 +130,12 @@ class DiffPool(DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
+                sparse_output=sparse_output,
             ),
             adj_transpose=adj_transpose,
+            cache_preprocessing=cache_preprocessing,
+            batched=batched,
+            sparse_output=sparse_output,
         )
 
         self.link_loss_coeff = link_loss_coeff
@@ -126,9 +145,12 @@ class DiffPool(DenseSRCPooling):
     def forward(
         self,
         x: Tensor,
-        adj: Optional[Tensor] = None,
+        adj: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         mask: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
@@ -139,13 +161,19 @@ class DiffPool(DenseSRCPooling):
                 :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`, with
                 batch-size :math:`B`, (maximum) number of nodes :math:`N` for
                 each graph, and feature dimension :math:`F`.
-            adj (~torch.Tensor): Adjacency tensor
-                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
+            adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
+                In batched mode, this accepts sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor
+                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`, or an
+                already dense adjacency tensor with the same shape.
+                (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
             mask (~torch.Tensor, optional): Mask matrix
                 :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph. (default: :obj:`None`)
+                the valid nodes in each graph. Only used when inputs are already
+                dense/padded. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -154,26 +182,80 @@ class DiffPool(DenseSRCPooling):
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch, batch_pooled=batch_pooled
+            )
             return x_lifted
 
-        else:
-            # Select
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
+            )
             so = self.select(x=x, mask=mask)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
+            adj_pooled, _ = self.connect(
+                edge_index=adj,
+                so=so,
+                edge_weight=edge_weight,
+                batch=batch,
+                batch_pooled=batch_pooled,
+            )
+            num_nodes = mask.sum().item()
+            loss = self.compute_loss(adj=adj, S=so.s, num_nodes=num_nodes)
+            if self.sparse_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pooled,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                    loss=loss,
+                )
+            return PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so, loss=loss)
 
-            # Reduce
-            x_pooled, _ = self.reduce(x=x, so=so)
+        # === Unbatched (sparse-loss) path ===
+        so = self.select(x=x, batch=batch)
+        loss = self.compute_sparse_loss(adj, edge_weight, so.s, batch)
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
+        edge_index_pooled, edge_weight_pooled = self.connect(
+            edge_index=adj,
+            so=so,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
+        )
+        return PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            loss=loss,
+        )
 
-            # Connect
-            adj_pooled, _ = self.connect(edge_index=adj, so=so)
-
-            loss = self.compute_loss(adj=adj, S=so.s)
-
-            out = PoolingOutput(x=x_pooled, edge_index=adj_pooled, so=so, loss=loss)
-
-            return out
-
-    def compute_loss(self, adj: Tensor, S: Tensor) -> dict:
+    def compute_loss(
+        self,
+        adj: Tensor,
+        S: Tensor,
+        num_nodes: int,
+    ) -> dict:
         r"""Computes the auxiliary loss terms.
 
         Args:
@@ -185,7 +267,46 @@ class DiffPool(DenseSRCPooling):
             the auxiliary loss.
         """
         link_loss = link_pred_loss(S, adj, normalize_loss=self.normalize_loss)
-        ent_loss = entropy_loss(S, batch_reduction="mean")
+        ent_loss = entropy_loss(S, num_nodes)
+        return {
+            "link_loss": link_loss * self.link_loss_coeff,
+            "entropy_loss": ent_loss * self.ent_loss_coeff,
+        }
+
+    def compute_sparse_loss(
+        self,
+        edge_index: Adj,
+        edge_weight: Optional[Tensor],
+        S: Tensor,
+        batch: Optional[Tensor],
+    ) -> dict:
+        """Computes the auxiliary loss terms for unbatched (sparse) mode.
+
+        This method is used when :attr:`batched=False` and operates on sparse
+        adjacency matrices without requiring padding or densification.
+
+        Args:
+            edge_index (~torch_geometric.typing.Adj): Graph connectivity in sparse format.
+            edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            S (~torch.Tensor): The dense assignment matrix of shape :math:`(N, K)`.
+            batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+
+        Returns:
+            dict: A dictionary with the different terms of the auxiliary loss:
+                - :obj:`'link_loss'`: The sparse link prediction loss.
+                - :obj:`'entropy_loss'`: The unbatched entropy loss.
+        """
+        edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
+            edge_index, edge_weight
+        )
+        link_loss = sparse_link_pred_loss(
+            S,
+            edge_index_conv,
+            edge_weight_conv,
+            batch,
+            normalize_loss=self.normalize_loss,
+        )
+        ent_loss = unbatched_entropy_loss(S)
         return {
             "link_loss": link_loss * self.link_loss_coeff,
             "entropy_loss": ent_loss * self.ent_loss_coeff,
@@ -193,6 +314,7 @@ class DiffPool(DenseSRCPooling):
 
     def extra_repr_args(self) -> dict:
         return {
+            "batched": self.batched,
             "link_loss_coeff": self.link_loss_coeff,
             "ent_loss_coeff": self.ent_loss_coeff,
             "normalize_loss": self.normalize_loss,

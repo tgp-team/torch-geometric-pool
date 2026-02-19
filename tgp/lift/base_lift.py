@@ -1,5 +1,8 @@
+from typing import Optional
+
+import torch
 from torch import Tensor, nn
-from torch_geometric.utils import scatter
+from torch_geometric.utils import scatter, unbatch
 
 from tgp.select import SelectOutput
 from tgp.utils import pseudo_inverse
@@ -75,7 +78,14 @@ class BaseLift(Lift):
         self.matrix_op = matrix_op
         self.reduce_op = reduce_op
 
-    def forward(self, x_pool: Tensor, so: SelectOutput = None, **kwargs) -> Tensor:
+    def forward(
+        self,
+        x_pool: Tensor,
+        so: SelectOutput = None,
+        batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
+        **kwargs,
+    ) -> Tensor:
         r"""Forward pass of the Lift operation.
 
         Args:
@@ -83,11 +93,24 @@ class BaseLift(Lift):
                 The pooled node features.
             so (~tgp.select.SelectOutput):
                 The output of the :math:`\texttt{select}` operator.
+            batch (~torch.Tensor, optional):
+                The batch vector for the original nodes.
+                If not provided, will use so.batch if available.
+                Required for multi-graph batches with dense [N, K] assignment matrices.
+                (default: :obj:`None`)
+            batch_pooled (~torch.Tensor, optional):
+                The batch vector for the pooled nodes.
+                Required for multi-graph batches with dense [N, K] assignment matrices.
+                (default: :obj:`None`)
 
         Returns:
             x_lift (~torch.Tensor):
                 The lifted node features.
         """
+        # Use so.batch if batch is not provided
+        if batch is None and hasattr(so, "batch") and so.batch is not None:
+            batch = so.batch
+
         if self.matrix_op == "precomputed":
             if so.s.is_sparse:
                 s_inv = so.s_inv.transpose(-2, -1).coalesce()
@@ -128,7 +151,96 @@ class BaseLift(Lift):
                 reduce=reduce,
             )
         else:
-            x_prime = s_inv.matmul(x_pool)
+            # Dense assignment matrix
+            K = s_inv.size(-1)
+
+            is_multi_graph = (
+                batch is not None
+                and batch.numel() > 0
+                and int(batch.min().item()) != int(batch.max().item())
+            )
+
+            # Dense [N, K] + multi-graph batches: pooled features may be flattened as [B*K, F].
+            if s_inv.dim() == 2 and x_pool.dim() == 2 and is_multi_graph:
+                batch_size = int(batch.max().item()) + 1
+                expected_nodes = batch_size * K
+
+                if x_pool.size(0) == expected_nodes:
+                    if batch_pooled is None:
+                        raise ValueError(
+                            "batch_pooled must be provided when lifting with dense [N, K] SelectOutput "
+                            "and multi-graph batches. Pass it as: "
+                            "pooler(x=x_pool, so=so, lifting=True, batch_pooled=batch_pooled)"
+                        )
+
+                    if batch_pooled.size(0) != x_pool.size(0):
+                        raise ValueError(
+                            "batch_pooled has an unexpected length for dense [N, K] lifting "
+                            f"(got {batch_pooled.size(0)}, expected {x_pool.size(0)})."
+                        )
+
+                    unbatched_s_inv = unbatch(s_inv, batch)  # list of [N_i, K] tensors
+                    unbatched_x_pool = unbatch(
+                        x_pool, batch_pooled
+                    )  # list of [K, F] tensors
+
+                    x_lifted_list = []
+                    for s_inv_i, x_pool_i in zip(unbatched_s_inv, unbatched_x_pool):
+                        x_lifted_list.append(s_inv_i.matmul(x_pool_i))
+
+                    x_prime = torch.cat(x_lifted_list, dim=0)  # [N, F]
+                elif x_pool.size(0) == K:
+                    # Pooling produced a global [K, F] tensor across the batch.
+                    x_prime = s_inv.matmul(x_pool)
+                else:
+                    raise ValueError(
+                        "Unexpected pooled feature shape for dense [N, K] lifting with a multi-graph batch: "
+                        f"got x_pool.size(0)={x_pool.size(0)}, expected {K} or {expected_nodes}."
+                    )
+            elif s_inv.dim() == 2 and x_pool.dim() == 3:
+                if not is_multi_graph:
+                    x_prime = s_inv.matmul(x_pool.squeeze(0))
+                else:
+                    batch_size = x_pool.size(0)
+                    expected_nodes = batch_size * K
+
+                    if batch_pooled is None:
+                        batch_pooled = torch.arange(
+                            batch_size, dtype=batch.dtype, device=batch.device
+                        ).repeat_interleave(K)
+
+                    if batch_pooled.size(0) != expected_nodes:
+                        raise ValueError(
+                            "batch_pooled has an unexpected length for dense [N, K] lifting "
+                            f"(got {batch_pooled.size(0)}, expected {expected_nodes})."
+                        )
+
+                    x_pool_flat = x_pool.reshape(expected_nodes, x_pool.size(-1))
+                    unbatched_s_inv = unbatch(s_inv, batch)  # list of [N_i, K] tensors
+                    unbatched_x_pool = unbatch(
+                        x_pool_flat, batch_pooled
+                    )  # list of [K, F] tensors
+
+                    x_lifted_list = []
+                    for s_inv_i, x_pool_i in zip(unbatched_s_inv, unbatched_x_pool):
+                        x_lifted_list.append(s_inv_i.matmul(x_pool_i))
+
+                    x_prime = torch.cat(x_lifted_list, dim=0)  # [N, F]
+            elif s_inv.dim() == 3 and x_pool.dim() == 2:
+                batch_size = s_inv.size(0)
+                num_clusters = s_inv.size(-1)
+                expected_nodes = batch_size * num_clusters
+
+                if x_pool.size(0) != expected_nodes:
+                    raise ValueError(
+                        "Unexpected pooled feature shape for dense [B, N, K] lifting: "
+                        f"got x_pool.size(0)={x_pool.size(0)}, expected {expected_nodes}."
+                    )
+
+                x_pool = x_pool.view(batch_size, num_clusters, x_pool.size(-1))
+                x_prime = s_inv.matmul(x_pool)
+            else:
+                x_prime = s_inv.matmul(x_pool)
 
         return x_prime
 

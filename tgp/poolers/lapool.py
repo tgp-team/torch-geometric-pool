@@ -3,21 +3,22 @@ from typing import Optional
 from torch import Tensor
 from torch_geometric.typing import Adj
 
-from tgp.connect import DenseConnectSPT
+from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import LaPoolSelect, SelectOutput
-from tgp.src import PoolingOutput, SRCPooling
+from tgp.src import DenseSRCPooling, PoolingOutput
+from tgp.utils import get_mask_from_dense_s
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
-class LaPooling(SRCPooling):
+class LaPooling(DenseSRCPooling):
     r"""The LaPool pooling operator from the paper `Towards Interpretable Sparse Graph Representation Learning
     with Laplacian Pooling <https://arxiv.org/abs/1905.11577>`_ (Noutahi et al., 2019).
 
     + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.LaPoolSelect`.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
-    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnectSPT`.
+    + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
     Args:
@@ -72,6 +73,12 @@ class LaPooling(SRCPooling):
             :obj:`~torch_geometric.utils.scatter`,
             e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
             (default: :obj:`"sum"`)
+        batched (bool, optional):
+            If :obj:`True`, uses the batched dense path.
+            (default: :obj:`True`)
+        sparse_output (bool, optional):
+            If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
+            returns batched dense outputs. (default: :obj:`False`)
     """
 
     def __init__(
@@ -84,18 +91,25 @@ class LaPooling(SRCPooling):
         s_inv_op: SinvType = "transpose",
         reduce_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
+        batched: bool = True,
+        sparse_output: bool = False,
     ):
         super().__init__(
             selector=LaPoolSelect(
-                shortest_path_reg=shortest_path_reg, s_inv_op=s_inv_op
+                shortest_path_reg=shortest_path_reg,
+                batched_representation=batched,
+                s_inv_op=s_inv_op,
             ),
             reducer=BaseReduce(reduce_op=reduce_red_op),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
-            connector=DenseConnectSPT(
+            connector=DenseConnect(
                 remove_self_loops=remove_self_loops,
                 degree_norm=degree_norm,
                 edge_weight_norm=edge_weight_norm,
+                sparse_output=sparse_output,
             ),
+            batched=batched,
+            sparse_output=sparse_output,
         )
 
     def forward(
@@ -105,66 +119,145 @@ class LaPooling(SRCPooling):
         edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
+        mask: Optional[Tensor] = None,
         **kwargs,
     ) -> PoolingOutput:
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor): The node feature matrix of shape :math:`[N, F]`,
-                where :math:`N` is the number of nodes in the batch and
-                :math:`F` is the number of node features.
+            x (~torch.Tensor): The node feature matrix of shape :math:`[N, F]` (unbatched)
+                or :math:`[B, N, F]` (batched), where :math:`N` is the number of nodes,
+                :math:`B` is the batch size, and :math:`F` is the number of node features.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                For unbatched mode: It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
+                For batched mode: it can be either sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor of shape
+                :math:`[B, N, N]`, or an already dense tensor of shape
+                :math:`[B, N, N]`.
                 If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
-                containing the weights of the edges.
+                containing the weights of the edges (unbatched mode only).
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
+            batch_pooled (torch.Tensor, optional): The batch vector for the pooled nodes.
+                Required when lifting with dense :math:`[N, K]` SelectOutput on multi-graph
+                batches. Pass `out.batch` from the pooling call. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
+            mask (~torch.Tensor, optional): Optional boolean mask indicating valid nodes
+                in each graph. Only used when inputs are already dense/padded.
+                (default: :obj:`None`)
 
         Returns:
             PoolingOutput: The output of the pooling operator.
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            batch_orig = batch if batch is not None else so.batch
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch_orig, batch_pooled=batch_pooled
+            )
             return x_lifted
 
-        else:
-            # Select
-            so = self.select(
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
                 x=x,
                 edge_index=adj,
                 edge_weight=edge_weight,
                 batch=batch,
-                num_nodes=x.size(0),
+                mask=mask,
             )
+
+            # Select
+            so = self.select(x=x, edge_index=adj, mask=mask)
 
             # Reduce
             x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
             # Connect
-            edge_index_pooled, edge_weight_pooled = self.connect(
+            adj_pool, _ = self.connect(
                 edge_index=adj,
                 so=so,
                 edge_weight=edge_weight,
+                batch=batch,
                 batch_pooled=batch_pooled,
             )
 
-            out = PoolingOutput(
-                x=x_pooled,
-                edge_index=edge_index_pooled,
-                edge_weight=edge_weight_pooled,
-                batch=batch_pooled,
-                so=so,
-            )
-            return out
+            if self.sparse_output:
+                mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pool,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                        mask=mask_pool,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                )
+
+            mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
+            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, mask=mask_pool)
+
+        # === Unbatched path ===
+        # Select
+        so = self.select(
+            x=x,
+            edge_index=adj,
+            edge_weight=edge_weight,
+            batch=batch,
+            num_nodes=x.size(0),
+        )
+
+        # Reduce
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
+
+        # Connect
+        edge_index_pooled, edge_weight_pooled = self.connect(
+            edge_index=adj,
+            so=so,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
+        )
+
+        mask_pool = (
+            get_mask_from_dense_s(s=so.s, batch=batch)
+            if not self.sparse_output
+            else None
+        )
+        out = PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            mask=mask_pool,
+        )
+        return out
+
+    def extra_repr_args(self) -> dict:
+        return {
+            "batched": self.batched,
+        }

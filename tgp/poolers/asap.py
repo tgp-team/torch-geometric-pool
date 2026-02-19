@@ -1,3 +1,4 @@
+import inspect
 from typing import Callable, Optional, Union
 
 import torch
@@ -143,12 +144,12 @@ class ASAPooling(SRCPooling):
         self.lin = Linear(in_channels, in_channels)
         self.att = Linear(2 * in_channels, 1)
         if self.GNN is not None:
-            # keep only the kwargs that are used in the GNN
-            kwargs = {
-                k: v
-                for k, v in kwargs.items()
-                if k in GNN.__init__.__code__.co_varnames
-            }
+            # keep only the kwargs that are used in the GNN (signature works when __code__ is not available)
+            try:
+                _params = set(inspect.signature(GNN).parameters.keys())
+            except (ValueError, TypeError):
+                _params = set()
+            kwargs = {k: v for k, v in kwargs.items() if k in _params}
             self.gnn_intra_cluster = GNN(self.in_channels, self.in_channels, **kwargs)
         else:
             self.gnn_intra_cluster = None

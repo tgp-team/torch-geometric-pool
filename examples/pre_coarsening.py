@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn.functional as F
 from torch_geometric import seed_everything
@@ -5,31 +7,44 @@ from torch_geometric.datasets import TUDataset
 from torch_geometric.nn import ARMAConv
 
 from tgp.data import PoolDataLoader, PreCoarsening
-from tgp.poolers import get_pooler
-from tgp.reduce import BaseReduce, global_reduce
+from tgp.reduce import global_reduce
 
 seed_everything(8)
 
-N_LEVELS = 2  # Number of coarsening levels
-poolers = {
-    "nopool": {},
-    "ndp": {},
-    "nmf": {"k": 5},
-    "graclus": {},
-    "kmis": {"scorer": "degree", "order_k": 2},
+pooling_schedules = {
+    "sep->sep": ["sep", "sep"],
+    "nopool->nopool": ["nopool", "nopool"],
+    "ndp->ndp": ["ndp", "ndp"],
+    "graclus->graclus": ["graclus", "graclus"],
+    "kmis->kmis": [
+        ("kmis", {"scorer": "degree", "order_k": 2}),
+        ("kmis", {"scorer": "degree", "order_k": 2}),
+    ],
+    # Poolers with different parameters across levels
+    "nmf->nmf": [("nmf", {"k": 8}), ("nmf", {"k": 4})],
+    "eigen->eigen": [
+        ("eigen", {"k": 5, "num_modes": 3}),
+        ("eigen", {"k": 3, "num_modes": 3}),
+    ],
+    # Mixed poolers
+    "ndp->eigen": [
+        "ndp",
+        ("eigen", {"k": 4, "num_modes": 3}),
+    ],
 }
 
-for _pool, args in poolers.items():
-    pooler = get_pooler(_pool, **args)
+for schedule_name, level_specs in pooling_schedules.items():
+    pre_transform = PreCoarsening(level_specs)
+    level_poolers = pre_transform.poolers
+    num_levels = len(level_poolers)
+
+    print(f"=== Using schedule: {schedule_name} ({num_levels} levels) ===")
 
     ### Get the data
     dataset = TUDataset(
         root="../data/TUDataset",
         name="MUTAG",
-        pre_transform=PreCoarsening(
-            pooler=pooler,
-            recursive_depth=N_LEVELS,
-        ),
+        pre_transform=pre_transform,
         force_reload=True,
     )
     train_loader = PoolDataLoader(dataset[:0.9], batch_size=32, shuffle=True)
@@ -38,11 +53,15 @@ for _pool, args in poolers.items():
     print(dataset[0])
     next_batch = next(iter(train_loader))
     print(next_batch)
-    print(next_batch.pooled_data[0])
+    for level_idx, pooled_graph in enumerate(next_batch.pooled_data):
+        print(f"pooled_data[{level_idx}] -> {pooled_graph}")
+
+    # EigenPooling expands features: [K, H*d]; others use num_modes=1
+    level_num_modes = [getattr(pooler, "num_modes", 1) for pooler in level_poolers]
 
     ### Model definition
     class Net(torch.nn.Module):
-        def __init__(self, hidden_channels=64, reducer=BaseReduce()):
+        def __init__(self, hidden_channels=64):
             super().__init__()
 
             num_features = dataset.num_features
@@ -54,19 +73,21 @@ for _pool, args in poolers.items():
             )
 
             # Pooling
-            self.reducer = reducer
+            self.reducers = torch.nn.ModuleList(
+                [pooler.reducer for pooler in level_poolers]
+            )
 
             # Second MP layer
-            self.next_conv = torch.nn.ModuleList(
-                [
+            self.next_conv = torch.nn.ModuleList()
+            for num_modes in level_num_modes:
+                in_ch = hidden_channels * num_modes
+                self.next_conv.append(
                     ARMAConv(
-                        in_channels=hidden_channels,
+                        in_channels=in_ch,
                         out_channels=hidden_channels,
                         num_layers=2,
                     )
-                    for _ in range(N_LEVELS)
-                ]
-            )
+                )
 
             # Readout layer
             self.lin = torch.nn.Linear(hidden_channels, num_classes)
@@ -77,15 +98,22 @@ for _pool, args in poolers.items():
             x = F.relu(x)
 
             # Pooling
-            for pooled, conv in zip(data.pooled_data, self.next_conv):
-                x, _ = self.reducer(x=x, so=pooled.so)
+            for pooled, conv, reducer in zip(
+                data.pooled_data, self.next_conv, self.reducers
+            ):
+                x, _ = reducer(x=x, so=pooled.so)
 
                 # Next MP layer
                 x = conv(x, pooled.edge_index, pooled.edge_weight)
                 x = F.relu(x)
 
             # Global pooling
-            x = global_reduce(x, reduce_op="sum", batch=pooled.batch)
+            x = global_reduce(
+                x,
+                reduce_op="sum",
+                batch=pooled.batch,
+                mask=getattr(pooled, "mask", None),
+            )
 
             # Readout layer
             x = self.lin(x)
@@ -123,9 +151,12 @@ for _pool, args in poolers.items():
 
     ### Training loop
     best_val_acc = test_acc = 0
+    start_time = time.time()
     for epoch in range(1, 11):
         train_loss = train()
         val_acc = test(test_loader)
         print(
             f"Epoch: {epoch:03d}, Train Loss: {train_loss:.4f}, Val Acc: {val_acc:.4f}"
         )
+    end_time = time.time()
+    print(f"Time taken: {end_time - start_time:.2f} seconds")

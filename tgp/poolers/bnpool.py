@@ -3,15 +3,23 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 from torch.distributions import Beta
+from torch_geometric.typing import Adj
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import DPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
+from tgp.utils import (
+    batched_negative_edge_sampling,
+    connectivity_to_edge_index,
+    get_mask_from_dense_s,
+    negative_edge_sampling,
+)
 from tgp.utils.losses import (
     cluster_connectivity_prior_loss,
     kl_loss,
+    sparse_bce_reconstruction_loss,
     weighted_bce_reconstruction_loss,
 )
 from tgp.utils.typing import LiftType, SinvType
@@ -73,12 +81,6 @@ class BNPool(DenseSRCPooling):
             (default: :obj:`1.0`)
         eta (float, optional): Weights the KL divergence loss term.
             (default: :obj:`1.0`)
-        rescale_loss (bool, optional): If :obj:`True`, losses are normalized by the square of the number of nodes :math:`N^2`
-            to ensure proper scaling across different graph sizes.
-            (default: :obj:`True`)
-        balance_links (bool, optional): If :obj:`True`, applies class-balancing weights in the reconstruction loss
-            to handle the imbalance between edges and non-edges in sparse graphs.
-            (default: :obj:`True`)
         train_K (bool, optional): If :obj:`True`, the cluster connectivity matrix :math:`\mathbf{K}` is learnable.
             If :obj:`False`, :math:`\mathbf{K}` is fixed to its initial value.
             (default: :obj:`True`)
@@ -120,6 +122,21 @@ class BNPool(DenseSRCPooling):
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
+        cache_preprocessing (bool, optional):
+            If :obj:`True`, caches the dense adjacency produced during preprocessing.
+            This should only be enabled when the same graph is reused across iterations.
+            (default: :obj:`False`)
+        batched (bool, optional):
+            If :obj:`True`, uses the batched dense representation of the input.
+            If :obj:`False`, uses an unbatched representation without padding.
+            (default: :obj:`True`)
+        sparse_output (bool, optional):
+            If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
+            returns batched dense outputs. (default: :obj:`False`)
+        num_neg_samples (int, optional):
+            Cap on the number of negative edges sampled **per graph** in the unbatched
+            (sparse-loss) path. If :obj:`None`, defaults to matching the number of
+            positive edges. (default: :obj:`None`)
     """
 
     def __init__(
@@ -131,8 +148,6 @@ class BNPool(DenseSRCPooling):
         K_mu=10.0,
         K_init=1.0,
         eta=1.0,
-        rescale_loss=True,
-        balance_links=True,
         train_K=True,  # hyperparameters of the selector
         act: str = None,
         dropout: float = 0.0,
@@ -142,6 +157,10 @@ class BNPool(DenseSRCPooling):
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
+        batched: bool = True,
+        sparse_output: bool = False,
+        cache_preprocessing: bool = False,
+        num_neg_samples: Optional[int] = None,
     ):
         if alpha_DP <= 0:
             raise ValueError("alpha_DP must be positive")
@@ -156,7 +175,14 @@ class BNPool(DenseSRCPooling):
             raise ValueError("max_k must be positive")
 
         super(BNPool, self).__init__(
-            selector=DPSelect(in_channels, k, act, dropout, s_inv_op),
+            selector=DPSelect(
+                in_channels,
+                k,
+                batched_representation=batched,
+                act=act,
+                dropout=dropout,
+                s_inv_op=s_inv_op,
+            ),
             reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift),
             connector=DenseConnect(
@@ -164,8 +190,12 @@ class BNPool(DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
+                sparse_output=sparse_output,
             ),
             adj_transpose=adj_transpose,
+            cache_preprocessing=cache_preprocessing,
+            batched=batched,
+            sparse_output=sparse_output,
         )
 
         self.k = k
@@ -173,10 +203,9 @@ class BNPool(DenseSRCPooling):
         self.alpha_DP = alpha_DP
         self.K_var_val = K_var
         self.K_mu_val = K_mu
-        self.rescale_loss = rescale_loss
-        self.balance_links = balance_links
         self.train_K = train_K
         self.eta = eta  # coefficient for the kl_loss
+        self.num_neg_samples = num_neg_samples
 
         # prior of the Stick Breaking Process
         self.register_buffer("alpha_prior", torch.ones(self.k - 1))
@@ -205,10 +234,13 @@ class BNPool(DenseSRCPooling):
     def forward(
         self,
         x: Tensor,
-        adj: Optional[Tensor] = None,
+        adj: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
-        mask: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
+        mask: Optional[Tensor] = None,
         **kwargs,
     ) -> PoolingOutput:
         r"""Forward pass.
@@ -218,39 +250,112 @@ class BNPool(DenseSRCPooling):
                 :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`, with
                 batch-size :math:`B`, (maximum) number of nodes :math:`N` for
                 each graph, and feature dimension :math:`F`.
-            adj (~torch.Tensor): Adjacency tensor
-                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
+            adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
+                In batched mode, this accepts sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor
+                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`, or an
+                already dense adjacency tensor with the same shape.
+                (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
-            mask (~torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
+            mask (~torch.Tensor, optional): Optional boolean mask indicating valid nodes
+                in each graph. Only used when inputs are already dense/padded.
+                (default: :obj:`None`)
 
         Returns:
             ~tgp.src.PoolingOutput: The output of the pooling operator.
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch, batch_pooled=batch_pooled
+            )
             return x_lifted
 
-        else:
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
+            )
+
             # Select
             so = self.select(x=x, mask=mask)
 
             # Reduce
-            x_pooled, _ = self.reduce(x=x, so=so)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
             # Connect
             adj_pool, _ = self.connect(edge_index=adj, so=so)
-
             loss = self.compute_loss(adj, mask, so)
 
-            out = PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
+            if self.sparse_output:
+                mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pool,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                        mask=mask_pool,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                    loss=loss,
+                )
 
-            return out
+            mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
+            return PoolingOutput(
+                x=x_pooled, edge_index=adj_pool, so=so, loss=loss, mask=mask_pool
+            )
+
+        # === Unbatched (sparse-loss) path ===
+        # Select
+        so = self.select(x=x, batch=batch)
+
+        loss = self.compute_sparse_loss(adj, batch, so)
+
+        # Reduce
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
+
+        # Connect
+        edge_index_pooled, edge_weight_pooled = self.connect(
+            edge_index=adj,
+            so=so,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
+        )
+
+        mask_pool = (
+            get_mask_from_dense_s(s=so.s, batch=batch)
+            if not self.sparse_output
+            else None
+        )
+        return PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            loss=loss,
+            mask=mask_pool,
+        )
 
     def compute_loss(self, adj, mask, so) -> dict:
         r"""Computes the loss components for BN-Pool training.
@@ -267,8 +372,8 @@ class BNPool(DenseSRCPooling):
         3. **Cluster Connectivity Prior Loss**: Regularizes the learned connectivity matrix :math:`\mathbf{K}`
            towards the specified prior distribution.
 
-        All losses can be optionally normalized by :math:`N^2` (number of node pairs) when :attr:`rescale_loss=True`
-        to ensure consistent scaling across different graph sizes.
+        All losses are normalized by :math:`N^2` (number of node pairs) to ensure consistent scaling
+        across different graph sizes.
 
         Args:
             adj (~torch.Tensor): True adjacency matrix of shape :math:`(B, N, N)` to reconstruct.
@@ -298,7 +403,7 @@ class BNPool(DenseSRCPooling):
         if mask is not None:
             N = mask.sum(-1)  # has shape B x 1
         else:
-            N = adj.shape[-1]  # N
+            N = torch.tensor(adj.shape[-1], device=adj.device)  # N
 
         N_squared = N**2
         # Reconstruction loss
@@ -306,7 +411,7 @@ class BNPool(DenseSRCPooling):
             rec_adj,
             adj,
             mask,
-            balance_links=self.balance_links,
+            balance_links=True,
             normalizing_const=N_squared,
             batch_reduction="mean",
         )
@@ -342,17 +447,107 @@ class BNPool(DenseSRCPooling):
             "K_prior": K_prior_loss,
         }
 
+    def compute_sparse_loss(
+        self, adj: Adj, batch: Optional[Tensor], so: SelectOutput
+    ) -> dict:
+        node_assignment, q_z = so.s, so.q_z
+
+        if batch is not None:
+            batch_size = int(batch.max()) + 1
+        else:
+            batch_size = 1
+
+        rec_loss, norm_const = self.get_sparse_rec_loss(
+            node_assignment, adj, batch, batch_size
+        )
+
+        alpha_prior = self.get_buffer("alpha_prior")
+        beta_prior = self.get_buffer("beta_prior")
+        prior_dist = Beta(alpha_prior, beta_prior)
+
+        kl_loss_value = kl_loss(
+            q_z,
+            prior_dist,
+            batch=batch,
+            batch_size=batch_size,
+            normalizing_const=norm_const,
+            batch_reduction="mean",
+        )
+
+        if self.train_K:
+            K_prior_loss = cluster_connectivity_prior_loss(
+                self.K,
+                self.get_buffer("K_mu"),
+                self.get_buffer("K_var"),
+                normalizing_const=norm_const,
+                batch_reduction="mean",
+            )
+        else:
+            K_prior_loss = torch.tensor(0.0)
+
+        return {
+            "quality": rec_loss,
+            "kl": self.eta * kl_loss_value,
+            "K_prior": K_prior_loss,
+        }
+
     def extra_repr_args(self) -> dict:
         return {
+            "batched": self.batched,
             "alpha_DP": self.alpha_DP,
             "k_prior_variance": self.K_var_val,
             "k_prior_mean": self.K_mu_val,
             "k_init_value": self.K_init_val,
             "eta": self.eta,
-            "rescale_loss": self.rescale_loss,
-            "balance_links": self.balance_links,
             "train_K": self.train_K,
+            "num_neg_samples": self.num_neg_samples,
         }
 
     def get_rec_adj(self, S):
         return S @ self.K @ S.transpose(-1, -2)
+
+    def get_sparse_rec_loss(self, node_assignment, adj, batch, batch_size):
+        edge_index, _ = connectivity_to_edge_index(adj)
+
+        dev = edge_index.device
+        if batch is None:
+            neg_edge_index = negative_edge_sampling(
+                edge_index,
+                num_neg_samples=self.num_neg_samples,
+                force_undirected=True,
+            )
+        else:
+            neg_edge_index = batched_negative_edge_sampling(
+                edge_index,
+                batch,
+                num_neg_samples=self.num_neg_samples,
+                force_undirected=True,
+            )
+
+        num_edges = edge_index.size(1)
+        num_neg_edges = neg_edge_index.size(1)
+        all_edges = torch.cat([edge_index, neg_edge_index], dim=1)
+        edges_batch_id = None
+
+        if batch is not None:
+            edges_batch_id = batch[all_edges[0]]
+
+        link_prob_logit = self.get_prob_link_logit(node_assignment, all_edges)
+
+        pred_y = torch.cat(
+            [torch.ones(num_edges, device=dev), torch.zeros(num_neg_edges, device=dev)],
+            dim=0,
+        )
+
+        return sparse_bce_reconstruction_loss(
+            link_prob_logit,
+            pred_y,
+            edges_batch_id=edges_batch_id,
+            batch_size=batch_size,
+        )
+
+    def get_prob_link_logit(self, node_assignment, edges_list):
+        left = node_assignment[edges_list[0]]
+        right = node_assignment[edges_list[1]]
+        aux = left @ self.K
+        return (aux * right).sum(-1)

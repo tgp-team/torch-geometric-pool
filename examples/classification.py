@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn.functional as F
 from torch_geometric import seed_everything
@@ -6,7 +8,6 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
 from tgp.poolers import get_pooler, pooler_map
-from tgp.utils import connectivity_to_torch_coo
 
 seed_everything(8)  # Reproducibility
 
@@ -44,6 +45,9 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "remove_self_loops": True,
             "scorer": "degree",
             "adj_transpose": True,
+            "num_modes": 5,
+            "sparse_output": False,
+            "batched": True,
         }
 
         ### Model definition
@@ -62,52 +66,52 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 )
 
                 # Pooling
-                self.pooler = pooler_kwargs.update({"in_channels": hidden_channels})
+                pooler_kwargs["in_channels"] = hidden_channels
                 self.pooler = get_pooler(pooler_type, **pooler_kwargs)
                 print(self.pooler)
 
                 # Second MP layer
-                if self.pooler.is_dense:
+                pool_hidden = (
+                    getattr(self.pooler, "num_modes", 1) * hidden_channels
+                )  # EigenPooling expands features to [K, H*d]; use H*d as in_channels
+                self.use_dense_pool_adj = (
+                    self.pooler.is_dense and not self.pooler.sparse_output
+                )
+                if self.use_dense_pool_adj:
                     self.conv2 = DenseGCNConv(
-                        in_channels=hidden_channels, out_channels=hidden_channels
+                        in_channels=pool_hidden, out_channels=hidden_channels
                     )
                 else:
                     self.conv2 = GCNConv(
-                        in_channels=hidden_channels, out_channels=hidden_channels
+                        in_channels=pool_hidden, out_channels=hidden_channels
                     )
 
                 # Readout layer
                 self.lin = torch.nn.Linear(hidden_channels, num_classes)
 
             def forward(self, x, edge_index, edge_weight, batch=None):
-                num_nodes = x.size(0)
-                edge_index = connectivity_to_torch_coo(
-                    edge_index, edge_weight, num_nodes
-                )
-
                 # First MP layer
                 x = self.conv1(x, edge_index, edge_weight)
                 x = F.relu(x)
 
                 # Pooling
-                x, edge_index, mask = self.pooler.preprocessing(
-                    x=x,
-                    edge_index=edge_index,
-                    edge_weight=edge_weight,
-                    batch=batch,
-                    use_cache=False,
-                )
                 out = self.pooler(
-                    x=x, adj=edge_index, edge_weight=edge_weight, batch=batch, mask=mask
+                    x=x, adj=edge_index, edge_weight=edge_weight, batch=batch
                 )
                 x_pool, adj_pool = out.x, out.edge_index
+                mask_pool = getattr(out, "mask", None)
 
                 # Second MP layer
-                x = self.conv2(x_pool, adj_pool)
+                if self.use_dense_pool_adj:
+                    x = self.conv2(x_pool, adj_pool, mask=mask_pool)
+                else:
+                    x = self.conv2(x_pool, adj_pool, out.edge_weight)
                 x = F.relu(x)
 
                 # Global pooling
-                x = self.pooler.global_pool(x, reduce_op="sum", batch=out.batch)
+                x = self.pooler.global_pool(
+                    x, reduce_op="sum", batch=out.batch, mask=mask_pool
+                )
 
                 # Readout layer
                 x = self.lin(x)
@@ -152,6 +156,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
         ### Training loop
         best_val_acc = test_acc = 0
+        start_time = time.time()
         for epoch in range(1, 11):
             train_loss = train()
             val_acc = test(test_loader)
@@ -159,3 +164,5 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 f"Epoch: {epoch:03d}, Train Loss: {train_loss:.4f}, "
                 f"Val Acc: {val_acc:.4f}"
             )
+        end_time = time.time()
+        print(f"Time taken: {end_time - start_time:.2f} seconds")

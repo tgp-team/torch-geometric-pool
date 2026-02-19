@@ -51,7 +51,7 @@ class Net(torch.nn.Module):
         )
 
         # Pooling
-        self.pooler = pooler_kwargs.update({"in_channels": hidden_channels})
+        pooler_kwargs["in_channels"] = hidden_channels
         self.pooler = get_pooler(pooler_type, **pooler_kwargs)
         print(self.pooler)
 
@@ -77,7 +77,9 @@ class Net(torch.nn.Module):
         x = F.relu(x)
 
         # Global pooling
-        x = self.pooler.global_pool(x, reduce_op="sum", batch=out.batch)
+        x = self.pooler.global_pool(
+            x, reduce_op="sum", batch=out.batch, mask=getattr(out, "mask", None)
+        )
 
         # Readout layer
         x = self.lin(x)

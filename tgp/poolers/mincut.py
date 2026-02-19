@@ -1,13 +1,20 @@
 from typing import List, Optional, Union
 
 from torch import Tensor
+from torch_geometric.typing import Adj
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
-from tgp.select import DenseSelect, SelectOutput
+from tgp.select import MLPSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils.losses import mincut_loss, orthogonality_loss
+from tgp.utils.losses import (
+    mincut_loss,
+    orthogonality_loss,
+    sparse_mincut_loss,
+    unbatched_orthogonality_loss,
+)
+from tgp.utils.ops import connectivity_to_edge_index, postprocess_adj_pool_dense
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -16,15 +23,17 @@ class MinCutPooling(DenseSRCPooling):
     Neural Networks for Graph Pooling" <https://arxiv.org/abs/1907.00481>`_
     (Bianchi et al., ICML 2020).
 
-    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.DenseSelect`.
+    + The :math:`\texttt{select}` operator is implemented with :class:`~tgp.select.MLPSelect`.
     + The :math:`\texttt{reduce}` operator is implemented with :class:`~tgp.reduce.BaseReduce`.
     + The :math:`\texttt{connect}` operator is implemented with :class:`~tgp.connect.DenseConnect`.
     + The :math:`\texttt{lift}` operator is implemented with :class:`~tgp.lift.BaseLift`.
 
     This layer optimizes two auxiliary losses:
 
-    + the mincut loss (:class:`tgp.utils.losses.mincut_loss`),
-    + the orthogonality loss (:class:`tgp.utils.losses.orthogonality_loss`).
+    + the mincut loss (:func:`~tgp.utils.losses.mincut_loss` for batched,
+      :func:`~tgp.utils.losses.sparse_mincut_loss` for unbatched),
+    + the orthogonality loss (:func:`~tgp.utils.losses.orthogonality_loss` for batched,
+      :func:`~tgp.utils.losses.unbatched_orthogonality_loss` for unbatched).
 
     Args:
         in_channels (int, list of int):
@@ -40,7 +49,7 @@ class MinCutPooling(DenseSRCPooling):
             Dropout probability in the MLP of the :math:`\texttt{select}` operator.
             (default: :obj:`0.0`)
         cut_loss_coeff (float, optional):
-            Coefficient for the MinCut loss (default: :obj:`0.5`)
+            Coefficient for the MinCut loss (default: :obj:`1.0`)
         ortho_loss_coeff (float, optional):
             Coefficient for the orthogonality loss (default: :obj:`1.0`)
         remove_self_loops (bool, optional):
@@ -58,6 +67,10 @@ class MinCutPooling(DenseSRCPooling):
             adjacency matrices, so that they could be passed "as is" to the dense
             message-passing layers.
             (default: :obj:`True`)
+        cache_preprocessing (bool, optional):
+            If :obj:`True`, caches the dense adjacency produced during preprocessing.
+            This should only be enabled when the same graph is reused across iterations.
+            (default: :obj:`False`)
         lift (~tgp.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
@@ -77,6 +90,16 @@ class MinCutPooling(DenseSRCPooling):
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
+
+        batched (bool, optional):
+            If :obj:`True`, uses the batched dense path which converts sparse inputs
+            to dense padded tensors. If :obj:`False`, uses the unbatched path which
+            operates on sparse adjacency matrices without padding, providing better
+            memory efficiency for graphs with varying sizes.
+            (default: :obj:`True`)
+        sparse_output (bool, optional):
+            If :obj:`True`, returns block-diagonal sparse outputs. If :obj:`False`,
+            returns batched dense outputs. (default: :obj:`False`)
     """
 
     def __init__(
@@ -93,11 +116,15 @@ class MinCutPooling(DenseSRCPooling):
         adj_transpose: bool = True,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
+        batched: bool = True,
+        sparse_output: bool = False,
+        cache_preprocessing: bool = False,
     ):
         super().__init__(
-            selector=DenseSelect(
+            selector=MLPSelect(
                 in_channels=in_channels,
                 k=k,
+                batched_representation=batched,
                 act=act,
                 dropout=dropout,
                 s_inv_op=s_inv_op,
@@ -109,8 +136,12 @@ class MinCutPooling(DenseSRCPooling):
                 degree_norm=degree_norm,
                 adj_transpose=adj_transpose,
                 edge_weight_norm=edge_weight_norm,
+                sparse_output=sparse_output,
             ),
             adj_transpose=adj_transpose,
+            cache_preprocessing=cache_preprocessing,
+            batched=batched,
+            sparse_output=sparse_output,
         )
 
         self.cut_loss_coeff = cut_loss_coeff
@@ -119,26 +150,48 @@ class MinCutPooling(DenseSRCPooling):
     def forward(
         self,
         x: Tensor,
-        adj: Optional[Tensor] = None,
+        adj: Optional[Adj] = None,
+        edge_weight: Optional[Tensor] = None,
         so: Optional[SelectOutput] = None,
         mask: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
         lifting: bool = False,
         **kwargs,
     ) -> PoolingOutput:
         r"""Forward pass.
 
         Args:
-            x (~torch.Tensor): Node feature tensor
-                :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`, with
-                batch-size :math:`B`, (maximum) number of nodes :math:`N` for
+            x (~torch.Tensor): Node feature tensor.
+                For batched mode: :math:`\mathbf{X} \in \mathbb{R}^{B \times N \times F}`,
+                with batch-size :math:`B`, (maximum) number of nodes :math:`N` for
                 each graph, and feature dimension :math:`F`.
-            adj (~torch.Tensor): Adjacency tensor
-                :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`.
+                For unbatched mode: :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`,
+                where :math:`N` is the total number of nodes across all graphs.
+            adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
+                For batched mode: it can be either sparse connectivity
+                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                which is internally converted to a dense padded tensor of shape
+                :math:`[B, N, N]`, or an already dense tensor of shape
+                :math:`[B, N, N]`.
+                For unbatched mode: Sparse connectivity matrix in one of the formats
+                supported by :class:`~torch_geometric.typing.Adj` (edge_index, SparseTensor, etc.).
+                (default: :obj:`None`)
+            edge_weight (~torch.Tensor, optional): A vector of shape :math:`[E]` or
+                :math:`[E, 1]` containing the weights of the edges (unbatched mode only).
+                (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
             mask (~torch.Tensor, optional): Mask matrix
                 :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph. (default: :obj:`None`)
+                the valid nodes in each graph. Only used when inputs are already
+                dense/padded. (default: :obj:`None`)
+            batch (~torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
+                to which graph in the batch each node belongs. (default: :obj:`None`)
+            batch_pooled (~torch.Tensor, optional): The batch vector for the pooled nodes.
+                Required when lifting with dense :math:`[N, K]` SelectOutput on multi-graph
+                batches. Pass `out.batch` from the pooling call. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -147,15 +200,27 @@ class MinCutPooling(DenseSRCPooling):
         """
         if lifting:
             # Lift
-            x_lifted = self.lift(x_pool=x, so=so)
+            batch_orig = batch if batch is not None else so.batch
+            x_lifted = self.lift(
+                x_pool=x, so=so, batch=batch_orig, batch_pooled=batch_pooled
+            )
             return x_lifted
 
-        else:
+        # === Batched path ===
+        if self.batched:
+            x, adj, mask = self._ensure_batched_inputs(
+                x=x,
+                edge_index=adj,
+                edge_weight=edge_weight,
+                batch=batch,
+                mask=mask,
+            )
+
             # Select
             so = self.select(x=x, mask=mask)
 
             # Reduce
-            x_pooled, _ = self.reduce(x=x, so=so)
+            x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
 
             # Connect
             adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
@@ -163,7 +228,7 @@ class MinCutPooling(DenseSRCPooling):
             loss = self.compute_loss(adj, so.s, adj_pool)
 
             # Normalize coarsened adjacency matrix
-            adj_pool = self.connector.postprocess_adj_pool(
+            adj_pool = postprocess_adj_pool_dense(
                 adj_pool,
                 remove_self_loops=self.connector.remove_self_loops,
                 degree_norm=self.connector.degree_norm,
@@ -171,21 +236,70 @@ class MinCutPooling(DenseSRCPooling):
                 edge_weight_norm=self.connector.edge_weight_norm,
             )
 
-            out = PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
+            if self.sparse_output:
+                x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
+                    self._finalize_sparse_output(
+                        x_pool=x_pooled,
+                        adj_pool=adj_pool,
+                        batch=batch,
+                        batch_pooled=batch_pooled,
+                        so=so,
+                    )
+                )
+                return PoolingOutput(
+                    x=x_pooled,
+                    edge_index=edge_index_pooled,
+                    edge_weight=edge_weight_pooled,
+                    batch=batch_pooled,
+                    so=so,
+                    loss=loss,
+                )
 
-            return out
+            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
-    def compute_loss(self, adj, S, adj_pooled) -> dict:
-        """Computes the auxiliary loss terms.
+        # === Unbatched (sparse-loss) path ===
+        # Select
+        so = self.select(x=x, batch=batch)
+
+        # Compute sparse loss
+        loss = self.compute_sparse_loss(adj, edge_weight, so.s, batch)
+
+        # Reduce
+        return_batched = not self.sparse_output
+        x_pooled, batch_pooled = self.reduce(
+            x=x, so=so, batch=batch, return_batched=return_batched
+        )
+
+        # Connect
+        edge_index_pooled, edge_weight_pooled = self.connect(
+            edge_index=adj,
+            so=so,
+            edge_weight=edge_weight,
+            batch=batch,
+            batch_pooled=batch_pooled,
+        )
+
+        return PoolingOutput(
+            x=x_pooled,
+            edge_index=edge_index_pooled,
+            edge_weight=edge_weight_pooled,
+            batch=batch_pooled,
+            so=so,
+            loss=loss,
+        )
+
+    def compute_loss(self, adj: Tensor, S: Tensor, adj_pooled: Tensor) -> dict:
+        """Computes the auxiliary loss terms for batched (dense) mode.
 
         Args:
-            adj (~torch.Tensor): The dense adjacency matrix.
-            S (~torch.Tensor): The dense assignment matrix.
-            adj_pooled (~torch.Tensor): The pooled adjacency matrix.
+            adj (~torch.Tensor): The dense adjacency matrix of shape :math:`(B, N, N)`.
+            S (~torch.Tensor): The dense assignment matrix of shape :math:`(B, N, K)`.
+            adj_pooled (~torch.Tensor): The pooled adjacency matrix of shape :math:`(B, K, K)`.
 
         Returns:
-            dict: A dictionary with the different terms of
-            the auxiliary loss.
+            dict: A dictionary with the different terms of the auxiliary loss:
+                - :obj:`'cut_loss'`: The mincut loss weighted by :attr:`cut_loss_coeff`.
+                - :obj:`'ortho_loss'`: The orthogonality loss weighted by :attr:`ortho_loss_coeff`.
         """
         cut_loss = mincut_loss(adj, S, adj_pooled, batch_reduction="mean")
         ortho_loss = orthogonality_loss(S, batch_reduction="mean")
@@ -195,8 +309,46 @@ class MinCutPooling(DenseSRCPooling):
             "ortho_loss": ortho_loss * self.ortho_loss_coeff,
         }
 
+    def compute_sparse_loss(
+        self,
+        edge_index: Adj,
+        edge_weight: Optional[Tensor],
+        S: Tensor,
+        batch: Optional[Tensor],
+    ) -> dict:
+        """Computes the auxiliary loss terms for unbatched (sparse) mode.
+
+        This method is used when :attr:`batched=False` and operates on sparse
+        adjacency matrices without requiring padding or densification.
+
+        Args:
+            edge_index (~torch_geometric.typing.Adj): Graph connectivity in sparse format.
+            edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
+            S (~torch.Tensor): The dense assignment matrix of shape :math:`(N, K)`.
+            batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+
+        Returns:
+            dict: A dictionary with the different terms of the auxiliary loss:
+                - :obj:`'cut_loss'`: The sparse mincut loss weighted by :attr:`cut_loss_coeff`.
+                - :obj:`'ortho_loss'`: The unbatched orthogonality loss weighted by :attr:`ortho_loss_coeff`.
+        """
+        edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
+            edge_index, edge_weight
+        )
+
+        cut_loss = sparse_mincut_loss(
+            edge_index_conv, S, edge_weight_conv, batch, batch_reduction="mean"
+        )
+        ortho_loss = unbatched_orthogonality_loss(S, batch, batch_reduction="mean")
+
+        return {
+            "cut_loss": cut_loss * self.cut_loss_coeff,
+            "ortho_loss": ortho_loss * self.ortho_loss_coeff,
+        }
+
     def extra_repr_args(self) -> dict:
         return {
+            "batched": self.batched,
             "cut_loss_coeff": self.cut_loss_coeff,
             "ortho_loss_coeff": self.ortho_loss_coeff,
         }

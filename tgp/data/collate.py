@@ -258,19 +258,86 @@ def _collate(
         )
 
     elif isinstance(elem, SelectOutput):
-        cat_dims = (0, 1)
-        repeats = [[value.s.size(dim) for dim in cat_dims] for value in values]
-        slices = cumsum(torch.tensor(repeats))
-        s = cat([value.s for value in values], dim=cat_dims)
-        s_inv = None
-        if elem.s_inv is not None:
-            s_inv = cat([value.s_inv for value in values], dim=cat_dims)
+        if is_sparse(elem.s):
+            # Sparse case: use cat for block-diagonal concatenation.
+            cat_dims = (0, 1)
+            repeats = [[value.s.size(dim) for dim in cat_dims] for value in values]
+            slices = cumsum(torch.tensor(repeats))
+            if is_torch_sparse_tensor(elem.s):
+                s = cat([value.s for value in values], dim=cat_dims)
+            else:
+                s = torch_sparse.cat([value.s for value in values], dim=cat_dims)
+            s_inv = None
+            if elem.s_inv is not None:
+                if is_torch_sparse_tensor(elem.s_inv):
+                    s_inv = cat([value.s_inv for value in values], dim=cat_dims)
+                else:
+                    s_inv = torch_sparse.cat(
+                        [value.s_inv for value in values], dim=cat_dims
+                    )
+        else:
+            # Dense case.
+            if not isinstance(elem.s, Tensor):
+                raise TypeError(
+                    "SelectOutput.s must be a Tensor or SparseTensor "
+                    f"(got {type(elem.s)})."
+                )
+
+            if elem.s.dim() == 3:
+                # Batched dense: concatenate along the batch dimension.
+                sizes = torch.tensor([value.s.size(0) for value in values])
+                slices = cumsum(sizes)
+                s = torch.cat([value.s for value in values], dim=0)
+                s_inv = None
+                if elem.s_inv is not None:
+                    s_inv = torch.cat([value.s_inv for value in values], dim=0)
+            elif elem.s.dim() == 2:
+                # Unbatched dense: concatenate along the node dimension.
+                sizes = torch.tensor([value.s.size(0) for value in values])
+                slices = cumsum(sizes)
+                s = torch.cat([value.s for value in values], dim=0)
+                s_inv = None
+                if elem.s_inv is not None:
+                    # s_inv is [K, N] (transpose of s), so concatenate along N (dim=1).
+                    s_inv = torch.cat([value.s_inv for value in values], dim=1)
+            else:
+                raise ValueError(
+                    "SelectOutput.s must be a 2D [N, K] or 3D [B, N, K] dense tensor "
+                    f"(got shape={tuple(elem.s.size())})."
+                )
+
+        # Handle SelectOutput.batch (if present).
+        has_batch = [hasattr(v, "batch") and v.batch is not None for v in values]
+        if any(has_batch) and not all(has_batch):
+            raise ValueError(
+                "Cannot collate SelectOutput objects when only some of them have "
+                "a 'batch' attribute set."
+            )
+
+        if all(has_batch):
+            batch_values = [v.batch for v in values]
+            batch_slices = cumsum(torch.tensor([v.size(0) for v in batch_values]))
+
+            batch_collated_parts = []
+            batch_offset = 0
+            for v in batch_values:
+                batch_collated_parts.append(v + batch_offset)
+                if v.numel() > 0:
+                    batch_offset += int(v.max().item()) + 1
+
+            batch_collated = torch.cat(batch_collated_parts, dim=0)
+        else:
+            batch_collated = None
+            batch_slices = None
+
+        # Handle extra_args (excluding batch which is now a proper attribute)
         extra_args = dict()
         extra_slices = dict()
         for k in elem._extra_args:
+            attr_values = [getattr(v, k) for v in values]
             k_value, k_slices, k_incs = _collate(
                 key,
-                [getattr(v, k) for v in values],
+                attr_values,
                 data_list,
                 stores,
                 increment,
@@ -278,8 +345,11 @@ def _collate(
             )
             extra_args[k] = k_value
             extra_slices[k] = k_slices
-        value = SelectOutput(s, s_inv, **extra_args)
+
+        value = SelectOutput(s, s_inv, batch=batch_collated, **extra_args)
         slices = dict(s=slices, **extra_slices)
+        if batch_slices is not None:
+            slices["batch"] = batch_slices
         return value, slices, None
 
     elif isinstance(elem, (int, float)):
@@ -436,11 +506,66 @@ def _separate(
         )
 
     elif isinstance(values, SelectOutput):
-        (start_x, start_y), (end_x, end_y) = slices["s"][idx : idx + 2].tolist()
-        s = values.s[start_x:end_x, start_y:end_y]
-        s_inv = None
-        if values.s_inv is not None:
-            s_inv = values.s_inv[start_x:end_x, start_y:end_y]
+        if is_sparse(values.s):
+            (start_x, start_y), (end_x, end_y) = slices["s"][idx : idx + 2].tolist()
+            if isinstance(values.s, SparseTensor):
+                s = values.s[start_x:end_x, start_y:end_y]
+                s_inv = None
+                if values.s_inv is not None:
+                    # s_inv has transposed shape (K x N), so we need to swap dims.
+                    s_inv = values.s_inv[start_y:end_y, start_x:end_x]
+            else:
+                # Native PyTorch sparse tensor - use narrow
+                s = narrow(values.s, 0, start_x, end_x - start_x)
+                s = narrow(s, 1, start_y, end_y - start_y)
+                s_inv = None
+                if values.s_inv is not None:
+                    s_inv = narrow(values.s_inv, 0, start_y, end_y - start_y)
+                    s_inv = narrow(s_inv, 1, start_x, end_x - start_x)
+        else:
+            if not isinstance(values.s, Tensor):
+                raise TypeError(
+                    "SelectOutput.s must be a Tensor or SparseTensor "
+                    f"(got {type(values.s)})."
+                )
+
+            s_slices = slices["s"]
+            if s_slices.dim() == 2:
+                start, end = int(s_slices[idx][0]), int(s_slices[idx + 1][0])
+            else:
+                start, end = int(s_slices[idx]), int(s_slices[idx + 1])
+
+            if values.s.dim() == 2:
+                s = values.s[start:end]
+                s_inv = None
+                if values.s_inv is not None:
+                    s_inv = values.s_inv[:, start:end]
+            elif values.s.dim() == 3:
+                s = values.s[start:end]
+                s_inv = None
+                if values.s_inv is not None:
+                    s_inv = values.s_inv[start:end]
+            else:
+                raise ValueError(
+                    "SelectOutput.s must be a 2D [N, K] or 3D [B, N, K] dense tensor "
+                    f"(got shape={tuple(values.s.size())})."
+                )
+
+        batch_attr = None
+        if hasattr(values, "batch") and values.batch is not None and "batch" in slices:
+            batch_attr = _separate(
+                key,
+                values.batch,
+                idx,
+                slices=slices["batch"],
+                incs=None,
+                batch=batch,
+                store=store,
+                decrement=decrement,
+            )
+            if batch_attr.numel() > 0:
+                batch_attr = batch_attr - batch_attr.min()
+
         extra_args = {
             k: _separate(
                 key,
@@ -454,7 +579,7 @@ def _separate(
             )
             for k in values._extra_args
         }
-        value = SelectOutput(s, s_inv, **extra_args)
+        value = SelectOutput(s, s_inv, batch=batch_attr, **extra_args)
         return value
 
     elif isinstance(values, Mapping):
