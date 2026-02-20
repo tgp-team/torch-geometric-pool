@@ -179,23 +179,28 @@ class AggrReduce(Reduce):
                 batch_min = int(batch.min().item())
                 batch_max = int(batch.max().item())
                 if batch_min != batch_max:
+                    # Mirror BaseReduce: unbatch then per-graph reduce (aggr instead of matmul)
                     unbatched_s = unbatch(so.s, batch)
                     unbatched_x = unbatch(x, batch)
                     x_pool_list = []
                     for s_i, x_i in zip(unbatched_s, unbatched_x):
+                        # x_pool_i: [K, F] via aggr, same K as BaseReduce's s_i
+                        K = s_i.size(-1)
                         cluster_i = s_i.argmax(dim=-1)
-                        src_i = x_i
                         src_sorted, index_sorted = _sort_by_cluster_index(
-                            src_i, cluster_i
+                            x_i, cluster_i
                         )
                         x_pool_i = self.aggr(
                             src_sorted,
                             index=index_sorted,
-                            dim_size=s_i.size(-1),
+                            dim_size=K,
                             dim=0,
                         )
                         x_pool_list.append(x_pool_i)
-                    x_pool = torch.stack(x_pool_list, dim=0)
+                    if return_batched:
+                        x_pool = torch.stack(x_pool_list, dim=0)  # [B, K, F]
+                    else:
+                        x_pool = torch.cat(x_pool_list, dim=0)  # [B*K, F]
                 else:
                     cluster = so.s.argmax(dim=-1)
                     src_sorted, index_sorted = _sort_by_cluster_index(x, cluster)
@@ -214,7 +219,7 @@ class AggrReduce(Reduce):
                     dim_size=so.s.size(-1),
                     dim=0,
                 )
-            if x.dim() == 3 and x_pool.dim() == 2:
+            if return_batched and x_pool.dim() == 2:
                 x_pool = x_pool.unsqueeze(0)
 
         batch_pool = self.reduce_batch(so, batch)

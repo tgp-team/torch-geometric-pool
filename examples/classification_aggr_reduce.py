@@ -47,35 +47,27 @@ def run_pooler_aggr(pooler_name: str, aggr_name: str, hidden_channels: int = 64)
     )
     test_loader = DataLoader(dataset[int(0.9 * len(dataset)) :], batch_size=32)
 
-    # Pooler kwargs (same spirit as classification.py)
     k = max(1, dataset._data.num_nodes // len(dataset) // 2)
-    if pooler_name == "mincut":
-        pooler_kwargs = {
-            "in_channels": hidden_channels,
-            "k": k,
-            "cached": False,
-            "lift": "inverse",
-            "s_inv_op": "transpose",
-            "remove_self_loops": True,
-            "adj_transpose": True,
-            "sparse_output": False,
-            "batched": True,
-        }
-    elif pooler_name == "topk":
-        pooler_kwargs = {
-            "in_channels": hidden_channels,
-            "ratio": 0.25,
-            "cached": False,
-            "s_inv_op": "transpose",
-            "remove_self_loops": True,
-        }
-    else:  # graclus
-        pooler_kwargs = {
-            "cached": False,
-            "s_inv_op": "transpose",
-            "remove_self_loops": True,
-        }
-
+    pooler_kwargs = {
+        "in_channels": hidden_channels,
+        "cached": False,
+        "lift": "inverse",
+        "s_inv_op": "transpose",
+        "reduce_red_op": "mean",
+        "connect_red_op": "mean",
+        "loss_coeff": 1.0,
+        "k": k,
+        "order_k": 2,
+        "cache_sel": False,
+        "cache_conn": False,
+        "ratio": 0.25,
+        "remove_self_loops": True,
+        "scorer": "degree",
+        "adj_transpose": True,
+        "num_modes": 5,
+        "sparse_output": True,
+        "batched": False,
+    }
     pooler = get_pooler(pooler_name, **pooler_kwargs)
 
     aggr_kwargs = {"in_channels": hidden_channels}
@@ -126,7 +118,8 @@ def run_pooler_aggr(pooler_name: str, aggr_name: str, hidden_channels: int = 64)
             )
             return F.log_softmax(x, dim=-1), aux
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     model = Net().to(device)
     # Ensure pooler's reducer (and its aggr submodule) are on the same device
     if hasattr(model.pooler, "reducer") and model.pooler.reducer is not None:

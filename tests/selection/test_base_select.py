@@ -3,6 +3,7 @@ import torch
 from torch_geometric.data import Data
 
 from tgp.select.base_select import Select, SelectOutput, cluster_to_s
+from tgp.utils.ops import get_mask_from_dense_s
 
 
 def test_cluster_to_s_as_edge_index():
@@ -171,6 +172,44 @@ def test_selectoutput_in_mask_must_be_2d():
         in_mask=torch.ones(2, 4, dtype=torch.bool),
     )
     assert so.in_mask.shape == (2, 4)
+
+
+def test_selectoutput_out_mask_2d_dense_with_batch():
+    """out_mask returns [B, K] for 2D dense s with batch (unbatched dense poolers)."""
+    # Two graphs: graph 0 has 3 nodes, graph 1 has 2 nodes; K=4 clusters
+    # s[0:3] belong to graph 0, s[3:5] to graph 1
+    s = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.5, 0.5, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    batch = torch.tensor([0, 0, 0, 1, 1])
+    so = SelectOutput(s=s, batch=batch)
+    mask = so.out_mask
+    assert mask is not None
+    assert mask.dim() == 2
+    assert mask.shape == (2, 4)
+    expected = get_mask_from_dense_s(s, batch)
+    assert torch.equal(mask, expected)
+    # Graph 0 uses clusters 0, 1, 2; graph 1 uses clusters 1, 3
+    assert mask[0, 0] and mask[0, 1] and mask[0, 2] and not mask[0, 3]
+    assert not mask[1, 0] and mask[1, 1] and not mask[1, 2] and mask[1, 3]
+
+
+def test_selectoutput_out_mask_2d_dense_no_batch():
+    """out_mask returns [1, K] for 2D dense s without batch (single graph)."""
+    s = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32)
+    so = SelectOutput(s=s)
+    mask = so.out_mask
+    assert mask is not None
+    assert mask.dim() == 2
+    assert mask.shape == (1, 2)
+    assert torch.equal(mask, get_mask_from_dense_s(s, None))
 
 
 def test_selectoutput_invalid_init():

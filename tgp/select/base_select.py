@@ -8,7 +8,12 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 
 from tgp.imports import is_sparsetensor
-from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
+from tgp.utils.ops import (
+    connectivity_to_edge_index,
+    get_assignments,
+    get_mask_from_dense_s,
+    pseudo_inverse,
+)
 
 
 def cluster_to_s(
@@ -219,10 +224,16 @@ class SelectOutput:
 
     @property
     def out_mask(self) -> Optional[Tensor]:
-        """Mask on pooled nodes [B, K]. Valid when s is batched dense (s.dim() == 3)."""
-        if not isinstance(self.s, Tensor) or self.s.dim() != 3:
+        """Mask on pooled nodes [B, K]. Valid when s is batched dense (s.dim() == 3)
+        or unbatched dense (s.dim() == 2 with batch vector); inferred from s (and batch).
+        """
+        if not isinstance(self.s, Tensor) or self.s.is_sparse:
             return None
-        return (self.s.sum(dim=-2) > 0).to(torch.bool)
+        if self.s.dim() == 3:
+            return (self.s.sum(dim=-2) > 0).to(torch.bool)
+        if self.s.dim() == 2:
+            return get_mask_from_dense_s(self.s, self.batch)
+        return None
 
     @property
     def is_sparse(self) -> bool:

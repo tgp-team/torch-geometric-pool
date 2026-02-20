@@ -46,8 +46,8 @@ for POOLER in ["lap"]:  # Test a specific pooler
             "scorer": "degree",
             "adj_transpose": True,
             "num_modes": 5,
-            "sparse_output": False,
-            "batched": True,
+            "sparse_output": True,
+            "batched": False,
         }
 
         ### Model definition
