@@ -27,16 +27,13 @@ def readout(
     batch: Optional[Tensor] = None,
     size: Optional[int] = None,
     mask: Optional[Tensor] = None,
-    node_dim: int = -2,
     **aggr_kwargs,
 ) -> Tensor:
     r"""Graph-level readout: aggregate node features to one vector per graph.
 
     Infers sparse vs dense from ``x.ndim``: 2D ``[N, F]`` is sparse (use ``batch``
     for grouping); 3D ``[B, N, F]`` is dense (reduce over node dimension).
-    When ``reduce_op`` is a string or a PyG
-    :class:`torch_geometric.nn.aggr.Aggregation` instance, readout uses
-    :class:`~tgp.reduce.AggrReduce` internally with :obj:`so=None` (one cluster per graph).
+    Nodes must be on the second-to-last dimension.
 
     Args:
         x: Node features. Shape ``[N, F]`` (sparse) or ``[B, N, F]`` (dense).
@@ -46,17 +43,12 @@ def readout(
         batch: Batch vector for sparse ``x``, shape ``[N]``. Ignored for dense.
         size: Number of graphs (for sparse). Optional.
         mask: Valid-node mask for batched (dense) ``x`` only, shape ``[B, N]``.
-            Must be :obj:`None` for unbatched (2D) ``x``. Node-level masks are only
-            supported with batched representations throughout the library.
-        node_dim: Dimension along which nodes are aggregated (default ``-2``).
         **aggr_kwargs: Passed to :func:`~tgp.reduce.get_aggr` when ``reduce_op``
             is a string (e.g. ``in_channels``, ``out_channels``, ``processing_steps``).
 
     Returns:
         Tensor of shape ``[B, F]`` (or ``[1, F]`` for single graph sparse).
     """
-    if node_dim != -2:
-        x = x.transpose(node_dim, -2)
     if x.dim() != 2 and x.dim() != 3:
         raise ValueError(
             f"readout expects x to be 2D [N, F] or 3D [B, N, F], got ndim={x.dim()}"

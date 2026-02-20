@@ -96,8 +96,8 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
   graph, or single graph → one vector). Dense assignment is supported only via
   argmax (hard assignment) with a warning; for soft assignments use BaseReduce.
   **Forward** accepts optional :obj:`mask` (original nodes) only for batched (3D) x;
-  resolution is mask arg → :obj:`so.in_mask` → all valid. Pass :obj:`mask=None` for
-  2D x.
+  resolution is mask arg → :obj:`so.in_mask` → all valid. Invalid mask (2D x or
+  wrong shape) triggers a warning and is ignored (all nodes valid).
 - **return_batched** is documented as applying only to the **unbatched (sparse) path**
   in all reduce operators; dense path always returns dense (same ndim as input).
 - **Bug fixes:** AggrReduce dense path now returns 3D when input is 3D (fixes shape
@@ -165,24 +165,27 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - **`readout(...)`** is the single graph-level readout function. Import from
   `tgp.reduce`: `from tgp.reduce import readout`. It infers sparse vs dense from
   the tensor shape: 2D `[N, F]` is treated as sparse (use `batch` for grouping);
-  3D `[B, N, F]` as dense.
-- **Mask is supported only for dense x:** For sparse (2D) x, if `mask` is passed we
-  emit a warning and ignore it (all nodes considered valid). For dense x, `mask` has
-  shape `[B, N]` and is passed to `AggrReduce` internally; wrong shape is warned and ignored.
+  3D `[B, N, F]` as dense. **Node dimension is fixed:** `x` must be `[N, F]` or
+  `[B, N, F]` (nodes on the second-to-last dimension); there is no `node_dim` parameter.
+- **Reduce op:** Only PyG-style aggregators are supported (string alias or
+  `torch_geometric.nn.aggr.Aggregation` instance). The `"any"` reduce is not
+  supported; use `"sum"`, `"mean"`, `"max"`, `"min"`, or parametrized aggrs
+  (e.g. `"lstm"`, `"set2set"`) via `get_aggr(reduce_op, **kwargs)`.
+- **Mask:** All mask handling lives in `AggrReduce`. Readout forwards `mask` to
+  the reducer; for sparse (2D) x or invalid mask shape, `AggrReduce` emits a
+  warning and ignores the mask (all nodes valid). For dense x, `mask` has shape
+  `[B, N]`.
 - **Poolers no longer have a `readout` method.** Call `readout(x, reduce_op=...,
   batch=..., mask=...)` directly on the pooled node features (use `mask` only when
   `x` is 3D).
-- **PyG aggregators:** Pass a `torch_geometric.nn.aggr.Aggregation` instance or a
-  string (e.g. `"sum"`, `"mean"`, `"lstm"`) as `reduce_op`. Strings are resolved
-  via `get_aggr(reduce_op, **kwargs)`; readout uses `AggrReduce` internally with
-  `so=None` (one cluster per graph).
-- **AggrReduce:** Wraps a PyG Aggregation for per-cluster reduce. Use
-  `AggrReduce(get_aggr("mean"))` or `AggrReduce(MeanAggregation())` for
-  aggregation types other than sum (BaseReduce now only does :math:`S^T X`).
-  **Mask resolution:** `forward(..., mask=...)` uses (1) the `mask` argument if
-  provided, (2) else `so.in_mask` if `so` is not None and `so.s.dim() == 3` (batched
-  dense only; `in_mask` is then `[B, N]`), (3) else all nodes valid. Mask is on
-  **original nodes**.
+- **AggrReduce (mask application):** When a valid mask is provided for batched
+  dense input, `AggrReduce` **selects only valid nodes** (sparse-like
+  `x_valid`, `index_valid` from argmax over `so.s`) and runs the aggregator on
+  them; masked-out nodes are not included (no zero-padding). For readout
+  (`so=None`), valid nodes are extracted and assigned one cluster per graph.
+- **AggrReduce (mask resolution):** `forward(..., mask=...)` uses (1) the `mask`
+  argument if provided and valid, (2) else `so.in_mask` if `so` is not None and
+  `so.s.dim() == 3`, (3) else all nodes valid. Mask is on **original nodes**.
 
 ## API / Behavior Changes
 
@@ -268,7 +271,7 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 - **Readout:** Replace `global_reduce(x, ...)` and `dense_global_reduce(x, ...)`
   with `readout(x, ...)`. Replace `pooler.global_pool(x, ...)` with
-  `pooler.readout(x, ...)`. Remove `node_dim` from pooler constructors and from
+  `readout(x, ...)`. Remove `node_dim` from pooler constructors and from
   KMIS if you used it.
 - If you previously relied on `block_diags_output` or `unbatched_output`,
   update to `sparse_output`.

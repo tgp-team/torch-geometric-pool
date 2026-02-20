@@ -198,15 +198,5 @@ def test_readout_pyg_aggr_dense_with_mask():
     assert torch.allclose(out, expected)
 
 
-def test_readout_node_dim():
-    # node_dim is -2 by default; exercise it explicitly
-    x = torch.tensor(
-        [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]], dtype=torch.float
-    )
-    batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
-    out = readout(x, reduce_op="sum", batch=batch, node_dim=-2)
-    assert out.shape == (2, 2)
-
-
 if __name__ == "__main__":
     pytest.main([__file__])
