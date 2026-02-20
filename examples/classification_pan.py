@@ -10,6 +10,7 @@ from torch_geometric.nn import GCNConv, PANConv
 from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
+from tgp.reduce import readout
 
 POOLER = "pan"
 pooler_cls = pooler_map[POOLER]
@@ -77,7 +78,8 @@ class Net(torch.nn.Module):
         x = F.relu(x)
 
         # Readout
-        x = self.pooler.readout(
+
+        x = readout(
             x, reduce_op="sum", batch=out.batch, mask=getattr(out, "mask", None)
         )
 

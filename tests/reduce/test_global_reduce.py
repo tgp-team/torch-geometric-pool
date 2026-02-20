@@ -36,7 +36,7 @@ def test_readout_dense_all_ops(reduce_op):
     expected = torch.stack([expected0, expected1], dim=0)
     assert torch.equal(out, expected)
 
-    with pytest.raises(ValueError, match="Unsupported aggregation"):
+    with pytest.raises(ValueError, match="Unknown aggregator alias|invalid"):
         readout(x, reduce_op="invalid")
 
 

@@ -55,11 +55,6 @@ class LaPooling(DenseSRCPooling):
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        reduce_red_op (~tgp.utils.typing.ReduceType, optional):
-            The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
-            (default: :obj:`sum`)
         connect_red_op (~tgp.typing.ConnectionType, optional):
             The aggregation function to be applied to all edges connecting nodes assigned
             to supernodes :math:`i` and :math:`j`.
@@ -89,7 +84,6 @@ class LaPooling(DenseSRCPooling):
         edge_weight_norm: bool = False,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
-        reduce_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
         batched: bool = True,
         sparse_output: bool = False,
@@ -100,7 +94,7 @@ class LaPooling(DenseSRCPooling):
                 batched_representation=batched,
                 s_inv_op=s_inv_op,
             ),
-            reducer=BaseReduce(reduce_op=reduce_red_op),
+            reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=DenseConnect(
                 remove_self_loops=remove_self_loops,

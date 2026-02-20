@@ -33,15 +33,15 @@ def test_aggr_reduce_vs_base_reduce_sparse(reduce_op):
     x = torch.randn(6, 4)  # 6 nodes, 4 features
     batch = None
 
-    base = BaseReduce(reduce_op=reduce_op)
     aggr_reduce = AggrReduce(aggr_module)
-
-    x_base, batch_base = base(x, so, batch=batch)
     x_aggr, batch_aggr = aggr_reduce(x, so, batch=batch)
 
-    assert x_base.shape == x_aggr.shape == (3, 4)
-    assert torch.allclose(x_base, x_aggr)
-    assert batch_base == batch_aggr
+    assert x_aggr.shape == (3, 4)
+    if reduce_op == "sum":
+        base = BaseReduce()
+        x_base, batch_base = base(x, so, batch=batch)
+        assert torch.allclose(x_base, x_aggr)
+        assert batch_base == batch_aggr
 
 
 def test_aggr_reduce_sparse_with_weights():
@@ -56,7 +56,7 @@ def test_aggr_reduce_sparse_with_weights():
     s = torch.sparse_coo_tensor(indices, values, size=(4, 2)).coalesce()
     so = SelectOutput(s=s)
     x = torch.ones(4, 2)
-    base = BaseReduce(reduce_op="sum")
+    base = BaseReduce()
     aggr_reduce = AggrReduce(aggr.SumAggregation())
     x_base, _ = base(x, so, batch=None)
     x_aggr, _ = aggr_reduce(x, so, batch=None)

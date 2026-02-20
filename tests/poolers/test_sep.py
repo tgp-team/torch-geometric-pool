@@ -11,7 +11,6 @@ def test_sep_pooling_forward(pooler_test_graph_sparse):
 
     pooler = SEPPooling(
         cached=False,
-        reduce_red_op="mean",
         connect_red_op="sum",
         lift_red_op="mean",
         s_inv_op="transpose",

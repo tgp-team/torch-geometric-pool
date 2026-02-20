@@ -22,6 +22,10 @@ class EigenPoolReduce(Reduce):
     then :math:`\mathbf{X}_{\text{pool,raw}}` is reshaped from mode-major layout
     :math:`[H \cdot K, F]` to :math:`[K, H \cdot F]`.
 
+    :obj:`return_batched` is only used when returning multi-graph results (stack
+    vs concatenate). EigenPool uses 2D inputs with a batch vector; there is no
+    separate dense path.
+
     Args:
         num_modes (int, optional):
             Number of eigenvector modes :math:`H`. Kept for API symmetry with the
@@ -92,8 +96,9 @@ class EigenPoolReduce(Reduce):
                 Unused for EigenPooling; kept for API compatibility.
                 (default: :obj:`None`)
             return_batched (bool, optional):
-                If :obj:`True`, returns :math:`[B, K, H \cdot F]` for multi-graph
-                batches and :math:`[1, K, H \cdot F]` for single graphs.
+                Only used for multi-graph batches. If :obj:`True`, returns
+                :math:`[B, K, H \cdot F]`; otherwise concatenated :math:`[B \cdot K, H \cdot F]`.
+                For single graphs, if :obj:`True` returns :math:`[1, K, H \cdot F]`.
                 (default: :obj:`False`)
 
         Returns:

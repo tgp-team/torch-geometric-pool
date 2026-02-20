@@ -5,7 +5,6 @@ from torch import Tensor, nn
 from torch_geometric.utils import scatter, unbatch
 
 from tgp.select import SelectOutput
-from tgp.utils.typing import ReduceType
 
 
 class Reduce(nn.Module):
@@ -92,26 +91,23 @@ class Reduce(nn.Module):
 
 
 class BaseReduce(Reduce):
-    r"""The basic :math:`\texttt{reduce}` operator to compute the node features
-    of the :math:`k`-th pooled node.
+    r"""The basic :math:`\texttt{reduce}` operator that computes :math:`\mathbf{S}^\top \mathbf{X}`.
 
-    .. math::
-        (\mathbf{x}_k)_\text{pool} = \text{aggr}(s_{1,k} \mathbf{x}_1, \ldots, s_{N,k} \mathbf{x}_N),
+    For **sparse** assignment :math:`\mathbf{S}`, this is implemented as a sum over nodes
+    in each cluster (with optional weighting by :obj:`so.s.values()`). For **dense**
+    assignment, it is a matrix multiply :math:`\mathbf{S}^\top \mathbf{X}`.
 
-    where aggr is an aggregation function such as the sum or the mean.
+    For dense multi-graph batches (dense :math:`[N, K]` with a batch vector), each graph
+    is processed separately (unbatch then per-graph matmul) for memory efficiency when
+    using unbatched dense poolers (:obj:`batched=False`).
 
-    Args:
-        reduce_red_op (~tgp.utils.typing.ReduceType, optional):
-            The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
-            (default: :obj:`None`)
+    :obj:`return_batched` is only used in the unbatched (sparse) path when returning
+    multi-graph results; in the dense path it is ignored and output shape follows
+    input (dense in :math:`\Rightarrow` dense out).
     """
 
-    def __init__(self, reduce_op: ReduceType = "sum"):
+    def __init__(self):
         super().__init__()
-
-        self.operation = reduce_op
 
     def forward(
         self,
@@ -122,7 +118,7 @@ class BaseReduce(Reduce):
         return_batched: bool = False,
         **kwargs,
     ) -> Tuple[Tensor, Optional[Tensor]]:
-        r"""Forward pass.
+        r"""Forward pass computing :math:`\mathbf{S}^\top \mathbf{X}`.
 
         Args:
             x (~torch.Tensor):
@@ -134,13 +130,11 @@ class BaseReduce(Reduce):
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
             return_batched (bool, optional):
-                If :obj:`True`, returns a batched output of shape :math:`[B, K, F]`
-                when using a dense :math:`[N, K]` assignment matrix on multi-graph
-                batches. (default: :obj:`False`)
+                Only used in the **unbatched (sparse) path** for multi-graph batches with
+                dense :math:`[N, K]` assignment. If :obj:`True`, returns shape :math:`[B, K, F]`;
+                otherwise :math:`[B \cdot K, F]`. Ignored in the dense path (dense in
+                :math:`\Rightarrow` dense out). (default: :obj:`False`)
         """
-        # If batch is not provided, try to retrieve it from SelectOutput
-        # This is necessary for multi-graph batches with dense [N, K] tensors,
-        # where we need to know which nodes belong to which graph
         if batch is None and hasattr(so, "batch") and so.batch is not None:
             batch = so.batch
 
@@ -151,19 +145,17 @@ class BaseReduce(Reduce):
                 )
             src = x[so.node_index]
             values = so.s.values()
-            if values is not None and self.operation != "any":
+            if values is not None:
                 src = src * values.view(-1, 1)
-
-            reduce = "any" if self.operation == "any" else self.operation
             x_pool = scatter(
-                src.bool() if reduce == "any" else src,
+                src,
                 so.cluster_index,
                 dim=0,
                 dim_size=so.num_supernodes,
-                reduce=reduce,
+                reduce="sum",
             )
         else:
-            # Dense assignment matrix
+            # Dense assignment: S^T @ x
             if so.s.dim() == 3:
                 # Dense [B, N, K] tensor (standard dense pooler format)
                 x_pool = so.s.transpose(-2, -1).matmul(x)
@@ -182,7 +174,6 @@ class BaseReduce(Reduce):
                         # x_pool_i = S_i^T @ X_i: [K, N_i] @ [N_i, F] = [K, F]
                         x_pool_i = s_i.t().matmul(x_i)
                         x_pool_list.append(x_pool_i)
-
                     if return_batched:
                         x_pool = torch.stack(x_pool_list, dim=0)  # [B, K, F]
                     else:
@@ -200,4 +191,4 @@ class BaseReduce(Reduce):
         return x_pool, batch_pool
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(reduce_op={self.operation})"
+        return f"{self.__class__.__name__}()"

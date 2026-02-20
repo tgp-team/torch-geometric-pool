@@ -71,6 +71,36 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
 - **Ops in docs**: The :mod:`tgp.utils.ops` utilities are now included in the API
   documentation under Utils.
 
+## Reduce cleanup and readout refactor
+
+- **BaseReduce** now only computes :math:`S^T X`: for sparse assignment it is a sum
+  (with optional weights from :obj:`so.s.values()`); for dense assignment it is a
+  matrix multiply. It **no longer accepts** :obj:`reduce_op`. For aggregation types
+  such as mean, max, or min, use **AggrReduce** with a PyG aggregator, e.g.
+  :obj:`AggrReduce(get_aggr("mean"))` or :obj:`AggrReduce(MeanAggregation())`.
+- **Unbatching in BaseReduce** for dense multi-graph (dense :math:`[N, K]` with a
+  batch vector) is **unchanged**: each graph is processed separately for memory
+  efficiency when using unbatched dense poolers (:obj:`batched=False`).
+- **get_aggr(alias, **kwargs)**: New helper in :obj:`tgp.reduce` to obtain PyG
+  Aggregation instances by string (e.g. :obj:`"sum"`, :obj:`"mean"`, :obj:`"lstm"`,
+  :obj:`"set2set"`). Use with :obj:`AggrReduce` and :obj:`readout`. Parametrized
+  aggregators accept kwargs such as :obj:`in_channels`, :obj:`out_channels`,
+  :obj:`processing_steps`.
+- **Readout** is **no longer a method** on pooler classes. Use
+  :obj:`tgp.reduce.readout(x, reduce_op=..., batch=..., mask=...)` directly. When
+  :obj:`reduce_op` is a string or a PyG Aggregation, readout uses :obj:`AggrReduce`
+  internally with :obj:`so=None` (one cluster per graph).
+- **AggrReduce** supports :obj:`so=None` for graph-level readout (one cluster per
+  graph, or single graph → one vector). Dense assignment is supported only via
+  argmax (hard assignment) with a warning; for soft assignments use BaseReduce.
+- **return_batched** is documented as applying only to the **unbatched (sparse) path**
+  in all reduce operators; dense path always returns dense (same ndim as input).
+- **Bug fixes:** AggrReduce dense path now returns 3D when input is 3D (fixes shape
+  errors with batched dense poolers). Reshape after aggregation uses
+  :obj:`x_pool.size(-1)` so Set2Set and other aggrs that change feature dim work
+  correctly. LSTM (and similar) aggregation now receives index sorted by destination
+  in the sparse path.
+
 ## Dense Pooling Modes (Intended Usage)
 
 Dense poolers implement **two internal processing modes**:
@@ -120,23 +150,19 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 ### Readout (graph-level aggregation)
 
-- **`global_reduce`** and **`dense_global_reduce`** are replaced by a single
-  function **`readout(...)`**. Import from `tgp.reduce`: `from tgp.reduce import readout`.
-  The function infers sparse vs dense from the tensor shape: 2D `[N, F]` is
-  treated as sparse (use `batch` for grouping); 3D `[B, N, F]` as dense (reduce
-  over node dimension). Optional `mask` is supported for both; `node_dim` is
-  internal (default `-2`) and only in `readout`, not on poolers.
-- **Poolers:** **`pooler.global_pool(x, ...)`** is replaced by
-  **`pooler.readout(x, ...)`** with the same arguments (`reduce_op`, `batch`,
-  `size`, `mask`). No `node_dim` on `SRCPooling` or `DenseSRCPooling`.
-- **KMIS:** The `node_dim` argument is removed from `KMISPooling` and
-  `KMISSelect` (it was unused in select; the pooler now uses `dim=0` in the
-  single `index_select`). Remove it from the KMIS constructor if you passed it.
-- **PyG aggregators:** You can pass a `torch_geometric.nn.aggr.Aggregation`
-  instance (e.g. `aggr.MeanAggregation()`) as `reduce_op` to `readout(...)`.
-- **AggrReduce:** New reduce class `AggrReduce(aggr)` wraps a PyG Aggregation
-  for per-cluster reduce, so the same aggregators work for both readout and
-  pooler reduce.
+- **`readout(...)`** is the single graph-level readout function. Import from
+  `tgp.reduce`: `from tgp.reduce import readout`. It infers sparse vs dense from
+  the tensor shape: 2D `[N, F]` is treated as sparse (use `batch` for grouping);
+  3D `[B, N, F]` as dense. Optional `mask` and `node_dim` are supported.
+- **Poolers no longer have a `readout` method.** Call `readout(x, reduce_op=...,
+  batch=..., mask=...)` directly on the pooled node features.
+- **PyG aggregators:** Pass a `torch_geometric.nn.aggr.Aggregation` instance or a
+  string (e.g. `"sum"`, `"mean"`, `"lstm"`) as `reduce_op`. Strings are resolved
+  via `get_aggr(reduce_op, **kwargs)`; readout uses `AggrReduce` internally with
+  `so=None` (one cluster per graph).
+- **AggrReduce:** Wraps a PyG Aggregation for per-cluster reduce. Use
+  `AggrReduce(get_aggr("mean"))` or `AggrReduce(MeanAggregation())` for
+  aggregation types other than sum (BaseReduce now only does :math:`S^T X`).
 
 ## API / Behavior Changes
 

@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from tgp.poolers import GraclusPooling
+from tgp.reduce import readout
 from tgp.select import SelectOutput
 from tgp.src import PoolingOutput
 
@@ -9,7 +10,7 @@ from tgp.src import PoolingOutput
 def test_graclus_forward(pooler_test_graph_sparse):
     x, edge_index, edge_weight, batch = pooler_test_graph_sparse
 
-    pooler = GraclusPooling(reduce_red_op="any", s_inv_op="inverse")
+    pooler = GraclusPooling(s_inv_op="inverse")
     pooler.eval()
 
     out = pooler(
@@ -20,7 +21,7 @@ def test_graclus_forward(pooler_test_graph_sparse):
     assert isinstance(next(iter(out)), torch.Tensor)
     assert out.has_loss is False
     assert out.get_loss_value() == 0.0
-    assert isinstance(pooler.readout(x, batch=batch), torch.Tensor)
+    assert isinstance(readout(x, batch=batch), torch.Tensor)
     assert pooler.get_forward_signature() is not None
     assert pooler.data_transforms() is None
 
@@ -28,7 +29,7 @@ def test_graclus_forward(pooler_test_graph_sparse):
 def test_caching(pooler_test_graph_sparse):
     x, edge_index, edge_weight, batch = pooler_test_graph_sparse
 
-    pooler = GraclusPooling(reduce_red_op="any", cached=True)
+    pooler = GraclusPooling(cached=True)
     pooler.eval()
 
     # First forward pass should cache the results
@@ -52,7 +53,7 @@ def test_graclus_edge_weights(pooler_test_graph_sparse):
     edge_weight = torch.ones((E, 1), dtype=torch.float)
 
     # Test with no edge weights
-    pooler = GraclusPooling(reduce_red_op="any", s_inv_op="inverse")
+    pooler = GraclusPooling(s_inv_op="inverse")
     pooler.eval()
 
     out = pooler(

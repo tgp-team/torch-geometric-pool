@@ -8,6 +8,7 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
 from tgp.poolers import get_pooler, pooler_map
+from tgp.reduce import readout
 
 seed_everything(8)  # Reproducibility
 
@@ -109,9 +110,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                 x = F.relu(x)
 
                 # Readout
-                x = self.pooler.readout(
-                    x, reduce_op="sum", batch=out.batch, mask=mask_pool
-                )
+                x = readout(x, reduce_op="sum", batch=out.batch, mask=mask_pool)
 
                 # Readout layer
                 x = self.lin(x)
