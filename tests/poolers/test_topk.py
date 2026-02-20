@@ -135,7 +135,6 @@ def test_topk_pooling_end_to_end_pool_and_lift():
         nonlinearity="linear",  # force identity activation
         lift="transpose",
         s_inv_op="transpose",
-        reduce_red_op="sum",
         connect_red_op="sum",
         lift_red_op="sum",
     )
@@ -224,7 +223,7 @@ def test_topk_pooling_with_min_score_parameter():
 def test_topk_forward(pooler_test_graph_sparse):
     x, edge_index, edge_weight, batch = pooler_test_graph_sparse
 
-    pooler = TopkPooling(in_channels=x.shape[-1], ratio=0.5, reduce_red_op="any")
+    pooler = TopkPooling(in_channels=x.shape[-1], ratio=0.5)
     pooler.eval()
 
     out = pooler(

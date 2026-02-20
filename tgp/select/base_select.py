@@ -8,7 +8,12 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 
 from tgp.imports import is_sparsetensor
-from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
+from tgp.utils.ops import (
+    connectivity_to_edge_index,
+    get_assignments,
+    get_mask_from_dense_s,
+    pseudo_inverse,
+)
 
 
 def cluster_to_s(
@@ -101,6 +106,7 @@ class SelectOutput:
         weight: Optional[Tensor] = None,
         s_inv_op: Optional[str] = "transpose",
         batch: Optional[Tensor] = None,
+        in_mask: Optional[Tensor] = None,
         **extra_args,
     ):
         super().__init__()
@@ -172,6 +178,22 @@ class SelectOutput:
             self.set_s_inv(s_inv_op)
 
         self.batch = batch
+        # in_mask: mask on original nodes, batched only, shape [B, N]; used by is_expressive and reduce
+        if in_mask is not None:
+            if in_mask.dim() != 2:
+                raise ValueError(
+                    "SelectOutput.in_mask must be 2D with shape [B, N] (batched representations only)."
+                )
+            self.in_mask = in_mask
+        elif "mask" in extra_args:
+            _mask = extra_args.pop("mask")
+            if _mask is not None and _mask.dim() != 2:
+                raise ValueError(
+                    "SelectOutput.in_mask must be 2D with shape [B, N] (batched representations only)."
+                )
+            self.in_mask = _mask
+        else:
+            self.in_mask = None
 
         self._extra_args = set()
         for k, v in extra_args.items():
@@ -190,9 +212,8 @@ class SelectOutput:
         if isinstance(row_sum, Tensor) and row_sum.is_sparse:
             row_sum = row_sum.to_dense()
 
-        if "mask" in self._extra_args:
-            mask = getattr(self, "mask")
-            row_sum = row_sum[mask]
+        if self.in_mask is not None:
+            row_sum = row_sum[self.in_mask]
         constant = row_sum[0]
 
         return torch.allclose(
@@ -200,6 +221,19 @@ class SelectOutput:
         ) and not torch.allclose(
             constant, torch.tensor(0, dtype=constant.dtype, device=constant.device)
         )
+
+    @property
+    def out_mask(self) -> Optional[Tensor]:
+        """Mask on pooled nodes [B, K]. Valid when s is batched dense (s.dim() == 3)
+        or unbatched dense (s.dim() == 2 with batch vector); inferred from s (and batch).
+        """
+        if not isinstance(self.s, Tensor) or self.s.is_sparse:
+            return None
+        if self.s.dim() == 3:
+            return (self.s.sum(dim=-2) > 0).to(torch.bool)
+        if self.s.dim() == 2:
+            return get_mask_from_dense_s(self.s, self.batch)
+        return None
 
     @property
     def is_sparse(self) -> bool:
@@ -423,6 +457,8 @@ class SelectOutput:
         for attr_name in self._extra_args if hasattr(self, "_extra_args") else []:
             if hasattr(self, attr_name):
                 setattr(new_select_output, attr_name, getattr(self, attr_name))
+        if getattr(self, "in_mask", None) is not None:
+            new_select_output.in_mask = self.in_mask
 
         return new_select_output
 

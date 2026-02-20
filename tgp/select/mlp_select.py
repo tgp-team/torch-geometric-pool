@@ -99,7 +99,7 @@ class MLPSelect(Select):
     ) -> SelectOutput:
         """Create a SelectOutput with the correct batched/unbatched fields."""
         if self.batched_representation:
-            return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask, **extra)
+            return SelectOutput(s=s, s_inv_op=self.s_inv_op, in_mask=mask, **extra)
         return SelectOutput(s=s, s_inv_op=self.s_inv_op, batch=batch, **extra)
 
     def forward(

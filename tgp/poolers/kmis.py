@@ -93,10 +93,9 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
         reduce_red_op (~tgp.utils.typing.ReduceType, optional):
-            The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
-            (default: :obj:`sum`)
+            If :obj:`None`, node features are taken by indexing the MIS nodes (no reduction).
+            Otherwise the reducer is used; the reduce step always computes :math:`\mathbf{S}^\top \mathbf{X}`.
+            (default: :obj:`"sum"`)
         connect_red_op (~tgp.typing.ConnectionType, optional):
             The aggregation function to be applied to all edges connecting nodes assigned
             to supernodes :math:`i` and :math:`j`.
@@ -124,8 +123,6 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
             operations will be cached, so that they do not need to be recomputed.
             If :obj:`True`, the scorer cannot be :obj:`"linear"`.
             (default: :obj:`False`)
-        node_dim (int, optional):
-            The node dimension in the input feature matrix. (default: :obj:`-2`)
     """
 
     def __init__(
@@ -144,7 +141,6 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         degree_norm: bool = False,
         edge_weight_norm: bool = False,
         cached: bool = False,
-        node_dim: int = -2,
     ):
         super().__init__(
             selector=KMISSelect(
@@ -154,11 +150,8 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
                 score_heuristic=score_heuristic,
                 force_undirected=force_undirected,
                 s_inv_op=s_inv_op,
-                node_dim=node_dim,
             ),
-            reducer=BaseReduce(
-                reduce_op=reduce_red_op if reduce_red_op is not None else "sum"
-            ),
+            reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
                 reduce_op=connect_red_op,
@@ -226,7 +219,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
 
             # Reduce
             if self.reduce_red_op is None:
-                x_pooled = torch.index_select(x, index=so.mis, dim=self.node_dim)
+                x_pooled = torch.index_select(x, index=so.mis, dim=0)
                 x_pooled = x_pooled * so.weight[so.mis].view(-1, 1)
                 batch_pooled = None if batch is None else batch[so.mis]
             else:

@@ -191,7 +191,7 @@ class LaPoolSelect(Select):
                 )
 
             s = self._forward_batched(x, edge_index, mask)
-            return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask)
+            return SelectOutput(s=s, s_inv_op=self.s_inv_op, in_mask=mask)
 
         if x.dim() != 2:
             raise ValueError("x must have shape [N, F].")
