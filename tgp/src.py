@@ -26,10 +26,9 @@ class PoolingOutput:
         edge_weight (~torch.Tensor, optional): The edge features of the coarsened
             graph. (default: :obj:`None`)
         batch (~torch.Tensor, optional): The batch vector of the pooled nodes.
-        mask (~torch.Tensor, optional): Optional boolean mask of shape :math:`[B, K]` indicating
-            valid supernodes when batched dense output has variable supernode counts (e.g. LaPool,
-            BNPool). When output is sparse, mask is always :obj:`None`. (default: :obj:`None`)
         so (:class:`~tgp.select.SelectOutput`): The selection output. (default: :obj:`None`)
+        mask: Derived from :obj:`so.out_mask` when :obj:`so` is set (valid supernodes
+            :math:`[B, K]` for batched dense); :obj:`None` otherwise.
         loss (Optional[Dict], optional): The loss dictionary. (default: :obj:`None`)
     """
 
@@ -37,9 +36,13 @@ class PoolingOutput:
     edge_index: Optional[Tensor] = None
     edge_weight: Optional[Tensor] = None
     batch: Optional[Tensor] = None
-    mask: Optional[Tensor] = None
     so: Optional[SelectOutput] = None
     loss: Optional[Dict] = None
+
+    @property
+    def mask(self) -> Optional[Tensor]:
+        """Mask on pooled nodes [B, K], derived from so.out_mask. None when so is None."""
+        return self.so.out_mask if self.so is not None else None
 
     def __repr__(self) -> str:
         return (
@@ -53,7 +56,17 @@ class PoolingOutput:
         )
 
     def __iter__(self) -> Iterator:
-        return iter(self.__dict__.values())
+        return iter(
+            (
+                self.x,
+                self.edge_index,
+                self.edge_weight,
+                self.batch,
+                self.mask,
+                self.so,
+                self.loss,
+            )
+        )
 
     @property
     def has_loss(self):
@@ -497,16 +510,16 @@ class DenseSRCPooling(SRCPooling):
         batch: Optional[Tensor],
         batch_pooled: Optional[Tensor],
         so: SelectOutput,
-        mask: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor]]:
         """Convert batched dense outputs to block-diagonal sparse representation.
 
-        When :obj:`mask` is provided (shape :math:`[B, K]`), only valid supernodes and
-        edges between them are included in the output (no padding in the sparse
-        representation). When :obj:`mask` is None, all nodes are kept (current behavior).
+        Uses :obj:`so.out_mask` when available (shape :math:`[B, K]`) so only valid
+        supernodes and edges between them are included. When :obj:`so.out_mask` is
+        None, all nodes are kept.
         """
         B, K = adj_pool.size(0), adj_pool.size(1)
         x_flat = x_pool.reshape(-1, x_pool.size(-1))
+        mask = so.out_mask
 
         if batch_pooled is None and batch is not None:
             batch_pooled = self.reducer.reduce_batch(so, batch)

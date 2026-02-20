@@ -21,6 +21,25 @@ def _sort_by_cluster_index(src: Tensor, cluster_index: Tensor) -> Tuple[Tensor, 
     return src_sorted, cluster_index_sorted
 
 
+def _apply_mask_dense(
+    x: Tensor,
+    mask: Optional[Tensor],
+) -> Tuple[Tensor, Tensor]:
+    """Apply mask to dense x; return (x_flat_valid, batch_flat_valid) for valid nodes only."""
+    B, N, F = x.shape
+    if mask is None:
+        x_flat = x.reshape(B * N, F)
+        batch_flat = torch.arange(
+            B, device=x.device, dtype=torch.long
+        ).repeat_interleave(N)
+        return x_flat, batch_flat
+    mask_flat = mask.reshape(-1)
+    valid = mask_flat.nonzero(as_tuple=True)[0]
+    x_flat = x.reshape(B * N, F)
+    batch_flat = torch.arange(B, device=x.device, dtype=torch.long).repeat_interleave(N)
+    return x_flat[valid], batch_flat[valid]
+
+
 class AggrReduce(Reduce):
     r"""Reduce operator that wraps a PyG :class:`torch_geometric.nn.aggr.Aggregation`.
 
@@ -36,6 +55,9 @@ class AggrReduce(Reduce):
     :obj:`so=None` is supported for graph-level readout: all nodes are assigned to one
     cluster per graph (using :obj:`batch` as cluster index), or to a single cluster
     when :obj:`batch` is :obj:`None`.
+
+    Node-level :obj:`mask` is only supported for batched (dense) representations:
+    use :obj:`mask=None` for 2D ``x``; for 3D ``x``, mask has shape ``[B, N]``.
 
     Args:
         aggr: A PyG Aggregation instance (e.g. :class:`torch_geometric.nn.aggr.SumAggregation`,
@@ -61,13 +83,40 @@ class AggrReduce(Reduce):
         batch: Optional[Tensor] = None,
         size: Optional[int] = None,
         return_batched: bool = False,
+        mask: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Tensor, Optional[Tensor]]:
+        # Mask is only for batched (dense) representations; warn and ignore otherwise
+        if mask is not None:
+            if x.dim() == 2:
+                warnings.warn(
+                    "mask is only supported for batched (dense) representations; ignoring mask for 2D x (all nodes considered valid).",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                mask = None
+            elif x.dim() == 3 and (mask.dim() != 2 or mask.shape != x.shape[:2]):
+                warnings.warn(
+                    "mask must be 2D with shape [B, N] matching x.shape[:2]; ignoring invalid mask (all nodes considered valid).",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                mask = None
+        # Resolve original-node mask: argument, then so.in_mask (batched dense only), else all valid
+        resolved_mask = mask
+        if resolved_mask is None and so is not None and so.s.dim() == 3:
+            resolved_mask = getattr(so, "in_mask", None)
+
         if so is None:
-            so = self._one_cluster_per_graph_so(x, batch=batch, size=size)
-            if x.dim() == 3:
-                x = x.reshape(-1, x.size(-1))
-                batch = so.cluster_index
+            if x.dim() == 3 and resolved_mask is not None:
+                x, batch = _apply_mask_dense(x, resolved_mask)
+                size = size if size is not None else int(batch.max().item()) + 1
+                so = self._one_cluster_per_graph_so(x, batch=batch, size=size)
+            else:
+                so = self._one_cluster_per_graph_so(x, batch=batch, size=size)
+                if x.dim() == 3:
+                    x = x.reshape(-1, x.size(-1))
+                    batch = so.cluster_index
 
         if batch is None and hasattr(so, "batch") and so.batch is not None:
             batch = so.batch
@@ -97,16 +146,29 @@ class AggrReduce(Reduce):
                 stacklevel=2,
             )
             if so.s.dim() == 3:
-                cluster = so.s.argmax(dim=-1)
                 B, N, F_in = x.shape
                 K = so.s.size(-1)
-                x_flat = x.reshape(B * N, F_in)
+                cluster = so.s.argmax(dim=-1)  # [B, N]
                 batch_idx = torch.arange(B, device=x.device).view(-1, 1).expand(-1, N)
-                index = batch_idx.reshape(-1) * K + cluster.reshape(-1)
+                if resolved_mask is not None and resolved_mask.shape == x.shape[:2]:
+                    # Select only valid nodes (sparse-like): x_valid, index_valid
+                    mask_flat = resolved_mask.reshape(-1)
+                    valid = mask_flat.nonzero(as_tuple=True)[0]
+                    x_flat = x.reshape(B * N, F_in)
+                    x_valid = x_flat[valid]
+                    index_flat = batch_idx.reshape(-1) * K + cluster.reshape(-1)
+                    index_valid = index_flat[valid]
+                else:
+                    x_flat = x.reshape(B * N, F_in)
+                    index_flat = batch_idx.reshape(-1) * K + cluster.reshape(-1)
+                    x_valid = x_flat
+                    index_valid = index_flat
                 # Sort by index for aggrs that require it (e.g. LSTMAggregation)
-                x_flat_sorted, index_sorted = _sort_by_cluster_index(x_flat, index)
+                x_valid_sorted, index_sorted = _sort_by_cluster_index(
+                    x_valid, index_valid
+                )
                 x_pool = self.aggr(
-                    x_flat_sorted, index=index_sorted, dim_size=B * K, dim=-2
+                    x_valid_sorted, index=index_sorted, dim_size=B * K, dim=-2
                 )
                 F_out = x_pool.size(-1)
                 x_pool = x_pool.reshape(B, K, F_out)

@@ -11,10 +11,11 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
 - **Explicit output format control**: A single flag, `sparse_output`, now determines
   whether pooled adjacency is returned as block‑diagonal sparse or batched dense.
 
-- **PoolingOutput mask and global pool**: For variable supernode counts (e.g. LaPool,
-  BNPool), `PoolingOutput` can include an optional `mask` `[B, K]`; global pool and
-  dense conv layers use it so only valid supernodes are aggregated. Unbatched dense
-  output can also return a mask for consistency.
+- **Two masks (in_mask / out_mask):** `SelectOutput` has `in_mask` (stored, optional;
+  mask on original nodes `[B, N]`) and `out_mask` (property; mask on pooled nodes
+  `[B, K]`). `PoolingOutput.mask` is derived from `so.out_mask`. **Node-level masks
+  are batched-only everywhere:** readout and `AggrReduce` accept `mask` only for
+  dense (3D) x; `mask` must be `None` for unbatched (2D) x.
 
 - **BNPool unified**: Dense and sparse BNPool variants are merged into one class with
   batched/unbatched branches and consistent outputs.
@@ -89,10 +90,14 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
 - **Readout** is **no longer a method** on pooler classes. Use
   :obj:`tgp.reduce.readout(x, reduce_op=..., batch=..., mask=...)` directly. When
   :obj:`reduce_op` is a string or a PyG Aggregation, readout uses :obj:`AggrReduce`
-  internally with :obj:`so=None` (one cluster per graph).
+  internally with :obj:`so=None` (one cluster per graph). **Mask is only supported
+  for dense x** (3D); pass :obj:`mask=None` for sparse (2D) x.
 - **AggrReduce** supports :obj:`so=None` for graph-level readout (one cluster per
   graph, or single graph → one vector). Dense assignment is supported only via
   argmax (hard assignment) with a warning; for soft assignments use BaseReduce.
+  **Forward** accepts optional :obj:`mask` (original nodes) only for batched (3D) x;
+  resolution is mask arg → :obj:`so.in_mask` → all valid. Pass :obj:`mask=None` for
+  2D x.
 - **return_batched** is documented as applying only to the **unbatched (sparse) path**
   in all reduce operators; dense path always returns dense (same ndim as input).
 - **Bug fixes:** AggrReduce dense path now returns 3D when input is 3D (fixes shape
@@ -136,26 +141,37 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - When inputs are sparse, masks are produced internally during preprocessing.
 - Dense poolers that accept `mask` document that it is only honored for pre‑padded inputs.
 
+### SelectOutput: in_mask and out_mask
+
+- **`SelectOutput.in_mask`** is an optional stored attribute (default `None`), set at
+  init (explicit parameter or legacy `mask` in extra_args). **Batched only:** shape
+  must be `[B, N]` (2D); 1D masks are not supported. Mask on **original nodes**. Used
+  by `is_expressive` and by reduce when `so.s.dim() == 3` (batched dense).
+- **`SelectOutput.out_mask`** is a **property** (not stored). It returns
+  `(so.s.sum(dim=-2) > 0)` when `so.s.dim() == 3`, else `None`. Mask on **pooled
+  nodes** `[B, K]`. For batched dense assignment only.
+
 ### PoolingOutput mask (variable supernode counts)
 
-- **`PoolingOutput.mask`** is an optional boolean tensor of shape `[B, K]` indicating
-  which supernodes are valid when the pooler uses **batched dense** output with
-  variable supernode counts per graph (e.g. LaPool, BNPool).
-- When `sparse_output=False`, the batched path may return `out.mask` so that
-  downstream layers (e.g. `DenseGCNConv`, global pool) can ignore padded positions.
-- When the **unbatched** path of a dense pooler returns dense output
-  (`sparse_output=False`), it can also set `out.mask` (e.g. via
-  `get_mask_from_dense_s`) so that variable-K behavior is consistent with
-  the batched path.
+- **`PoolingOutput.mask`** is a **property** derived from `so.out_mask`: it returns
+  `self.so.out_mask` when `so` is set, else `None`. No stored mask field; do not
+  pass `mask=` when constructing `PoolingOutput`. Shape `[B, K]` when batched dense.
+- Downstream layers (e.g. `DenseGCNConv`, global pool) use `out.mask` to ignore
+  padded supernodes. For unbatched dense output with 2D `s`, `so.out_mask` is `None`;
+  use `get_mask_from_dense_s(so.s, batch)` if a `[B, K]` mask is needed there.
 
 ### Readout (graph-level aggregation)
 
 - **`readout(...)`** is the single graph-level readout function. Import from
   `tgp.reduce`: `from tgp.reduce import readout`. It infers sparse vs dense from
   the tensor shape: 2D `[N, F]` is treated as sparse (use `batch` for grouping);
-  3D `[B, N, F]` as dense. Optional `mask` and `node_dim` are supported.
+  3D `[B, N, F]` as dense.
+- **Mask is supported only for dense x:** For sparse (2D) x, if `mask` is passed we
+  emit a warning and ignore it (all nodes considered valid). For dense x, `mask` has
+  shape `[B, N]` and is passed to `AggrReduce` internally; wrong shape is warned and ignored.
 - **Poolers no longer have a `readout` method.** Call `readout(x, reduce_op=...,
-  batch=..., mask=...)` directly on the pooled node features.
+  batch=..., mask=...)` directly on the pooled node features (use `mask` only when
+  `x` is 3D).
 - **PyG aggregators:** Pass a `torch_geometric.nn.aggr.Aggregation` instance or a
   string (e.g. `"sum"`, `"mean"`, `"lstm"`) as `reduce_op`. Strings are resolved
   via `get_aggr(reduce_op, **kwargs)`; readout uses `AggrReduce` internally with
@@ -163,6 +179,10 @@ This flag determines the appropriate downstream MP/global pooling layers.
 - **AggrReduce:** Wraps a PyG Aggregation for per-cluster reduce. Use
   `AggrReduce(get_aggr("mean"))` or `AggrReduce(MeanAggregation())` for
   aggregation types other than sum (BaseReduce now only does :math:`S^T X`).
+  **Mask resolution:** `forward(..., mask=...)` uses (1) the `mask` argument if
+  provided, (2) else `so.in_mask` if `so` is not None and `so.s.dim() == 3` (batched
+  dense only; `in_mask` is then `[B, N]`), (3) else all nodes valid. Mask is on
+  **original nodes**.
 
 ## API / Behavior Changes
 

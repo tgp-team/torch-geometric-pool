@@ -20,8 +20,10 @@ from tgp.reduce import AggrReduce, get_aggr, readout
 seed_everything(8)
 
 # Poolers and aggregators to try
-POOLER_NAMES = ["topk", "mincut", "graclus"]
-AGGR_NAMES = ["sum", "mean", "lstm", "set2set"]
+# POOLER_NAMES = ["topk", "lap", "mincut", "graclus"]
+POOLER_NAMES = ["lap"]
+# AGGR_NAMES = ["sum", "mean", "lstm", "set2set"]
+AGGR_NAMES = ["mean"]
 
 
 def readout_dim_for_aggr(aggr_name: str, in_channels: int) -> int:
@@ -109,9 +111,14 @@ def run_pooler_aggr(pooler_name: str, aggr_name: str, hidden_channels: int = 64)
                 x = F.relu(self.conv2(x_pool, adj_pool, mask=mask_pool))
             else:
                 x = F.relu(self.conv2(x_pool, adj_pool, out.edge_weight))
-            # Readout with the same aggregator (string → get_aggr inside readout)
+            # Readout: mask only for dense x (3D)
+            readout_mask = mask_pool if (x.dim() == 3) else None
             x = readout(
-                x, reduce_op=aggr_name, batch=out.batch, mask=mask_pool, **aggr_kwargs
+                x,
+                reduce_op=aggr_name,
+                batch=out.batch,
+                mask=readout_mask,
+                **aggr_kwargs,
             )
             x = self.lin(x)
             aux = (
@@ -121,6 +128,9 @@ def run_pooler_aggr(pooler_name: str, aggr_name: str, hidden_channels: int = 64)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Net().to(device)
+    # Ensure pooler's reducer (and its aggr submodule) are on the same device
+    if hasattr(model.pooler, "reducer") and model.pooler.reducer is not None:
+        model.pooler.reducer.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     def train_epoch():

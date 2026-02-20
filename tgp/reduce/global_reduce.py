@@ -1,8 +1,7 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor, nn
-from torch_geometric.utils import scatter
 
 from tgp.utils.typing import ReduceType
 
@@ -20,40 +19,6 @@ def _is_pyg_aggregation(reduce_op) -> bool:
     if PyGAggregation is None:
         return False
     return isinstance(reduce_op, nn.Module) and isinstance(reduce_op, PyGAggregation)
-
-
-def _apply_mask_sparse(
-    x: Tensor,
-    batch: Optional[Tensor],
-    mask: Optional[Tensor],
-) -> Tuple[Tensor, Optional[Tensor]]:
-    """Apply mask to sparse x; return (x_masked, batch_masked) with invalid rows removed."""
-    if mask is None:
-        return x, batch
-    x_masked = x * mask.unsqueeze(-1).to(x.dtype)
-    valid = mask.nonzero(as_tuple=True)[0]
-    x_masked = x_masked[valid]
-    batch_masked = batch[valid] if batch is not None else None
-    return x_masked, batch_masked
-
-
-def _apply_mask_dense(
-    x: Tensor,
-    mask: Optional[Tensor],
-) -> Tuple[Tensor, Optional[Tensor]]:
-    """Apply mask to dense x; return (x_flat_valid, batch_flat_valid) for valid nodes only."""
-    B, N, F = x.shape
-    if mask is None:
-        x_flat = x.reshape(B * N, F)
-        batch_flat = torch.arange(
-            B, device=x.device, dtype=torch.long
-        ).repeat_interleave(N)
-        return x_flat, batch_flat
-    mask_flat = mask.reshape(-1)
-    valid = mask_flat.nonzero(as_tuple=True)[0]
-    x_flat = x.reshape(B * N, F)
-    batch_flat = torch.arange(B, device=x.device, dtype=torch.long).repeat_interleave(N)
-    return x_flat[valid], batch_flat[valid]
 
 
 def readout(
@@ -80,8 +45,9 @@ def readout(
             Strings are resolved via :func:`~tgp.reduce.get_aggr`.
         batch: Batch vector for sparse ``x``, shape ``[N]``. Ignored for dense.
         size: Number of graphs (for sparse). Optional.
-        mask: Valid-node mask. Sparse: shape ``[N]``; dense: shape ``[B, N]``.
-            Only valid nodes are aggregated when provided.
+        mask: Valid-node mask for batched (dense) ``x`` only, shape ``[B, N]``.
+            Must be :obj:`None` for unbatched (2D) ``x``. Node-level masks are only
+            supported with batched representations throughout the library.
         node_dim: Dimension along which nodes are aggregated (default ``-2``).
         **aggr_kwargs: Passed to :func:`~tgp.reduce.get_aggr` when ``reduce_op``
             is a string (e.g. ``in_channels``, ``out_channels``, ``processing_steps``).
@@ -96,19 +62,6 @@ def readout(
             f"readout expects x to be 2D [N, F] or 3D [B, N, F], got ndim={x.dim()}"
         )
 
-    # "any" has no PyG Aggregation equivalent; use scatter
-    if isinstance(reduce_op, str) and reduce_op.strip().lower() == "any":
-        if x.dim() == 2:
-            if mask is not None:
-                x = x * mask.unsqueeze(-1).to(x.dtype)
-            if batch is None:
-                return x.any(dim=node_dim, keepdim=True)
-            return scatter(x.bool(), batch, dim=node_dim, dim_size=size, reduce="any")
-        else:
-            if mask is not None:
-                x = x.masked_fill(~mask.unsqueeze(-1), False)
-            return x.any(dim=node_dim)
-
     if isinstance(reduce_op, str):
         aggr = get_aggr(reduce_op, **aggr_kwargs)
     elif _is_pyg_aggregation(reduce_op):
@@ -119,14 +72,11 @@ def readout(
         )
 
     reducer = AggrReduce(aggr)
-
-    if x.dim() == 2:
-        x_agg, batch_agg = _apply_mask_sparse(x, batch, mask)
-        if batch_agg is None and x_agg.size(0) > 0:
-            batch_agg = torch.zeros(x_agg.size(0), dtype=torch.long, device=x.device)
-        x_pool, _ = reducer(x_agg, so=None, batch=batch_agg, size=size)
-    else:
-        x_flat, batch_flat = _apply_mask_dense(x, mask)
-        x_pool, _ = reducer(x_flat, so=None, batch=batch_flat, size=x.size(0))
-
+    reducer.to(x.device)
+    # AggrReduce handles so=None (one cluster per graph), mask validation, and 2D vs 3D
+    batch_in = batch
+    if x.dim() == 2 and batch_in is None and x.size(0) > 0:
+        batch_in = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+    size_in = size if x.dim() == 2 else x.size(0)
+    x_pool, _ = reducer(x, so=None, batch=batch_in, size=size_in, mask=mask)
     return x_pool

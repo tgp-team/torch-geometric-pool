@@ -79,9 +79,9 @@ class Net(torch.nn.Module):
 
         # Readout
 
-        x = readout(
-            x, reduce_op="sum", batch=out.batch, mask=getattr(out, "mask", None)
-        )
+        # Readout: mask only for dense x (3D)
+        readout_mask = getattr(out, "mask", None) if x.dim() == 3 else None
+        x = readout(x, reduce_op="sum", batch=out.batch, mask=readout_mask)
 
         # Readout layer
         x = self.lin(x)

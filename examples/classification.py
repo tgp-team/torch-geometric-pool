@@ -12,9 +12,8 @@ from tgp.reduce import readout
 
 seed_everything(8)  # Reproducibility
 
-for POOLER, value in pooler_map.items():  # Use all poolers
-    # for POOLER in ['mincut']:                 # Test a specific pooler
-
+# for POOLER, value in pooler_map.items():  # Use all poolers
+for POOLER in ["lap"]:  # Test a specific pooler
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
 
@@ -109,8 +108,9 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                     x = self.conv2(x_pool, adj_pool, out.edge_weight)
                 x = F.relu(x)
 
-                # Readout
-                x = readout(x, reduce_op="sum", batch=out.batch, mask=mask_pool)
+                # Readout: mask only for dense x (3D)
+                readout_mask = mask_pool if (x.dim() == 3) else None
+                x = readout(x, reduce_op="sum", batch=out.batch, mask=readout_mask)
 
                 # Readout layer
                 x = self.lin(x)

@@ -160,6 +160,19 @@ def test_data_to_moves_selectoutput_extra_tensors_in_nested_pooled_data():
     assert data.pooled_data[0].so.theta_list[0].device.type == "meta"
 
 
+def test_selectoutput_in_mask_must_be_2d():
+    # in_mask is batched only: must be 2D [B, N]
+    s = torch.eye(4)
+    with pytest.raises(ValueError, match="in_mask must be 2D"):
+        SelectOutput(s=s, in_mask=torch.tensor([True, True, False, True]))
+    # 2D is accepted
+    so = SelectOutput(
+        s=s.unsqueeze(0).expand(2, 4, 4),
+        in_mask=torch.ones(2, 4, dtype=torch.bool),
+    )
+    assert so.in_mask.shape == (2, 4)
+
+
 def test_selectoutput_invalid_init():
     # If s is neither None, Tensor, nor SparseTensor, expect ValueError
     with pytest.raises(ValueError):

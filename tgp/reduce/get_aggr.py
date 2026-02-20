@@ -6,6 +6,7 @@ keyword arguments such as :obj:`in_channels`, :obj:`out_channels`,
 :obj:`processing_steps`.
 """
 
+import inspect
 from typing import Any
 
 try:
@@ -96,4 +97,11 @@ def get_aggr(alias: str, **kwargs: Any) -> Any:
         and "in_channels" in merged
     ):
         merged["out_channels"] = merged["in_channels"]
+    # Only pass kwargs that the aggregator's __init__ accepts (e.g. Sum/Mean take none)
+    try:
+        sig = inspect.signature(cls.__init__)
+        allowed = {p for p in sig.parameters if p != "self"}
+    except Exception:
+        allowed = set(merged)
+    merged = {k: v for k, v in merged.items() if k in allowed}
     return cls(**merged)
