@@ -229,9 +229,7 @@ class SelectOutput:
         """
         if not isinstance(self.s, Tensor) or self.s.is_sparse:
             return None
-        if self.s.dim() == 3:
-            return (self.s.sum(dim=-2) > 0).to(torch.bool)
-        if self.s.dim() == 2:
+        if self.s.dim() in (2, 3):
             return get_mask_from_dense_s(self.s, self.batch)
         return None
 
