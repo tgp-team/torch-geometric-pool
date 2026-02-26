@@ -525,6 +525,9 @@ class DenseSRCPooling(SRCPooling):
             batch_pooled = self.reducer.reduce_batch(so, batch)
         if batch_pooled is None and B > 1:
             batch_pooled = torch.arange(B, device=x_pool.device).repeat_interleave(K)
+        if batch_pooled is None and mask is not None:
+            # Single graph, no batch, dense path
+            batch_pooled = torch.zeros(B * K, dtype=torch.long, device=x_pool.device)
 
         if mask is not None:
             mask_flat = mask.reshape(-1)

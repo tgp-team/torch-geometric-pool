@@ -232,10 +232,34 @@ class BaseLift(Lift):
                 expected_nodes = batch_size * num_clusters
 
                 if x_pool.size(0) != expected_nodes:
-                    raise ValueError(
-                        "Unexpected pooled feature shape for dense [B, N, K] lifting: "
-                        f"got x_pool.size(0)={x_pool.size(0)}, expected {expected_nodes}."
-                    )
+                    # Compacted x_pool from sparse_output path: expand using so.out_mask
+                    out_mask = getattr(so, "out_mask", None)
+                    if (
+                        out_mask is not None
+                        and batch_pooled is not None
+                        and out_mask.numel() == expected_nodes
+                    ):
+                        mask_flat = out_mask.reshape(-1)
+                        valid_indices = mask_flat.nonzero(as_tuple=True)[0]
+                        if valid_indices.size(0) == x_pool.size(0):
+                            x_pool_padded = x_pool.new_zeros(
+                                expected_nodes, x_pool.size(-1)
+                            )
+                            x_pool_padded[valid_indices] = x_pool
+                            x_pool = x_pool_padded
+                        else:
+                            raise ValueError(
+                                "Unexpected pooled feature shape for dense [B, N, K] lifting: "
+                                f"x_pool has {x_pool.size(0)} nodes but out_mask has "
+                                f"{valid_indices.size(0)} valid positions."
+                            )
+                    else:
+                        raise ValueError(
+                            "Unexpected pooled feature shape for dense [B, N, K] lifting: "
+                            f"got x_pool.size(0)={x_pool.size(0)}, expected {expected_nodes}. "
+                            "If using sparse_output=True, pass the same so and batch_pooled from "
+                            "the pooler output so the lift can expand compacted x_pool."
+                        )
 
                 x_pool = x_pool.view(batch_size, num_clusters, x_pool.size(-1))
                 x_prime = s_inv.matmul(x_pool)

@@ -20,10 +20,8 @@ from tgp.reduce import AggrReduce, get_aggr, readout
 seed_everything(8)
 
 # Poolers and aggregators to try
-# POOLER_NAMES = ["topk", "lap", "mincut", "graclus"]
-POOLER_NAMES = ["lap"]
-# AGGR_NAMES = ["sum", "mean", "lstm", "set2set"]
-AGGR_NAMES = ["mean"]
+POOLER_NAMES = ["topk", "lap", "mincut", "graclus"]
+AGGR_NAMES = ["sum", "mean", "lstm", "set2set"]
 
 
 def readout_dim_for_aggr(aggr_name: str, in_channels: int) -> int:
@@ -65,8 +63,8 @@ def run_pooler_aggr(pooler_name: str, aggr_name: str, hidden_channels: int = 64)
         "scorer": "degree",
         "adj_transpose": True,
         "num_modes": 5,
-        "sparse_output": True,
-        "batched": False,
+        "sparse_output": False,
+        "batched": True,
     }
     pooler = get_pooler(pooler_name, **pooler_kwargs)
 

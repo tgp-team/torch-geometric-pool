@@ -12,8 +12,8 @@ from tgp.reduce import readout
 
 seed_everything(8)  # Reproducibility
 
-# for POOLER, value in pooler_map.items():  # Use all poolers
-for POOLER in ["lap"]:  # Test a specific pooler
+for POOLER, value in pooler_map.items():  # Use all poolers
+    # for POOLER in ["lap"]:  # Test a specific pooler
     pooler_cls = pooler_map[POOLER]
     print(f"Using pooler: {POOLER}")
 
@@ -46,8 +46,8 @@ for POOLER in ["lap"]:  # Test a specific pooler
             "scorer": "degree",
             "adj_transpose": True,
             "num_modes": 5,
-            "sparse_output": True,
-            "batched": False,
+            "sparse_output": False,
+            "batched": True,
         }
 
         ### Model definition
