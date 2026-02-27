@@ -21,22 +21,37 @@ def _sort_by_cluster_index(src: Tensor, cluster_index: Tensor) -> Tuple[Tensor, 
     return src_sorted, cluster_index_sorted
 
 
-def _apply_mask_dense(
+def _apply_mask(
     x: Tensor,
-    mask: Optional[Tensor],
+    mask: Tensor,
 ) -> Tuple[Tensor, Tensor]:
-    """Apply mask to dense x; return (x_flat_valid, batch_flat_valid) for valid nodes only."""
+    r"""Apply a node mask to dense inputs.
+
+    Assumes:
+        - :obj:`x` has shape ``[B, N, F]``
+        - :obj:`mask` has shape ``[B, N]``
+
+    Returns:
+        ``(x_valid, batch_valid)`` where both are flattened over valid (unmasked)
+        nodes only, suitable for sparse-style aggregation.
+    """
+    if x.dim() != 3:
+        raise ValueError(
+            f"_apply_mask expects x to be 3D [B, N, F], got ndim={x.dim()}"
+        )
+    if mask.dim() != 2 or tuple(mask.shape) != tuple(x.shape[:2]):
+        raise ValueError(
+            f"_apply_mask expects mask shape [B, N]={tuple(x.shape[:2])}, "
+            f"got {tuple(mask.shape)}"
+        )
+
     B, N, F = x.shape
-    if mask is None:
-        x_flat = x.reshape(B * N, F)
-        batch_flat = torch.arange(
-            B, device=x.device, dtype=torch.long
-        ).repeat_interleave(N)
-        return x_flat, batch_flat
     mask_flat = mask.reshape(-1)
     valid = mask_flat.nonzero(as_tuple=True)[0]
+
     x_flat = x.reshape(B * N, F)
     batch_flat = torch.arange(B, device=x.device, dtype=torch.long).repeat_interleave(N)
+
     return x_flat[valid], batch_flat[valid]
 
 
@@ -83,40 +98,16 @@ class AggrReduce(Reduce):
         batch: Optional[Tensor] = None,
         size: Optional[int] = None,
         return_batched: bool = False,
-        mask: Optional[Tensor] = None,
         **kwargs,
     ) -> Tuple[Tensor, Optional[Tensor]]:
-        # Mask is only for batched (dense) representations; warn and ignore otherwise
-        if mask is not None:
-            if x.dim() == 2:
-                warnings.warn(
-                    "mask is only supported for batched (dense) representations; ignoring mask for 2D x (all nodes considered valid).",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                mask = None
-            elif x.dim() == 3 and (mask.dim() != 2 or mask.shape != x.shape[:2]):
-                warnings.warn(
-                    "mask must be 2D with shape [B, N] matching x.shape[:2]; ignoring invalid mask (all nodes considered valid).",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                mask = None
-        # Resolve original-node mask: argument, then so.in_mask (batched dense only), else all valid
-        resolved_mask = mask
-        if resolved_mask is None and so is not None and so.s.dim() == 3:
-            resolved_mask = getattr(so, "in_mask", None)
-
+        # so=None is treated as global readout: one cluster per graph.
         if so is None:
-            if x.dim() == 3 and resolved_mask is not None:
-                x, batch = _apply_mask_dense(x, resolved_mask)
-                size = size if size is not None else int(batch.max().item()) + 1
-                so = self._one_cluster_per_graph_so(x, batch=batch, size=size)
-            else:
-                so = self._one_cluster_per_graph_so(x, batch=batch, size=size)
-                if x.dim() == 3:
-                    x = x.reshape(-1, x.size(-1))
-                    batch = so.cluster_index
+            so = self._one_cluster_per_graph_so(x, batch=batch, size=size)
+            # For dense [B, N, F] inputs we flatten to sparse-style [B*N, F]
+            # and let cluster_index encode graph membership.
+            if x.dim() == 3:
+                x = x.reshape(-1, x.size(-1))
+                batch = so.cluster_index
 
         if batch is None and hasattr(so, "batch") and so.batch is not None:
             batch = so.batch
@@ -133,10 +124,7 @@ class AggrReduce(Reduce):
             # Sort by cluster_index for aggrs that require it (e.g. LSTMAggregation)
             src_sorted, index_sorted = _sort_by_cluster_index(src, so.cluster_index)
             x_pool = self.aggr(
-                src_sorted,
-                index=index_sorted,
-                dim_size=so.num_supernodes,
-                dim=0,
+                src_sorted, index=index_sorted, dim_size=so.num_supernodes, dim=0
             )
         else:
             warnings.warn(
@@ -146,70 +134,63 @@ class AggrReduce(Reduce):
                 stacklevel=2,
             )
             if so.s.dim() == 3:
+                # Batched dense assignment: s [B, N, K], x [B, N, F]
                 B, N, F_in = x.shape
                 K = so.s.size(-1)
                 cluster = so.s.argmax(dim=-1)  # [B, N]
-                batch_idx = torch.arange(B, device=x.device).view(-1, 1).expand(-1, N)
-                if resolved_mask is not None and resolved_mask.shape == x.shape[:2]:
-                    # Select only valid nodes (sparse-like): x_valid, index_valid
-                    mask_flat = resolved_mask.reshape(-1)
-                    valid = mask_flat.nonzero(as_tuple=True)[0]
-                    x_flat = x.reshape(B * N, F_in)
-                    x_valid = x_flat[valid]
-                    index_flat = batch_idx.reshape(-1) * K + cluster.reshape(-1)
-                    index_valid = index_flat[valid]
-                else:
-                    x_flat = x.reshape(B * N, F_in)
-                    index_flat = batch_idx.reshape(-1) * K + cluster.reshape(-1)
-                    x_valid = x_flat
-                    index_valid = index_flat
-                # Sort by index for aggrs that require it (e.g. LSTMAggregation)
-                x_valid_sorted, index_sorted = _sort_by_cluster_index(
-                    x_valid, index_valid
-                )
-                x_pool = self.aggr(
-                    x_valid_sorted, index=index_sorted, dim_size=B * K, dim=-2
-                )
-                F_out = x_pool.size(-1)
-                x_pool = x_pool.reshape(B, K, F_out)
-                # Dense in => dense out: do not flatten when input was 3D
-            elif batch is not None and batch.numel() > 0:
-                from torch_geometric.utils import unbatch
 
-                batch_min = int(batch.min().item())
-                batch_max = int(batch.max().item())
-                if batch_min != batch_max:
-                    # Mirror BaseReduce: unbatch then per-graph reduce (aggr instead of matmul)
-                    unbatched_s = unbatch(so.s, batch)
-                    unbatched_x = unbatch(x, batch)
-                    x_pool_list = []
-                    for s_i, x_i in zip(unbatched_s, unbatched_x):
-                        # x_pool_i: [K, F] via aggr, same K as BaseReduce's s_i
-                        K = s_i.size(-1)
-                        cluster_i = s_i.argmax(dim=-1)
-                        src_sorted, index_sorted = _sort_by_cluster_index(
-                            x_i, cluster_i
-                        )
-                        x_pool_i = self.aggr(
-                            src_sorted,
-                            index=index_sorted,
-                            dim_size=K,
-                            dim=0,
-                        )
-                        x_pool_list.append(x_pool_i)
-                    if return_batched:
-                        x_pool = torch.stack(x_pool_list, dim=0)  # [B, K, F]
-                    else:
-                        x_pool = torch.cat(x_pool_list, dim=0)  # [B*K, F]
+                # Build per-node graph ids for global indexing.
+                batch_idx = (
+                    torch.arange(B, device=x.device, dtype=torch.long)
+                    .view(-1, 1)
+                    .expand(-1, N)
+                )
+
+                in_mask = getattr(so, "in_mask", None)
+                if in_mask is not None:
+                    # Use shared helper to restrict x to valid nodes.
+                    x_flat, batch_flat = _apply_mask(x, in_mask)
+                    # Rebuild cluster indices on the same valid positions.
+                    cluster_flat = cluster.reshape(-1)
+                    mask_flat = in_mask.reshape(-1)
+                    valid = mask_flat.nonzero(as_tuple=True)[0]
+                    cluster_flat = cluster_flat[valid]
                 else:
-                    cluster = so.s.argmax(dim=-1)
-                    src_sorted, index_sorted = _sort_by_cluster_index(x, cluster)
-                    x_pool = self.aggr(
-                        src_sorted,
-                        index=index_sorted,
-                        dim_size=so.s.size(-1),
-                        dim=0,
-                    )
+                    x_flat = x.reshape(B * N, F_in)
+                    batch_flat = batch_idx.reshape(-1)
+                    cluster_flat = cluster.reshape(-1)
+
+                # Global cluster index encodes (graph, cluster) pairs.
+                global_cluster = batch_flat * K + cluster_flat
+
+                # Sort by index for aggrs that require it (e.g. LSTMAggregation)
+                src_sorted, index_sorted = _sort_by_cluster_index(
+                    x_flat, global_cluster
+                )
+                x_pool_flat = self.aggr(
+                    src_sorted, index=index_sorted, dim_size=B * K, dim=0
+                )
+                F_out = x_pool_flat.size(-1)
+                x_pool = x_pool_flat.reshape(B, K, F_out)
+                # Dense in => dense out: return [B, K, F]
+            elif batch is not None and batch.numel() > 0:
+                # Dense [N, K] with batch: flatten to global cluster index, one aggr.
+                cluster = so.s.argmax(dim=-1)  # [N]
+                K = so.s.size(-1)
+                B = int(batch.max().item()) + 1
+                global_cluster = batch * K + cluster
+                src_sorted, index_sorted = _sort_by_cluster_index(x, global_cluster)
+                x_pool_flat = self.aggr(
+                    src_sorted,
+                    index=index_sorted,
+                    dim_size=B * K,
+                    dim=0,
+                )
+                F_out = x_pool_flat.size(-1)
+                if return_batched:
+                    x_pool = x_pool_flat.reshape(B, K, F_out)
+                else:
+                    x_pool = x_pool_flat
             else:
                 cluster = so.s.argmax(dim=-1)
                 src_sorted, index_sorted = _sort_by_cluster_index(x, cluster)

@@ -14,9 +14,7 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
 - **Two masks (in_mask / out_mask):** `SelectOutput` has `in_mask` (stored, optional;
   mask on original nodes `[B, N]`) and `out_mask` (property; mask on pooled nodes
   `[B, K]`). `PoolingOutput.mask` is derived from `so.out_mask`. **Node-level masks
-  are batched-only everywhere:** readout and `AggrReduce` accept `mask` only for
-  dense (3D) x; `mask` must be `None` for unbatched (2D) x.
-
+  are batched-only everywhere:** readout accepts `mask` for dense (3D) `x`.
 - **BNPool unified**: Dense and sparse BNPool variants are merged into one class with
   batched/unbatched branches and consistent outputs.
 

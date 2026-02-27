@@ -63,47 +63,8 @@ def test_aggr_reduce_sparse_with_weights():
     assert torch.allclose(x_base, x_aggr)
 
 
-def test_aggr_reduce_ignores_mask_for_2d_x_with_warning():
-    """AggrReduce warns and ignores mask when x is 2D (unbatched); all nodes valid."""
-    try:
-        from torch_geometric.nn import aggr
-    except ImportError:
-        pytest.skip("PyG aggr not available")
-    so = _make_sparse_select_output()
-    x = torch.randn(6, 4)  # 2D
-    mask = torch.ones(6, dtype=torch.bool)
-    reducer = AggrReduce(aggr.SumAggregation())
-    with pytest.warns(UserWarning, match="mask is only supported for batched"):
-        out, _ = reducer(x, so=so, batch=None, mask=mask)
-    expected, _ = reducer(x, so=so, batch=None, mask=None)
-    assert torch.allclose(out, expected)
-
-
-def test_aggr_reduce_readout_dense_with_mask():
-    """AggrReduce with so=None and dense x applies mask (readout path)."""
-    try:
-        from torch_geometric.nn import aggr
-    except ImportError:
-        pytest.skip("PyG aggr not available")
-    # x [B=2, N=3, F=2]; mask zeros out one node per graph
-    x = torch.tensor(
-        [
-            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
-            [[-1.0, 0.0], [0.0, 1.0], [2.0, -2.0]],
-        ],
-        dtype=torch.float,
-    )
-    mask = torch.tensor([[True, True, False], [True, False, True]], dtype=torch.bool)
-    reducer = AggrReduce(aggr.SumAggregation())
-    out, _ = reducer(x, so=None, size=2, mask=mask)
-    assert out.shape == (2, 2)
-    # Graph 0: nodes 0,1 -> [4, 6]; Graph 1: nodes 0,2 -> [1, -2]
-    expected = torch.tensor([[4.0, 6.0], [1.0, -2.0]])
-    assert torch.allclose(out, expected)
-
-
 def test_aggr_reduce_dense_with_so_in_mask():
-    """AggrReduce uses so.in_mask (batched dense only, shape [B, N]) when mask argument is None."""
+    """AggrReduce uses so.in_mask (batched dense only, shape [B, N]) when present."""
     try:
         from torch_geometric.nn import aggr
     except ImportError:
@@ -127,7 +88,7 @@ def test_aggr_reduce_dense_with_so_in_mask():
         dtype=torch.float,
     )
     reducer = AggrReduce(aggr.SumAggregation())
-    out, _ = reducer(x, so=so, batch=None, mask=None)
+    out, _ = reducer(x, so=so, batch=None)
     assert out.shape == (B, K, 2)
     # Graph 0: nodes 0,1 (masked) -> cluster 0 sum [4, 6]; node 2 masked out
     # Graph 1: node 0 -> cluster 0 [-1, 0]; nodes 1,2 (node 1 masked) -> cluster 1 [2, -2]

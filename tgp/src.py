@@ -55,7 +55,7 @@ class PoolingOutput:
             f"loss={list(self.loss.keys()) if self.loss is not None else None})"
         )
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator:  # TODO: check this method
         return iter(
             (
                 self.x,
@@ -313,9 +313,6 @@ class DenseSRCPooling(SRCPooling):
 
     It provides a preprocessing function that transform a batch of graphs in
     sparse representation into a batch of dense graphs.
-    For graph-level readout, use :func:`~tgp.reduce.readout` directly on
-    the pooled node features (format is inferred from the tensor shape).
-
     When :attr:`batched=True`, dense poolers accept either raw sparse inputs
     (which are converted internally) or already-dense padded tensors. In the
     latter case, an external boolean mask can be provided to mark valid nodes;

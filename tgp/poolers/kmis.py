@@ -219,7 +219,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
 
             # Reduce
             if self.reduce_red_op is None:
-                x_pooled = torch.index_select(x, index=so.mis, dim=0)
+                x_pooled = torch.index_select(x, index=so.mis, dim=-2)
                 x_pooled = x_pooled * so.weight[so.mis].view(-1, 1)
                 batch_pooled = None if batch is None else batch[so.mis]
             else:

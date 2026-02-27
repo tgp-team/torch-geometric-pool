@@ -1,3 +1,4 @@
+import warnings
 from typing import Optional, Union
 
 import torch
@@ -5,7 +6,7 @@ from torch import Tensor, nn
 
 from tgp.utils.typing import ReduceType
 
-from .aggr_reduce import AggrReduce
+from .aggr_reduce import AggrReduce, _apply_mask
 from .get_aggr import get_aggr
 
 try:
@@ -54,6 +55,26 @@ def readout(
             f"readout expects x to be 2D [N, F] or 3D [B, N, F], got ndim={x.dim()}"
         )
 
+    # Mask is only meaningful for batched (dense) representations; warn and ignore
+    # otherwise, mirroring AggrReduce's previous behavior.
+    if mask is not None:
+        if x.dim() == 2:
+            warnings.warn(
+                "mask is only supported for batched (dense) representations; ignoring "
+                "mask for 2D x (all nodes considered valid).",
+                UserWarning,
+                stacklevel=2,
+            )
+            mask = None
+        elif x.dim() == 3 and (mask.dim() != 2 or mask.shape != x.shape[:2]):
+            warnings.warn(
+                "mask must be 2D with shape [B, N] matching x.shape[:2]; ignoring "
+                "invalid mask (all nodes considered valid).",
+                UserWarning,
+                stacklevel=2,
+            )
+            mask = None
+
     if isinstance(reduce_op, str):
         aggr = get_aggr(reduce_op, **aggr_kwargs)
     elif _is_pyg_aggregation(reduce_op):
@@ -65,10 +86,19 @@ def readout(
 
     reducer = AggrReduce(aggr)
     reducer.to(x.device)
-    # AggrReduce handles so=None (one cluster per graph), mask validation, and 2D vs 3D
+
+    # Dense masked readout: apply mask once here and delegate to sparse-style readout.
+    if x.dim() == 3 and mask is not None:
+        x_valid, batch_valid = _apply_mask(x, mask)
+        B = mask.size(0)
+        x_pool, _ = reducer(x_valid, so=None, batch=batch_valid, size=B)
+        return x_pool
+
+    # Unmasked or sparse-style paths.
     batch_in = batch
     if x.dim() == 2 and batch_in is None and x.size(0) > 0:
         batch_in = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
     size_in = size if x.dim() == 2 else x.size(0)
-    x_pool, _ = reducer(x, so=None, batch=batch_in, size=size_in, mask=mask)
+
+    x_pool, _ = reducer(x, so=None, batch=batch_in, size=size_in)
     return x_pool

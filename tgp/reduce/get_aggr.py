@@ -48,16 +48,23 @@ _AGGR_ALIASES = {
 def get_aggr(alias: str, **kwargs: Any) -> Any:
     r"""Return a PyG :class:`torch_geometric.nn.aggr.Aggregation` instance by alias.
 
-    Use this with :class:`~tgp.reduce.AggrReduce` or :func:`~tgp.reduce.readout`
-    when you want to specify the aggregator by string instead of passing a
-    module instance.
+    This is the **aggregation analogue** of :func:`tgp.poolers.get_pooler`:
+    instead of instantiating poolers by alias, :func:`get_aggr` instantiates
+    PyG aggregation modules. Use it with :class:`~tgp.reduce.AggrReduce` or
+    :func:`~tgp.reduce.readout` when you prefer to configure aggregation via a
+    string name.
 
     Args:
         alias: Name of the aggregator (e.g. :obj:`"sum"`, :obj:`"mean"`,
-            :obj:`"lstm"`, :obj:`"set2set"`). Case-insensitive.
+            :obj:`"lstm"`, :obj:`"set2set"`). Case-insensitive; dashes are
+            normalized to underscores. The full list of supported aliases is
+            documented in :mod:`tgp.reduce` (see the *Aggregator aliases*
+            section).
         **kwargs: Passed to the aggregator constructor. Parametrized aggregators
             typically need :obj:`in_channels`, :obj:`out_channels`, and/or
-            :obj:`processing_steps` (e.g. for Set2Set, LSTM).
+            :obj:`processing_steps` (e.g. for Set2Set, LSTM). Any extra
+            keyword arguments that are not accepted by the underlying PyG
+            class are silently dropped.
 
     Returns:
         An instance of the requested PyG Aggregation.
@@ -67,9 +74,13 @@ def get_aggr(alias: str, **kwargs: Any) -> Any:
         ValueError: If :obj:`alias` is not recognized.
 
     Example:
-        >>> from tgp.reduce import get_aggr, AggrReduce
-        >>> red = AggrReduce(get_aggr("mean"))
-        >>> red_lstm = AggrReduce(get_aggr("lstm", in_channels=64, out_channels=64))
+        >>> from tgp.reduce import get_aggr, AggrReduce, readout
+        >>> # Inside a pooling layer
+        >>> reducer = AggrReduce(get_aggr("mean"))
+        >>> # For graph-level readout with Set2Set
+        >>> x_graph = readout(
+        ...     x, reduce_op="set2set", in_channels=64, processing_steps=3
+        ... )
     """
     if _aggr_module is None:
         raise ImportError(
