@@ -140,15 +140,12 @@ class BaseLift(Lift):
             src = x_pool[col]
             if values is not None:
                 src = src * values.view(-1, 1)
-            reduce = "any" if self.reduce_op == "any" else self.reduce_op
-            if reduce == "any":
-                src = src.bool()
             x_prime = scatter(
                 src,
                 row,
                 dim=0,
                 dim_size=s_inv.size(0),
-                reduce=reduce,
+                reduce=self.reduce_op,
             )
         else:
             # Dense assignment matrix

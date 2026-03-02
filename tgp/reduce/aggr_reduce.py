@@ -223,11 +223,15 @@ class AggrReduce(Reduce):
             num_supernodes = size if size is not None else B
         else:
             num_nodes = x.size(0)
-            if batch is not None and batch.numel() > 0:
+            if batch is not None:
                 cluster_index = batch
-                num_supernodes = (
-                    size if size is not None else int(batch.max().item()) + 1
-                )
+                if batch.numel() > 0:
+                    inferred = int(batch.max().item()) + 1
+                    num_supernodes = size if size is not None else inferred
+                else:
+                    # Preserve explicit graph cardinality (dim_size) even when
+                    # there are no valid nodes (e.g. dense readout with all-false mask).
+                    num_supernodes = size if size is not None else 1
             else:
                 cluster_index = torch.zeros(
                     num_nodes, dtype=torch.long, device=x.device

@@ -47,6 +47,14 @@ def test_readout_sparse():
     assert out.shape == (2, 2)  # [B, F]
 
 
+def test_readout_dense_mask_all_false_preserves_batch_size():
+    x = torch.randn(3, 4, 2)
+    mask = torch.zeros(3, 4, dtype=torch.bool)
+    out = readout(x, reduce_op="sum", mask=mask)
+    assert out.shape == (3, 2)
+    assert torch.allclose(out, torch.zeros_like(out))
+
+
 def test_readout_sparse_single_graph():
     # Sparse with batch=None -> single graph, output [1, F]
     x = torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=torch.float)

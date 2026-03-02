@@ -4,8 +4,6 @@ from typing import Optional, Union
 import torch
 from torch import Tensor, nn
 
-from tgp.utils.typing import ReduceType
-
 from .aggr_reduce import AggrReduce, _apply_mask
 from .get_aggr import get_aggr
 
@@ -24,7 +22,7 @@ def _is_pyg_aggregation(reduce_op) -> bool:
 
 def readout(
     x: Tensor,
-    reduce_op: Union[ReduceType, str, "PyGAggregation"] = "sum",
+    reduce_op: Union[str, "PyGAggregation"] = "sum",
     batch: Optional[Tensor] = None,
     size: Optional[int] = None,
     mask: Optional[Tensor] = None,
@@ -55,8 +53,7 @@ def readout(
             f"readout expects x to be 2D [N, F] or 3D [B, N, F], got ndim={x.dim()}"
         )
 
-    # Mask is only meaningful for batched (dense) representations; warn and ignore
-    # otherwise, mirroring AggrReduce's previous behavior.
+    # Mask is only meaningful for batched (dense) representations; warn and ignore otherwise.
     if mask is not None:
         if x.dim() == 2:
             warnings.warn(
