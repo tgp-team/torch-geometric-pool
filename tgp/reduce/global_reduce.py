@@ -1,6 +1,5 @@
 from typing import Optional, Union
 
-import torch
 from torch import Tensor
 
 from tgp.utils.ops import apply_dense_node_mask
@@ -39,7 +38,9 @@ def readout(
             ``"min"``, ``"lstm"``, ``"set2set"``) or a PyG Aggregation module.
             Strings are resolved via :func:`~tgp.reduce.get_aggr`.
         batch: Batch vector for sparse ``x``, shape ``[N]``. Ignored for dense.
-        size: Number of graphs (for sparse). Optional.
+        size: Number of graphs for sparse readout when :obj:`batch` is provided.
+            Passing :obj:`size` with sparse ``x`` and :obj:`batch=None` raises
+            :class:`ValueError`.
         mask: Input-node validity mask for batched (dense) ``x`` only, shape ``[B, N]``.
             Passing :obj:`mask` with sparse ``x`` or with a mismatched shape raises
             :class:`ValueError`.
@@ -75,8 +76,10 @@ def readout(
     if mask is not None:
         raise ValueError("mask is only supported for dense x with shape [B, N, F].")
 
-    if batch is None and x.size(0) > 0:
-        batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+    if batch is None and size is not None:
+        raise ValueError(
+            "size is only supported for sparse readout when batch is provided."
+        )
 
     x_pool, _ = reducer(x, so=None, batch=batch, size=size)
     return x_pool

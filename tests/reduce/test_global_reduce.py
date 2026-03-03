@@ -73,6 +73,15 @@ def test_readout_sparse_with_size():
     assert out.shape == (2, 2)
 
 
+def test_readout_sparse_size_requires_batch():
+    x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float)
+    with pytest.raises(
+        ValueError,
+        match="size is only supported for sparse readout when batch is provided",
+    ):
+        readout(x, reduce_op="sum", batch=None, size=2)
+
+
 def test_readout_sparse_rejects_mask():
     # mask is only valid for dense [B, N, F] inputs.
     x = torch.tensor(
