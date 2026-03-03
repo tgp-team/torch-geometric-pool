@@ -1,5 +1,6 @@
 from .ops import (
     add_remaining_self_loops,
+    apply_dense_node_mask,
     batched_negative_edge_sampling,
     build_pooled_batch,
     check_and_filter_edge_weights,

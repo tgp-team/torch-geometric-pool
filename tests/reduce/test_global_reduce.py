@@ -73,33 +73,26 @@ def test_readout_sparse_with_size():
     assert out.shape == (2, 2)
 
 
-def test_readout_sparse_ignores_mask_with_warning():
-    # readout mask is only for batched (dense) x; for 2D x we warn and ignore (all nodes valid)
+def test_readout_sparse_rejects_mask():
+    # mask is only valid for dense [B, N, F] inputs.
     x = torch.tensor(
         [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]], dtype=torch.float
     )
     batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
     mask = torch.tensor([True, True, False, True], dtype=torch.bool)
-    with pytest.warns(UserWarning, match="mask is only supported for batched"):
-        out = readout(x, reduce_op="sum", batch=batch, mask=mask)
-    # Result is as if mask was None (all nodes aggregated)
-    assert out.shape == (2, 2)
-    expected_no_mask = readout(x, reduce_op="sum", batch=batch)
-    assert torch.allclose(out, expected_no_mask)
+    with pytest.raises(ValueError, match="mask is only supported for dense"):
+        readout(x, reduce_op="sum", batch=batch, mask=mask)
 
 
-def test_readout_dense_ignores_wrong_shape_mask_with_warning():
-    # readout with wrong mask shape: warn and ignore (all nodes valid)
+def test_readout_dense_rejects_wrong_shape_mask():
+    # dense readout requires mask shape [B, N] exactly.
     x = torch.randn(2, 3, 4)  # [B=2, N=3, F=4]
     mask_1d = torch.ones(6, dtype=torch.bool)  # wrong: 1D
-    with pytest.warns(UserWarning, match="2D with shape|invalid mask"):
-        out_1d = readout(x, reduce_op="sum", mask=mask_1d)
-    expected = readout(x, reduce_op="sum")
-    assert torch.allclose(out_1d, expected)
+    with pytest.raises(ValueError, match="mask must have shape \\[B, N\\]"):
+        readout(x, reduce_op="sum", mask=mask_1d)
     mask_wrong = torch.ones(2, 5, dtype=torch.bool)  # wrong: N=5 != 3
-    with pytest.warns(UserWarning, match="2D with shape|invalid mask"):
-        out_wrong = readout(x, reduce_op="sum", mask=mask_wrong)
-    assert torch.allclose(out_wrong, expected)
+    with pytest.raises(ValueError, match="mask must have shape \\[B, N\\]"):
+        readout(x, reduce_op="sum", mask=mask_wrong)
 
 
 def test_readout_invalid_ndim():
@@ -170,8 +163,8 @@ def test_readout_pyg_aggr_sparse_single_graph():
     assert torch.allclose(out, torch.tensor([[4.0, 6.0]]))
 
 
-def test_readout_pyg_aggr_sparse_ignores_mask_with_warning():
-    """Readout ignores mask for sparse (2D) x with a warning."""
+def test_readout_pyg_aggr_sparse_rejects_mask():
+    """Readout rejects mask for sparse (2D) inputs."""
     try:
         from torch_geometric.nn import aggr
     except ImportError:
@@ -179,10 +172,8 @@ def test_readout_pyg_aggr_sparse_ignores_mask_with_warning():
     x = torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=torch.float)
     batch = torch.tensor([0, 0, 1], dtype=torch.long)
     mask = torch.tensor([True, False, True], dtype=torch.bool)
-    with pytest.warns(UserWarning, match="mask is only supported for batched"):
-        out = readout(x, reduce_op=aggr.SumAggregation(), batch=batch, mask=mask)
-    expected = readout(x, reduce_op=aggr.SumAggregation(), batch=batch)
-    assert torch.allclose(out, expected)
+    with pytest.raises(ValueError, match="mask is only supported for dense"):
+        readout(x, reduce_op=aggr.SumAggregation(), batch=batch, mask=mask)
 
 
 def test_readout_pyg_aggr_dense_with_mask():

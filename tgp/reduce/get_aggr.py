@@ -1,4 +1,4 @@
-"""Resolve string aliases to PyG Aggregation instances.
+"""Resolve and validate PyG aggregation operators.
 
 Use :func:`get_aggr` to obtain aggregators by name for :class:`AggrReduce` and
 :func:`readout`. For parametrized aggregators (e.g. LSTM, Set2Set), pass
@@ -7,12 +7,17 @@ keyword arguments such as :obj:`in_channels`, :obj:`out_channels`,
 """
 
 import inspect
-from typing import Any
+from typing import Any, Union
 
 try:
     from torch_geometric.nn import aggr as _aggr_module
 except Exception:
     _aggr_module = None
+
+try:
+    from torch_geometric.nn.aggr import Aggregation as _PyGAggregation
+except Exception:
+    _PyGAggregation = None
 
 # Alias -> (PyG class name, default kwargs for parametrized aggrs)
 _AGGR_ALIASES = {
@@ -43,6 +48,41 @@ _AGGR_ALIASES = {
     "patch_transformer": ("PatchTransformerAggregation", {}),
     "graph_multiset_transformer": ("GraphMultisetTransformer", {}),
 }
+
+
+def has_pyg_aggregation() -> bool:
+    """Return :obj:`True` if PyG aggregation modules are available."""
+    return _PyGAggregation is not None
+
+
+def is_pyg_aggregation(obj: Any) -> bool:
+    """Return :obj:`True` when :obj:`obj` is a PyG Aggregation instance."""
+    return _PyGAggregation is not None and isinstance(obj, _PyGAggregation)
+
+
+def resolve_reduce_op(
+    reduce_op: Union[str, Any],
+    **kwargs: Any,
+) -> Any:
+    r"""Resolve :obj:`reduce_op` to a PyG Aggregation instance.
+
+    Args:
+        reduce_op: Either a string alias accepted by :func:`get_aggr` or an
+            already-instantiated PyG Aggregation module.
+        **kwargs: Forwarded to :func:`get_aggr` when :obj:`reduce_op` is a
+            string.
+
+    Returns:
+        A PyG Aggregation instance.
+    """
+    if isinstance(reduce_op, str):
+        return get_aggr(reduce_op, **kwargs)
+    if is_pyg_aggregation(reduce_op):
+        return reduce_op
+    raise TypeError(
+        "reduce_op must be a string alias or a PyG Aggregation instance, "
+        f"got {type(reduce_op)}"
+    )
 
 
 def get_aggr(alias: str, **kwargs: Any) -> Any:

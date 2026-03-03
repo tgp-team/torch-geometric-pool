@@ -1,28 +1,27 @@
-import warnings
 from typing import Optional, Union
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
-from .aggr_reduce import AggrReduce, _apply_mask
-from .get_aggr import get_aggr
+from tgp.utils.ops import apply_dense_node_mask
 
-try:
-    from torch_geometric.nn.aggr import Aggregation as PyGAggregation
-except Exception:
-    PyGAggregation = None
+from .aggr_reduce import AggrReduce
+from .get_aggr import resolve_reduce_op
 
 
-def _is_pyg_aggregation(reduce_op) -> bool:
-    """Return True if reduce_op is a PyG Aggregation module."""
-    if PyGAggregation is None:
-        return False
-    return isinstance(reduce_op, nn.Module) and isinstance(reduce_op, PyGAggregation)
+def _validate_dense_mask(mask: Optional[Tensor], x: Tensor) -> None:
+    """Validate dense readout mask shape against :obj:`x`."""
+    if mask is None:
+        return
+    if mask.dim() != 2 or tuple(mask.shape) != tuple(x.shape[:2]):
+        raise ValueError(
+            "mask must have shape [B, N] matching x.shape[:2] for dense readout."
+        )
 
 
 def readout(
     x: Tensor,
-    reduce_op: Union[str, "PyGAggregation"] = "sum",
+    reduce_op: Union[str, object] = "sum",
     batch: Optional[Tensor] = None,
     size: Optional[int] = None,
     mask: Optional[Tensor] = None,
@@ -42,60 +41,42 @@ def readout(
         batch: Batch vector for sparse ``x``, shape ``[N]``. Ignored for dense.
         size: Number of graphs (for sparse). Optional.
         mask: Input-node validity mask for batched (dense) ``x`` only, shape ``[B, N]``.
+            Passing :obj:`mask` with sparse ``x`` or with a mismatched shape raises
+            :class:`ValueError`.
         **aggr_kwargs: Passed to :func:`~tgp.reduce.get_aggr` when ``reduce_op``
             is a string (e.g. ``in_channels``, ``out_channels``, ``processing_steps``).
 
     Returns:
         Tensor of shape ``[B, F]`` (or ``[1, F]`` for single graph sparse).
     """
-    if x.dim() != 2 and x.dim() != 3:
+    if x.dim() not in (2, 3):
         raise ValueError(
             f"readout expects x to be 2D [N, F] or 3D [B, N, F], got ndim={x.dim()}"
         )
 
-    # Mask is only meaningful for batched (dense) representations; warn and ignore otherwise.
-    if mask is not None:
-        if x.dim() == 2:
-            warnings.warn(
-                "mask is only supported for batched (dense) representations; ignoring "
-                "mask for 2D x (all nodes considered real/non-padded).",
-                UserWarning,
-                stacklevel=2,
-            )
-            mask = None
-        elif x.dim() == 3 and (mask.dim() != 2 or mask.shape != x.shape[:2]):
-            warnings.warn(
-                "mask must be 2D with shape [B, N] matching x.shape[:2]; ignoring "
-                "invalid mask (all nodes considered real/non-padded).",
-                UserWarning,
-                stacklevel=2,
-            )
-            mask = None
-
-    if isinstance(reduce_op, str):
-        aggr = get_aggr(reduce_op, **aggr_kwargs)
-    elif _is_pyg_aggregation(reduce_op):
-        aggr = reduce_op
-    else:
-        raise TypeError(
-            f"reduce_op must be a string or a PyG Aggregation, got {type(reduce_op)}"
-        )
-
+    aggr = resolve_reduce_op(reduce_op, **aggr_kwargs)
     reducer = AggrReduce(aggr)
     reducer.to(x.device)
 
-    # Dense masked readout: apply mask once here and delegate to sparse-style readout.
+    # Path 1: dense masked readout [B, N, F] + [B, N].
     if x.dim() == 3 and mask is not None:
-        x_valid, batch_valid = _apply_mask(x, mask)
+        _validate_dense_mask(mask, x)
+        x_valid, batch_valid = apply_dense_node_mask(x, mask)
         B = mask.size(0)
         x_pool, _ = reducer(x_valid, so=None, batch=batch_valid, size=B)
         return x_pool
 
-    # Unmasked or sparse-style paths.
-    batch_in = batch
-    if x.dim() == 2 and batch_in is None and x.size(0) > 0:
-        batch_in = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
-    size_in = size if x.dim() == 2 else x.size(0)
+    # Path 2: dense unmasked readout [B, N, F].
+    if x.dim() == 3:
+        x_pool, _ = reducer(x, so=None, batch=None, size=x.size(0))
+        return x_pool
 
-    x_pool, _ = reducer(x, so=None, batch=batch_in, size=size_in)
+    # Path 3: sparse-style readout [N, F] (+ optional batch vector).
+    if mask is not None:
+        raise ValueError("mask is only supported for dense x with shape [B, N, F].")
+
+    if batch is None and x.size(0) > 0:
+        batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+
+    x_pool, _ = reducer(x, so=None, batch=batch, size=size)
     return x_pool

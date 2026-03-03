@@ -5,7 +5,7 @@ from torch import Tensor, nn
 from torch_geometric.utils import scatter, unbatch
 
 from tgp.select import SelectOutput
-from tgp.utils.ops import build_pooled_batch
+from tgp.utils.ops import build_pooled_batch, is_multi_graph_batch
 
 
 class Reduce(nn.Module):
@@ -30,33 +30,27 @@ class Reduce(nn.Module):
             :class:`~torch.Tensor` or :obj:`None`: The pooled batch.
         """
         if batch is None:
-            return batch
+            return None
 
+        # Sparse assignment: each selected supernode inherits the graph id of
+        # the node that maps to it.
         if select_output.s.is_sparse:
             out = torch.arange(select_output.num_supernodes, device=batch.device)
             return out.scatter_(
                 0, select_output.cluster_index, batch[select_output.node_index]
             )
-        else:
-            # Dense [N, K] tensor with batch vector
-            # Each graph in the batch has K supernodes
-            K = select_output.num_supernodes
 
-            # Handle empty batch case
-            if batch.numel() == 0:
-                return batch.new_empty((0,), dtype=batch.dtype)
+        # Dense assignment: each graph contributes exactly K pooled nodes.
+        if batch.numel() == 0:
+            return batch.new_empty((0,), dtype=batch.dtype)
 
-            batch_size = int(batch.max().item()) + 1
-
-            # batch_pooled assigns each supernode to its graph:
-            # - Supernodes 0 to K-1 belong to graph 0
-            # - Supernodes K to 2K-1 belong to graph 1
-            # - etc.
-            batch_pooled = build_pooled_batch(
-                batch_size, K, batch.device, dtype=batch.dtype
-            )
-
-            return batch_pooled
+        batch_size = int(batch.max().item()) + 1
+        return build_pooled_batch(
+            batch_size,
+            select_output.num_supernodes,
+            batch.device,
+            dtype=batch.dtype,
+        )
 
     def reset_parameters(self):
         r"""Resets all learnable parameters of the module."""
@@ -102,9 +96,10 @@ class BaseReduce(Reduce):
     is processed separately (unbatch then per-graph matmul) for memory efficiency when
     using unbatched dense poolers (:obj:`batched=False`).
 
-    :obj:`return_batched` is only used in the unbatched (sparse) path when returning
-    multi-graph results; in the dense path it is ignored and output shape follows
-    input (dense in :math:`\Rightarrow` dense out).
+    For dense unbatched assignments :math:`[N, K]` with multi-graph batches,
+    :obj:`return_batched=True` returns :math:`[B, K, F]`; otherwise
+    :math:`[B \cdot K, F]`. For dense batched assignments :math:`[B, N, K]`,
+    output is always :math:`[B, K, F]`.
     """
 
     def __init__(self):
@@ -131,23 +126,24 @@ class BaseReduce(Reduce):
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)
             return_batched (bool, optional):
-                Only used in the **unbatched (sparse) path** for multi-graph batches with
-                dense :math:`[N, K]` assignment. If :obj:`True`, returns shape :math:`[B, K, F]`;
-                otherwise :math:`[B \cdot K, F]`. Ignored in the dense path (dense in
-                :math:`\Rightarrow` dense out). (default: :obj:`False`)
+                For dense unbatched :math:`[N, K]` assignments with multi-graph
+                batches, controls output shape:
+                :obj:`True` gives :math:`[B, K, F]`, :obj:`False` gives
+                :math:`[B \cdot K, F]`. For single-graph :math:`[N, K]`,
+                :obj:`True` wraps output as :math:`[1, K, F]`.
+                (default: :obj:`False`)
         """
-        if batch is None and hasattr(so, "batch") and so.batch is not None:
+        if batch is None and so.batch is not None:
             batch = so.batch
 
+        # Path 1: sparse assignment matrix (edge list style). Aggregate selected
+        # node features into supernodes via scatter.
         if so.s.is_sparse:
             if return_batched:
                 raise ValueError(
                     "return_batched=True is only supported for dense assignment matrices."
                 )
-            src = x[so.node_index]
-            values = so.s.values()
-            if values is not None:
-                src = src * values.view(-1, 1)
+            src = x[so.node_index] * so.weight.view(-1, 1)
             x_pool = scatter(
                 src,
                 so.cluster_index,
@@ -155,38 +151,40 @@ class BaseReduce(Reduce):
                 dim_size=so.num_supernodes,
                 reduce="sum",
             )
-        else:
-            # Dense assignment: S^T @ x
-            if so.s.dim() == 3:
-                # Dense [B, N, K] tensor (standard dense pooler format)
-                x_pool = so.s.transpose(-2, -1).matmul(x)
-            elif batch is not None and batch.numel() > 0:
-                # Check if multi-graph batch
-                batch_min = int(batch.min().item())
-                batch_max = int(batch.max().item())
-                if batch_min != batch_max:
-                    # Multi-graph batch with dense [N, K] tensor
-                    # Process each graph separately and concatenate or stack
-                    unbatched_s = unbatch(so.s, batch)  # list of [N_i, K] tensors
-                    unbatched_x = unbatch(x, batch)  # list of [N_i, F] tensors
+            batch_pool = self.reduce_batch(so, batch)
+            return x_pool, batch_pool
 
-                    x_pool_list = []
-                    for s_i, x_i in zip(unbatched_s, unbatched_x):
-                        # x_pool_i = S_i^T @ X_i: [K, N_i] @ [N_i, F] = [K, F]
-                        x_pool_i = s_i.t().matmul(x_i)
-                        x_pool_list.append(x_pool_i)
-                    if return_batched:
-                        x_pool = torch.stack(x_pool_list, dim=0)  # [B, K, F]
-                    else:
-                        x_pool = torch.cat(x_pool_list, dim=0)  # [B*K, F]
-                else:
-                    # Single-graph batch: simple matmul
-                    x_pool = so.s.transpose(-2, -1).matmul(x)
-            else:
-                # Single graph without batch: simple matmul
-                x_pool = so.s.transpose(-2, -1).matmul(x)
-            if return_batched and x_pool.dim() == 2:
-                x_pool = x_pool.unsqueeze(0)
+        # Path 2: dense batched assignment [B, N, K] and dense features [B, N, F].
+        if so.s.dim() == 3:
+            x_pool = so.s.transpose(-2, -1).matmul(x)  # [B, K, F]
+            batch_pool = self.reduce_batch(so, batch)
+            return x_pool, batch_pool
+
+        if so.s.dim() != 2:
+            raise ValueError(
+                "Dense SelectOutput.s must be 2D [N, K] or 3D [B, N, K], "
+                f"got ndim={so.s.dim()}."
+            )
+
+        # Path 3: dense unbatched assignment [N, K] with multi-graph batch.
+        if is_multi_graph_batch(batch):
+            unbatched_s = unbatch(so.s, batch)  # list of [N_i, K]
+            unbatched_x = unbatch(x, batch)  # list of [N_i, F]
+            x_pool_per_graph = [
+                s_i.t().matmul(x_i) for s_i, x_i in zip(unbatched_s, unbatched_x)
+            ]
+            x_pool = (
+                torch.stack(x_pool_per_graph, dim=0)
+                if return_batched
+                else torch.cat(x_pool_per_graph, dim=0)
+            )
+            batch_pool = self.reduce_batch(so, batch)
+            return x_pool, batch_pool
+
+        # Path 4: dense unbatched assignment [N, K] for a single graph.
+        x_pool = so.s.transpose(-2, -1).matmul(x)  # [K, F]
+        if return_batched:
+            x_pool = x_pool.unsqueeze(0)  # [1, K, F]
 
         batch_pool = self.reduce_batch(so, batch)
         return x_pool, batch_pool

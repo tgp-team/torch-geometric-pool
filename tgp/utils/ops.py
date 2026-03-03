@@ -82,6 +82,7 @@ def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
     return edge_index, edge_weight
 
 
+# TODO: mask out entries with value < eps? maybe useful in bnpool and in general to filter out weak assignments
 def get_mask_from_dense_s(
     s: Tensor,
     batch: Optional[Tensor] = None,
@@ -166,6 +167,40 @@ def build_pooled_batch(
     return torch.arange(batch_size, dtype=dtype, device=device).repeat_interleave(
         num_supernodes
     )
+
+
+def apply_dense_node_mask(
+    x: Tensor,
+    mask: Tensor,
+) -> Tuple[Tensor, Tensor]:
+    r"""Flatten dense node features and keep only valid rows from :obj:`mask`.
+
+    Args:
+        x (~torch.Tensor): Dense node features of shape ``[B, N, F]``.
+        mask (~torch.Tensor): Boolean validity mask of shape ``[B, N]``.
+
+    Returns:
+        tuple:
+            - **x_valid** (*~torch.Tensor*): Valid rows from ``x`` with shape
+              ``[N_valid, F]``.
+            - **batch_valid** (*~torch.Tensor*): Graph ids for each valid row
+              with shape ``[N_valid]``.
+    """
+    if x.dim() != 3:
+        raise ValueError(
+            f"apply_dense_node_mask expects x to be 3D [B, N, F], got ndim={x.dim()}"
+        )
+    if mask.dim() != 2 or tuple(mask.shape) != tuple(x.shape[:2]):
+        raise ValueError(
+            "apply_dense_node_mask expects mask shape "
+            f"[B, N]={tuple(x.shape[:2])}, got {tuple(mask.shape)}"
+        )
+
+    B, N, F = x.shape
+    valid = mask.reshape(-1).nonzero(as_tuple=True)[0]
+    x_flat = x.reshape(B * N, F)
+    batch_flat = torch.arange(B, device=x.device, dtype=torch.long).repeat_interleave(N)
+    return x_flat[valid], batch_flat[valid]
 
 
 def expand_compacted_rows(
