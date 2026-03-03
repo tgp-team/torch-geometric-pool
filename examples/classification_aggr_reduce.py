@@ -20,7 +20,7 @@ from tgp.reduce import AggrReduce, get_aggr, readout
 seed_everything(8)
 
 # Poolers and aggregators to try
-POOLER_NAMES = ["topk", "lap", "mincut", "graclus"]
+POOLER_NAMES = ["topk", "graclus"]
 AGGR_NAMES = ["sum", "mean", "lstm", "set2set"]
 
 
