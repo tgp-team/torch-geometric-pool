@@ -100,10 +100,10 @@ class EigenPoolLift(Lift):
                 Batch vector for pooled nodes in multi-graph lifting.
                 (default: :obj:`None`)
             edge_index (~torch.Tensor, optional):
-                Unused for EigenPooling; kept for API compatibility.
+                Unused by EigenPooling.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional):
-                Unused for EigenPooling; kept for API compatibility.
+                Unused by EigenPooling.
                 (default: :obj:`None`)
 
         Returns:

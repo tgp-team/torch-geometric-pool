@@ -2,6 +2,7 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
+from tgp.data import PooledBatch
 from tgp.select.base_select import Select, SelectOutput, cluster_to_s
 from tgp.utils.ops import get_mask_from_dense_s
 
@@ -140,14 +141,16 @@ def test_selectoutput_apply_updates_extra_tensor_args():
 
 def test_data_to_moves_selectoutput_extra_tensors_in_nested_pooled_data():
     root_so = SelectOutput(
-        s=torch.eye(2),
+        s=torch.eye(2).unsqueeze(0),
         theta=torch.ones(2, 2),
         theta_list=[torch.zeros(2, 2)],
+        in_mask=torch.tensor([[True, False]], dtype=torch.bool),
     )
     pooled_so = SelectOutput(
-        s=torch.eye(2),
+        s=torch.eye(2).unsqueeze(0),
         theta=torch.ones(2, 2),
         theta_list=[torch.zeros(2, 2)],
+        in_mask=torch.tensor([[True, True]], dtype=torch.bool),
     )
     data = Data(so=root_so, pooled_data=[Data(so=pooled_so)])
 
@@ -156,9 +159,56 @@ def test_data_to_moves_selectoutput_extra_tensors_in_nested_pooled_data():
     assert data.so.s.device.type == "meta"
     assert data.so.theta.device.type == "meta"
     assert data.so.theta_list[0].device.type == "meta"
+    assert data.so.in_mask.device.type == "meta"
     assert data.pooled_data[0].so.s.device.type == "meta"
     assert data.pooled_data[0].so.theta.device.type == "meta"
     assert data.pooled_data[0].so.theta_list[0].device.type == "meta"
+    assert data.pooled_data[0].so.in_mask.device.type == "meta"
+
+
+def test_selectoutput_to_moves_batch_and_in_mask():
+    so = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        batch=torch.tensor([0], dtype=torch.long),
+        in_mask=torch.tensor([[True, True, False]], dtype=torch.bool),
+    )
+
+    so_meta = so.clone().to("meta")
+    assert so_meta.s.device.type == "meta"
+    assert so_meta.batch.device.type == "meta"
+    assert so_meta.in_mask.device.type == "meta"
+
+
+def test_selectoutput_collate_and_separate_preserve_in_mask():
+    so_1 = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        in_mask=torch.tensor([[True, True, False]], dtype=torch.bool),
+    )
+    so_2 = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        in_mask=torch.tensor([[True, False, False]], dtype=torch.bool),
+    )
+
+    batch = PooledBatch.from_data_list([Data(so=so_1), Data(so=so_2)])
+    assert batch.so.in_mask.shape == (2, 3)
+    assert torch.equal(batch.so.in_mask[0], so_1.in_mask[0])
+    assert torch.equal(batch.so.in_mask[1], so_2.in_mask[0])
+
+    separated_0 = batch.get_example(0)
+    separated_1 = batch.get_example(1)
+    assert torch.equal(separated_0.so.in_mask, so_1.in_mask)
+    assert torch.equal(separated_1.so.in_mask, so_2.in_mask)
+
+
+def test_selectoutput_collate_rejects_partial_in_mask():
+    so_with_mask = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        in_mask=torch.tensor([[True, True, False]], dtype=torch.bool),
+    )
+    so_without_mask = SelectOutput(s=torch.eye(3).unsqueeze(0))
+
+    with pytest.raises(ValueError, match="different extra attributes"):
+        PooledBatch.from_data_list([Data(so=so_with_mask), Data(so=so_without_mask)])
 
 
 def test_selectoutput_in_mask_must_be_2d():
@@ -172,6 +222,18 @@ def test_selectoutput_in_mask_must_be_2d():
         in_mask=torch.ones(2, 4, dtype=torch.bool),
     )
     assert so.in_mask.shape == (2, 4)
+
+
+def test_selectoutput_in_mask_requires_batched_dense_s():
+    s = torch.eye(4)
+    with pytest.raises(ValueError, match="only supported for batched dense"):
+        SelectOutput(s=s, in_mask=torch.ones(1, 4, dtype=torch.bool))
+
+
+def test_selectoutput_in_mask_shape_must_match_s():
+    s = torch.eye(4).unsqueeze(0).expand(2, 4, 4)
+    with pytest.raises(ValueError, match="must have shape"):
+        SelectOutput(s=s, in_mask=torch.ones(2, 5, dtype=torch.bool))
 
 
 def test_selectoutput_out_mask_2d_dense_with_batch():

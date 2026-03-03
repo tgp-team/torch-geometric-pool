@@ -90,10 +90,10 @@ class EigenPoolReduce(Reduce):
                 method uses :obj:`so.batch` when available.
                 (default: :obj:`None`)
             edge_index (~torch.Tensor, optional):
-                Unused for EigenPooling; kept for API compatibility.
+                Unused by EigenPooling.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional):
-                Unused for EigenPooling; kept for API compatibility.
+                Unused by EigenPooling.
                 (default: :obj:`None`)
             return_batched (bool, optional):
                 Only used for multi-graph batches. If :obj:`True`, returns

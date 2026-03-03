@@ -260,8 +260,10 @@ class BNPool(DenseSRCPooling):
                 (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
-            mask (~torch.Tensor, optional): Optional boolean mask indicating valid nodes
-                in each graph. Only used when inputs are already dense/padded.
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}`, where :obj:`True`
+                marks real (non-padded) nodes. Only used when inputs are already
+                dense/padded.
                 (default: :obj:`None`)
 
         Returns:
@@ -365,8 +367,8 @@ class BNPool(DenseSRCPooling):
 
         Args:
             adj (~torch.Tensor): True adjacency matrix of shape :math:`(B, N, N)` to reconstruct.
-            mask (~torch.Tensor): Boolean node mask of shape :math:`(B, N)` indicating valid nodes.
-                Used to handle variable-sized graphs within batches.
+            mask (~torch.Tensor): Input-node validity mask of shape :math:`(B, N)`,
+                where :obj:`True` marks real (non-padded) nodes.
             so (:class:`~tgp.select.SelectOutput`): Selection output containing:
                 - :attr:`s`: Soft assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
                 - :attr:`q_z`: Posterior Beta distributions for stick-breaking variables

@@ -13,7 +13,7 @@ from tgp.utils.ops import check_and_filter_edge_weights
 
 # Batched losses expect a correctly assembled S tensor: padded positions (e.g. for
 # variable-sized graphs in a batch) should have zero rows, as produced by the select
-# step (e.g. MLPSelect applies the node mask so that S has zeros at padded nodes).
+# step (e.g. MLPSelect applies the input-node validity mask so S is zero on padded rows).
 BatchReductionType = Literal["mean", "sum"]
 
 
@@ -520,9 +520,9 @@ def hosc_orthogonality_loss(
         S (~torch.Tensor): The dense cluster assignment matrix of shape
             :math:`(B, N, K)`, where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
-        mask (Optional[~torch.Tensor]): A mask matrix
-            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-            the valid nodes for each graph. (default: :obj:`None`)
+        mask (Optional[~torch.Tensor]): Input-node validity mask
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+            :obj:`True` on real (non-padded) nodes. (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
             (default: :obj:`"mean"`)
@@ -868,8 +868,9 @@ def asym_norm_loss(
         k (int): The number of clusters (:math:`K`). This is used
             internally to set :math:`\rho = K - 1` if no other
             value of :math:`\rho` is explicitly chosen.
-        mask (Optional[~torch.Tensor]): A mask matrix of shape :math:`(B, N)` with
-            :obj:`True` for valid nodes. If :obj:`None`, all nodes are used.
+        mask (Optional[~torch.Tensor]): Input-node validity mask of shape
+            :math:`(B, N)` with :obj:`True` for real (non-padded) nodes.
+            If :obj:`None`, all nodes are used.
             (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be :obj:`'mean'` or :obj:`'sum'`.
@@ -944,9 +945,9 @@ def just_balance_loss(
         S (~torch.Tensor): The dense cluster assignment matrix of shape
             :math:`(B, N, K)`, where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
-        mask (Optional[~torch.Tensor]): A mask matrix
-            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-            the valid nodes for each graph. (default: :obj:`None`)
+        mask (Optional[~torch.Tensor]): Input-node validity mask
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+            :obj:`True` on real (non-padded) nodes. (default: :obj:`None`)
         normalize_loss (bool, optional): If set to :obj:`True`, the loss is
             normalized by the number of nodes :math:`N` and the number of clusters :math:`K`.
             (default: :obj:`True`)
@@ -1020,9 +1021,9 @@ def spectral_loss(
             :math:`(B, N, K)`, where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
         adj_pooled (~torch.Tensor): The pooled adjacency matrix.
-        mask (Optional[~torch.Tensor]): A mask matrix
-            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-            the valid nodes for each graph. (default: :obj:`None`)
+        mask (Optional[~torch.Tensor]): Input-node validity mask
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+            :obj:`True` on real (non-padded) nodes. (default: :obj:`None`)
         num_supernodes (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
@@ -1150,9 +1151,9 @@ def cluster_loss(
         S (~torch.Tensor): The dense cluster assignment matrix of shape
             :math:`(B, N, K)`, where :math:`B` is the batch size,
             :math:`N` is the number of nodes, and :math:`K` is the number of clusters.
-        mask (Optional[~torch.Tensor]): A mask matrix
-            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-            the valid nodes for each graph. (default: :obj:`None`)
+        mask (Optional[~torch.Tensor]): Input-node validity mask
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+            :obj:`True` on real (non-padded) nodes. (default: :obj:`None`)
         num_supernodes (Optional[int]): The number of clusters in the graph. If not provided,
             it is inferred from the shape of :math:`\mathbf{S}`. (default: :obj:`None`)
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
@@ -1214,9 +1215,9 @@ def weighted_bce_reconstruction_loss(
             :math:`(B, N, N)`, where :math:`B` is the batch size and :math:`N` is
             the number of nodes. Contains the predicted edge probabilities.
         adj (~torch.Tensor): The true adjacency matrix of shape :math:`(B, N, N)`.
-        mask (Optional[~torch.Tensor]): A mask matrix
-            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-            the valid nodes for each graph. (default: :obj:`None`)
+        mask (Optional[~torch.Tensor]): Input-node validity mask
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+            :obj:`True` on real (non-padded) nodes. (default: :obj:`None`)
         balance_links (bool, optional): Whether to apply class-balancing weights to handle
             edge/non-edge imbalance.
             (default: :obj:`True`)
@@ -1292,9 +1293,9 @@ def kl_loss(
     Args:
         q (~torch.distributions.Distribution): The approximate posterior distribution.
         p (~torch.distributions.Distribution): The prior distribution.
-        mask (Optional[~torch.Tensor]): A mask matrix
-            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-            the valid nodes for each graph. (default: :obj:`None`)
+        mask (Optional[~torch.Tensor]): Input-node validity mask
+            :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+            :obj:`True` on real (non-padded) nodes. (default: :obj:`None`)
         batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
                 to which graph in the batch each node belongs. (default: :obj:`None`)

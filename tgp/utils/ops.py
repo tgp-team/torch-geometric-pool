@@ -86,38 +86,44 @@ def get_mask_from_dense_s(
     s: Tensor,
     batch: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Build a dense boolean mask of shape :math:`[B, K]` indicating which
-    supernodes have at least one assigned node.
+    r"""Build a pooled-supernode validity mask from a dense assignment matrix.
 
-    Use this when returning a dense :class:`~tgp.src.PoolingOutput`
-    (e.g. :obj:`sparse_output=False`) so that downstream layers and global
-    pooling can ignore padding. Works for both batched and unbatched paths,
-    and for both dense and sparse assignment matrices :obj:`s`.
+    The returned mask has shape :math:`[B, K]`, where each entry is :obj:`True`
+    iff supernode :math:`k` has at least one assigned input node in graph :math:`b`.
+
+    This helper supports both dense assignment layouts:
+    - :math:`s \in \mathbb{R}^{B \times N \times K}` (batched dense path).
+    - :math:`s \in \mathbb{R}^{N \times K}` with optional :obj:`batch`:
+      - if :obj:`batch` is provided, :math:`N` may contain nodes from multiple graphs;
+      - if :obj:`batch` is :obj:`None`, it is treated as a single graph and the
+        output has shape :math:`[1, K]`.
 
     Args:
-        s (~torch.Tensor): Assignment matrix of shape :math:`[N, K]` or :math:`[B, N, K]`.
-        batch: Batch vector of shape :math:`[N]` when multiple graphs are
-            present (unbatched path with batch). If :obj:`None`, returns
-            mask of shape :math:`[1, K]`.
+        s (~torch.Tensor): Dense assignment tensor of shape :math:`[N, K]` or
+            :math:`[B, N, K]`.
+        batch (~torch.Tensor, optional): Node-to-graph assignment of shape
+            :math:`[N]` for the 2D case.
 
     Returns:
-        Boolean tensor of shape :math:`[B, K]` with :math:`B=1` when
-        :obj:`batch` is :obj:`None`.
+        ~torch.Tensor: Boolean validity mask of shape :math:`[B, K]`.
     """
-    K = s.size(-1)
+    num_supernodes = s.size(-1)
     device = s.device
 
     assert not s.is_sparse, "s must be a dense tensor"
+    if s.dim() not in (2, 3):
+        raise ValueError(f"s must have shape [N, K] or [B, N, K], got ndim={s.dim()}")
+
     # Dense S: [N, K] or [B, N, K]
     if s.dim() == 3:
         mask = s.sum(dim=-2) > 0
         return mask
-    # 2D [N, K]: single graph (batch None) or multi-graph (batch provided)
+    # 2D [N, K]: single graph (batch None) or multi-graph sparse-batch (batch provided)
     if batch is None:
         mask = (s.sum(dim=-2) > 0).unsqueeze(0)
         return mask
     batch_size = int(batch.max().item()) + 1
-    mask = torch.zeros(batch_size, K, dtype=torch.bool, device=device)
+    mask = torch.zeros(batch_size, num_supernodes, dtype=torch.bool, device=device)
     for b in range(batch_size):
         node_mask = batch == b
         if node_mask.any():

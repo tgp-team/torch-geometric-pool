@@ -186,7 +186,8 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
             so (~tgp.select.SelectOutput, optional):
                 Pre-computed selection output. (default: :obj:`None`)
             mask (~torch.Tensor, optional):
-                Unused, kept for API compatibility. (default: :obj:`None`)
+                Unused input-node validity mask.
+                (default: :obj:`None`)
             batch (~torch.Tensor, optional):
                 Batch vector for sparse multi-graph inputs. (default: :obj:`None`)
             batch_pooled (~torch.Tensor, optional):

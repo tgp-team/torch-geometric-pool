@@ -41,7 +41,7 @@ def readout(
             Strings are resolved via :func:`~tgp.reduce.get_aggr`.
         batch: Batch vector for sparse ``x``, shape ``[N]``. Ignored for dense.
         size: Number of graphs (for sparse). Optional.
-        mask: Valid-node mask for batched (dense) ``x`` only, shape ``[B, N]``.
+        mask: Input-node validity mask for batched (dense) ``x`` only, shape ``[B, N]``.
         **aggr_kwargs: Passed to :func:`~tgp.reduce.get_aggr` when ``reduce_op``
             is a string (e.g. ``in_channels``, ``out_channels``, ``processing_steps``).
 
@@ -58,7 +58,7 @@ def readout(
         if x.dim() == 2:
             warnings.warn(
                 "mask is only supported for batched (dense) representations; ignoring "
-                "mask for 2D x (all nodes considered valid).",
+                "mask for 2D x (all nodes considered real/non-padded).",
                 UserWarning,
                 stacklevel=2,
             )
@@ -66,7 +66,7 @@ def readout(
         elif x.dim() == 3 and (mask.dim() != 2 or mask.shape != x.shape[:2]):
             warnings.warn(
                 "mask must be 2D with shape [B, N] matching x.shape[:2]; ignoring "
-                "invalid mask (all nodes considered valid).",
+                "invalid mask (all nodes considered real/non-padded).",
                 UserWarning,
                 stacklevel=2,
             )

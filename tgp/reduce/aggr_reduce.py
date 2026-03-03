@@ -25,7 +25,7 @@ def _apply_mask(
     x: Tensor,
     mask: Tensor,
 ) -> Tuple[Tensor, Tensor]:
-    r"""Apply a node mask to dense inputs.
+    r"""Apply an input-node validity mask to dense inputs.
 
     Assumes:
         - :obj:`x` has shape ``[B, N, F]``
@@ -148,7 +148,7 @@ class AggrReduce(Reduce):
 
                 in_mask = getattr(so, "in_mask", None)
                 if in_mask is not None:
-                    # Use shared helper to restrict x to valid nodes.
+                    # Use shared helper to restrict x to real (non-padded) nodes.
                     x_flat, batch_flat = _apply_mask(x, in_mask)
                     # Rebuild cluster indices on the same valid positions.
                     cluster_flat = cluster.reshape(-1)
@@ -230,7 +230,7 @@ class AggrReduce(Reduce):
                     num_supernodes = size if size is not None else inferred
                 else:
                     # Preserve explicit graph cardinality (dim_size) even when
-                    # there are no valid nodes (e.g. dense readout with all-false mask).
+                    # there are no real nodes (e.g. dense readout with all-false mask).
                     num_supernodes = size if size is not None else 1
             else:
                 cluster_index = torch.zeros(

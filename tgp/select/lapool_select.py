@@ -162,9 +162,9 @@ class LaPoolSelect(Select):
                 to which graph in the batch each node belongs.
                 (default: :obj:`None`)
             mask (~torch.Tensor, optional):
-                Mask matrix :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph (batched mode only).
-                (default: :obj:`None`)
+                Input-node validity mask :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}`
+                with :obj:`True` on real (non-padded) nodes in each graph
+                (batched mode only). (default: :obj:`None`)
             num_nodes (int, optional):
                 The total number of nodes of the graphs in the batch.
                 (default: :obj:`None`)

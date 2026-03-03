@@ -438,7 +438,7 @@ class EigenPoolSelect(Select):
 
         Args:
             x (~torch.Tensor, optional):
-                Node features (unused; kept for API compatibility). (default: :obj:`None`)
+                Node features (unused by EigenPooling). (default: :obj:`None`)
             edge_index (~torch_geometric.typing.Adj, optional):
                 Graph connectivity.
             edge_weight (~torch.Tensor, optional):

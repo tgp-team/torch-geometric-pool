@@ -27,8 +27,9 @@ class PoolingOutput:
             graph. (default: :obj:`None`)
         batch (~torch.Tensor, optional): The batch vector of the pooled nodes.
         so (:class:`~tgp.select.SelectOutput`): The selection output. (default: :obj:`None`)
-        mask: Derived from :obj:`so.out_mask` when :obj:`so` is set (valid supernodes
-            :math:`[B, K]` for batched dense); :obj:`None` otherwise.
+        mask: Derived from :obj:`so.out_mask` when :obj:`so` is set.
+            This is a pooled-supernode validity mask of shape :math:`[B, K]`
+            (or :math:`[1, K]` for single-graph dense assignments).
         loss (Optional[Dict], optional): The loss dictionary. (default: :obj:`None`)
     """
 
@@ -41,7 +42,7 @@ class PoolingOutput:
 
     @property
     def mask(self) -> Optional[Tensor]:
-        """Mask on pooled nodes [B, K], derived from so.out_mask. None when so is None."""
+        """Pooled-supernode validity mask, derived from :obj:`so.out_mask`."""
         return self.so.out_mask if self.so is not None else None
 
     def __repr__(self) -> str:
@@ -315,8 +316,8 @@ class DenseSRCPooling(SRCPooling):
     sparse representation into a batch of dense graphs.
     When :attr:`batched=True`, dense poolers accept either raw sparse inputs
     (which are converted internally) or already-dense padded tensors. In the
-    latter case, an external boolean mask can be provided to mark valid nodes;
-    otherwise a full-ones mask is assumed.
+    latter case, an external input-node validity mask can be provided to mark
+    real (non-padded) nodes; otherwise a full-ones mask is assumed.
 
     Args:
         selector (:class:`~tgp.select.Select`): The *dense* :math:`\texttt{select}` operator.
@@ -423,8 +424,8 @@ class DenseSRCPooling(SRCPooling):
             of the largest graph in the batch.
             :obj:`adj` is the tensor of shape :math:`[B, N_\text{max}, N_\text{max}]`
             containing the batched and dense adjacency matrices.
-            :obj:`mask` is the tensor of shape :math:`[B, N_\text{max}, F]`
-            indicating which nodes in the batch are valid or padded.
+            :obj:`mask` is the tensor of shape :math:`[B, N_\text{max}]`
+            indicating which nodes in the batch are real or padded.
         """
         if use_cache and self.preprocessing_cache is not None:
             adj = self.preprocessing_cache
@@ -510,33 +511,33 @@ class DenseSRCPooling(SRCPooling):
     ) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor]]:
         """Convert batched dense outputs to block-diagonal sparse representation.
 
-        Uses :obj:`so.out_mask` when available (shape :math:`[B, K]`) so only valid
-        supernodes and edges between them are included. When :obj:`so.out_mask` is
-        None, all nodes are kept.
+        Uses :obj:`so.out_mask` when available so only valid supernodes and
+        edges between them are included. When :obj:`so.out_mask` is :obj:`None`,
+        all pooled nodes are kept.
         """
         B, K = adj_pool.size(0), adj_pool.size(1)
         x_flat = x_pool.reshape(-1, x_pool.size(-1))
-        mask = so.out_mask
+        out_mask = so.out_mask
 
         if batch_pooled is None and batch is not None:
             batch_pooled = self.reducer.reduce_batch(so, batch)
         if batch_pooled is None and B > 1:
             batch_pooled = torch.arange(B, device=x_pool.device).repeat_interleave(K)
-        if batch_pooled is None and mask is not None:
+        if batch_pooled is None and out_mask is not None:
             # Single graph, no batch, dense path
             batch_pooled = torch.zeros(B * K, dtype=torch.long, device=x_pool.device)
 
-        if mask is not None:
-            mask_flat = mask.reshape(-1)
-            valid_indices = mask_flat.nonzero(as_tuple=True)[0]
+        if out_mask is not None:
+            valid_flat = out_mask.reshape(-1)
+            valid_indices = valid_flat.nonzero(as_tuple=True)[0]
             num_valid = valid_indices.size(0)
             x_pool = x_flat[valid_indices]
-            batch_pooled = batch_pooled[mask_flat]
+            batch_pooled = batch_pooled[valid_flat]
             # Zero out edges at padded positions so dense_to_block_diag only sees valid edges
             adj_masked = (
                 adj_pool
-                * mask.unsqueeze(-1).to(adj_pool.dtype)
-                * mask.unsqueeze(-2).to(adj_pool.dtype)
+                * out_mask.unsqueeze(-1).to(adj_pool.dtype)
+                * out_mask.unsqueeze(-2).to(adj_pool.dtype)
             )
             edge_index, edge_weight = dense_to_block_diag(adj_masked)
             # Remap node indices from [0 .. B*K-1] to compact [0 .. num_valid-1]

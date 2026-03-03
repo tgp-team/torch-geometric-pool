@@ -147,8 +147,10 @@ class LaPooling(DenseSRCPooling):
                 batches. Pass `out.batch` from the pooling call. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
-            mask (~torch.Tensor, optional): Optional boolean mask indicating valid nodes
-                in each graph. Only used when inputs are already dense/padded.
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}`, where :obj:`True`
+                marks real (non-padded) nodes. Only used when inputs are already
+                dense/padded.
                 (default: :obj:`None`)
 
         Returns:
