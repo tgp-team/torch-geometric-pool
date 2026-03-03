@@ -81,14 +81,13 @@ class AggrReduce(Reduce):
         return_batched: bool = False,
         **kwargs,
     ) -> Tuple[Tensor, Optional[Tensor]]:
-        # Path 0: readout mode (`so=None`) creates one supernode per graph.
-        # Used, e.g., by readout to perform global pooling.
+        # Path 0: readout mode (`so=None`) aggregates directly to one output per graph.
         if so is None:
-            so = self._one_supernode_per_graph_so(x, batch=batch, size=size)
-            # Dense [B, N, F] readout is handled as flattened sparse-style input.
-            if x.dim() == 3:
-                x = x.reshape(-1, x.size(-1))
-                batch = so.cluster_index
+            if return_batched:
+                raise ValueError(
+                    "return_batched=True is only supported for dense assignment matrices."
+                )
+            return self._readout_without_select_output(x, batch=batch, size=size)
 
         if batch is None and so.batch is not None:
             batch = so.batch
@@ -170,51 +169,56 @@ class AggrReduce(Reduce):
         batch_pool = self.reduce_batch(so, batch)
         return x_pool, batch_pool
 
-    def _one_supernode_per_graph_so(
+    def _readout_without_select_output(
         self,
         x: Tensor,
         *,
         batch: Optional[Tensor] = None,
         size: Optional[int] = None,
-    ) -> SelectOutput:
-        r"""Build readout assignments with one pooled supernode per input graph.
-
-        This utility is used when :obj:`so=None` in :meth:`forward`, i.e., pure
-        graph-level readout without an explicit :class:`~tgp.select.SelectOutput`.
-        It creates a sparse assignment where all nodes of graph :math:`b` map to
-        pooled supernode :math:`b`.
-
-        Note:
-            The returned :class:`~tgp.select.SelectOutput` uses the field name
-            :obj:`cluster_index` by API convention; each value is the target
-            supernode id.
-        """
+    ) -> Tuple[Tensor, Optional[Tensor]]:
+        r"""Readout fast-path for :obj:`so=None` (one pooled supernode per graph)."""
         if x.dim() == 3:
             B, N, _ = x.shape
-            num_nodes = B * N
             cluster_index = build_pooled_batch(B, N, x.device)
             num_supernodes = size if size is not None else B
-        else:
-            num_nodes = x.size(0)
-            if batch is not None:
-                cluster_index = batch
-                if batch.numel() > 0:
-                    inferred = int(batch.max().item()) + 1
-                    num_supernodes = size if size is not None else inferred
-                else:
-                    # Preserve explicit graph cardinality (dim_size) even when
-                    # there are no real nodes (e.g. dense readout with all-false mask).
-                    num_supernodes = size if size is not None else 1
+            x_flat = x.reshape(-1, x.size(-1))
+            x_pool = _aggregate_sorted(
+                self.aggr,
+                x_flat,
+                cluster_index,
+                dim_size=num_supernodes,
+            )
+            batch_pool = torch.arange(num_supernodes, device=x.device)
+            return x_pool, batch_pool
+
+        if x.dim() != 2:
+            raise ValueError(
+                "Readout mode expects x to be 2D [N, F] or 3D [B, N, F], "
+                f"got ndim={x.dim()}."
+            )
+
+        if batch is not None:
+            cluster_index = batch
+            if batch.numel() > 0:
+                inferred = int(batch.max().item()) + 1
+                num_supernodes = size if size is not None else inferred
             else:
-                cluster_index = torch.zeros(
-                    num_nodes, dtype=torch.long, device=x.device
-                )
-                num_supernodes = 1
-        return SelectOutput(
-            cluster_index=cluster_index,
-            num_nodes=num_nodes,
-            num_supernodes=num_supernodes,
-        )
+                # Preserve explicit graph cardinality (dim_size) even when there
+                # are no real nodes (e.g. dense readout with all-false mask).
+                num_supernodes = size if size is not None else 1
+            x_pool = _aggregate_sorted(
+                self.aggr,
+                x,
+                cluster_index,
+                dim_size=num_supernodes,
+            )
+            batch_pool = torch.arange(num_supernodes, device=batch.device)
+            return x_pool, batch_pool
+
+        num_nodes = x.size(0)
+        cluster_index = torch.zeros(num_nodes, dtype=torch.long, device=x.device)
+        x_pool = _aggregate_sorted(self.aggr, x, cluster_index, dim_size=1)
+        return x_pool, None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(aggr={self.aggr})"
