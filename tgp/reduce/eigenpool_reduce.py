@@ -6,6 +6,7 @@ from torch_geometric.utils import unbatch
 
 from tgp.reduce.base_reduce import Reduce
 from tgp.select import SelectOutput
+from tgp.utils.ops import is_multi_graph_batch
 from tgp.utils.typing import ReduceType
 
 
@@ -111,11 +112,7 @@ class EigenPoolReduce(Reduce):
         num_clusters = so.s.size(-1)
         theta = so.theta
 
-        is_multi_graph = (
-            batch is not None
-            and batch.numel() > 0
-            and int(batch.min().item()) != int(batch.max().item())
-        )
+        is_multi_graph = is_multi_graph_batch(batch)
 
         # Single graph case: directly pool with theta and reshape
         if not is_multi_graph:

@@ -6,6 +6,7 @@ from torch_geometric.utils import unbatch
 
 from tgp.lift.base_lift import Lift
 from tgp.select import SelectOutput
+from tgp.utils.ops import build_pooled_batch, is_multi_graph_batch
 from tgp.utils.typing import ReduceType
 
 
@@ -116,11 +117,7 @@ class EigenPoolLift(Lift):
         num_clusters = so.s.size(-1)
         theta = so.theta
 
-        is_multi_graph = (
-            batch is not None
-            and batch.numel() > 0
-            and int(batch.min().item()) != int(batch.max().item())
-        )
+        is_multi_graph = is_multi_graph_batch(batch)
 
         # Single graph case.
         if not is_multi_graph:
@@ -132,9 +129,9 @@ class EigenPoolLift(Lift):
         # Multi-graph case: unbatch pooled features and theta, lift each graph, then concatenate.
         batch_size = int(batch.max().item()) + 1
         if batch_pooled is None:
-            batch_pooled = torch.arange(
-                batch_size, dtype=batch.dtype, device=batch.device
-            ).repeat_interleave(num_clusters)
+            batch_pooled = build_pooled_batch(
+                batch_size, num_clusters, batch.device, dtype=batch.dtype
+            )
 
         x_pool_flat = x_pool.view(-1, x_pool.size(-1)) if x_pool.dim() == 3 else x_pool
         x_pool_list = unbatch(x_pool_flat, batch=batch_pooled)

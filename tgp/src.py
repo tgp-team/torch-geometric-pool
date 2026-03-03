@@ -13,7 +13,7 @@ from tgp.lift import Lift
 from tgp.reduce import Reduce
 from tgp.select import Select, SelectOutput
 from tgp.utils import Signature, connectivity_to_edge_index, foo_signature
-from tgp.utils.ops import dense_to_block_diag, is_dense_adj
+from tgp.utils.ops import build_pooled_batch, dense_to_block_diag, is_dense_adj
 
 
 @dataclass
@@ -522,7 +522,7 @@ class DenseSRCPooling(SRCPooling):
         if batch_pooled is None and batch is not None:
             batch_pooled = self.reducer.reduce_batch(so, batch)
         if batch_pooled is None and B > 1:
-            batch_pooled = torch.arange(B, device=x_pool.device).repeat_interleave(K)
+            batch_pooled = build_pooled_batch(B, K, x_pool.device)
         if batch_pooled is None and out_mask is not None:
             # Single graph, no batch, dense path
             batch_pooled = torch.zeros(B * K, dtype=torch.long, device=x_pool.device)

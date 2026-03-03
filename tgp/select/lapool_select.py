@@ -18,6 +18,7 @@ from tgp.utils import (
     check_and_filter_edge_weights,
     connectivity_to_edge_index,
     is_dense_adj,
+    is_multi_graph_batch,
 )
 from tgp.utils.typing import SinvType
 
@@ -316,11 +317,7 @@ class LaPoolSelect(Select):
         num_nodes: int,
     ) -> Tensor:
         # Multi-graph: run single-graph path per graph, pad to K_max, concatenate
-        if (
-            batch is not None
-            and batch.numel() > 0
-            and int(batch.min().item()) != int(batch.max().item())
-        ):
+        if is_multi_graph_batch(batch):
             edge_index, edge_weight = connectivity_to_edge_index(
                 edge_index, edge_weight
             )

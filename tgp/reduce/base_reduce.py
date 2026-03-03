@@ -5,6 +5,7 @@ from torch import Tensor, nn
 from torch_geometric.utils import scatter, unbatch
 
 from tgp.select import SelectOutput
+from tgp.utils.ops import build_pooled_batch
 
 
 class Reduce(nn.Module):
@@ -51,9 +52,9 @@ class Reduce(nn.Module):
             # - Supernodes 0 to K-1 belong to graph 0
             # - Supernodes K to 2K-1 belong to graph 1
             # - etc.
-            batch_pooled = torch.arange(
-                batch_size, dtype=batch.dtype, device=batch.device
-            ).repeat_interleave(K)
+            batch_pooled = build_pooled_batch(
+                batch_size, K, batch.device, dtype=batch.dtype
+            )
 
             return batch_pooled
 
