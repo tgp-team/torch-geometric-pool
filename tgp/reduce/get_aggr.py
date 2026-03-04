@@ -91,8 +91,8 @@ def get_aggr(alias: str, **kwargs: Any) -> Any:
     This is the **aggregation analogue** of :func:`tgp.poolers.get_pooler`:
     instead of instantiating poolers by alias, :func:`get_aggr` instantiates
     PyG aggregation modules. Use it with :class:`~tgp.reduce.AggrReduce` or
-    :func:`~tgp.reduce.readout` when you prefer to configure aggregation via a
-    string name.
+    :class:`~tgp.reduce.GlobalReduce` when you prefer to configure aggregation
+    via a string name.
 
     Args:
         alias: Name of the aggregator (e.g. :obj:`"sum"`, :obj:`"mean"`,
