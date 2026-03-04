@@ -1,7 +1,9 @@
 import pytest
 import torch
 
+import tgp.select.lapool_select as lapool_select_module
 from tgp.poolers import LaPooling
+from tgp.select.lapool_select import LaPoolSelect
 from tgp.src import PoolingOutput
 
 
@@ -177,6 +179,182 @@ def test_lapool_batched_sparse_output_no_mask(pooler_test_graph_dense_batch):
     assert out.so is not None
     assert out.mask is not None
     assert torch.equal(out.mask, out.so.out_mask)
+
+
+def test_lapool_select_batched_validation_and_unsqueeze_paths(monkeypatch):
+    selector = LaPoolSelect(batched_representation=True)
+    x = torch.tensor([[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]], dtype=torch.float32)
+    adj = torch.tensor(
+        [[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]], dtype=torch.float32
+    )
+
+    so = selector(x=x, edge_index=adj)
+    assert so.s.dim() == 3
+    assert so.s.size(0) == 1
+
+    with pytest.raises(ValueError, match=r"x must have shape \[B, N, F\]"):
+        selector(x=torch.tensor([1.0, 2.0, 3.0]), edge_index=adj)
+
+    edge_index_sparse = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
+    with pytest.raises(ValueError, match="dense adjacency tensor"):
+        selector(x=x, edge_index=edge_index_sparse)
+
+    monkeypatch.setattr(lapool_select_module, "is_dense_adj", lambda _: True)
+    with pytest.raises(ValueError, match=r"\[B, N, N\]"):
+        selector(x=x, edge_index=torch.ones(1, 1, 1, 1, dtype=torch.float32))
+
+
+def test_lapool_select_unbatched_validation_errors():
+    selector = LaPoolSelect(batched_representation=False)
+    edge_index_sparse = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
+
+    with pytest.raises(ValueError, match=r"x must have shape \[N, F\]"):
+        selector(x=torch.randn(1, 3, 2), edge_index=edge_index_sparse)
+
+    with pytest.raises(
+        ValueError, match="mask is only supported for batched representations"
+    ):
+        selector(
+            x=torch.randn(3, 2),
+            edge_index=edge_index_sparse,
+            mask=torch.tensor([True, True, True]),
+        )
+
+    with pytest.raises(ValueError, match="expects a sparse adjacency tensor"):
+        selector(
+            x=torch.randn(3, 2),
+            edge_index=torch.eye(3, dtype=torch.float32),
+        )
+
+
+def test_lapool_select_forward_batched_mask_variants():
+    selector = LaPoolSelect(batched_representation=True)
+    x = torch.tensor(
+        [
+            [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
+            [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]],
+        ],
+        dtype=torch.float32,
+    )
+    adj = torch.tensor(
+        [
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]],
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0]],
+        ],
+        dtype=torch.float32,
+    )
+
+    # 1D mask branch: mask is unsqueezed to [1, N].
+    s_single = selector._forward_batched(x[:1], adj[:1], mask=torch.tensor([1, 1, 0]))
+    assert s_single.shape[0] == 1
+    assert torch.allclose(s_single[0, 2], torch.zeros_like(s_single[0, 2]))
+
+    # Graph 1 has no valid nodes, so k_b == 0 and the copy branch is skipped.
+    mask = torch.tensor([[1, 1, 1], [0, 0, 0]], dtype=torch.bool)
+    s = selector._forward_batched(x, adj, mask=mask)
+    assert torch.allclose(s[1], torch.zeros_like(s[1]))
+
+
+def test_lapool_select_batched_shortest_path_skips_empty_edges():
+    selector = LaPoolSelect(batched_representation=True, shortest_path_reg=True)
+    x = torch.tensor([[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]], dtype=torch.float32)
+    adj = torch.zeros((1, 3, 3), dtype=torch.float32)
+
+    s = selector._forward_batched(x, adj, mask=None)
+    assert s.shape[0] == 1
+    assert torch.isfinite(s).all()
+
+
+def test_lapool_select_unbatched_shortest_path_branch():
+    selector = LaPoolSelect(batched_representation=False, shortest_path_reg=True)
+    x = torch.tensor([[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]], dtype=torch.float32)
+    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float32)
+
+    so = selector(
+        x=x,
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        batch=None,
+        num_nodes=x.size(0),
+    )
+    assert so.s is not None
+    assert torch.isfinite(so.s).all()
+
+
+def test_lapool_select_unbatched_no_leader_fallback(monkeypatch):
+    selector = LaPoolSelect(batched_representation=False, shortest_path_reg=False)
+    x = torch.tensor([[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]], dtype=torch.float32)
+    edge_index = torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]], dtype=torch.long)
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float32)
+
+    monkeypatch.setattr(
+        lapool_select_module,
+        "scatter_mul",
+        lambda src, index, dim, dim_size: torch.zeros(
+            dim_size, dtype=src.dtype, device=src.device
+        ),
+    )
+
+    s = selector._forward_unbatched(
+        x=x,
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        batch=None,
+        num_nodes=x.size(0),
+    )
+    assert s.shape == (x.size(0), x.size(0))
+    assert torch.isfinite(s).all()
+
+
+def test_lapool_select_forward_batched_single_leader_unsqueeze_branch():
+    selector = LaPoolSelect(batched_representation=True)
+    x = torch.tensor([[[1.0, 0.0]]], dtype=torch.float32)  # [B=1, N=1, F=2]
+    adj = torch.zeros((1, 1, 1), dtype=torch.float32)
+
+    s = selector._forward_batched(x, adj, mask=torch.tensor([[True]]))
+    assert s.shape == (1, 1, 1)
+    assert torch.equal(s, torch.ones_like(s))
+
+
+def test_lapool_select_unbatched_multi_graph_batch_path():
+    selector = LaPoolSelect(batched_representation=False)
+    x = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [0.5, 0.5],
+        ],
+        dtype=torch.float32,
+    )
+    edge_index = torch.tensor(
+        [
+            [0, 1, 2, 3],
+            [1, 0, 3, 2],
+        ],
+        dtype=torch.long,
+    )
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float32)
+    batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+    s = selector._forward_unbatched(
+        x=x,
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        batch=batch,
+        num_nodes=x.size(0),
+    )
+    assert s.size(0) == x.size(0)
+    assert s.size(1) >= 1
+    assert torch.isfinite(s).all()
+
+
+def test_lapool_select_repr():
+    selector = LaPoolSelect(shortest_path_reg=True, s_inv_op="transpose")
+    rep = repr(selector)
+    assert "LaPoolSelect" in rep
+    assert "shortest_path_reg=True" in rep
 
 
 if __name__ == "__main__":

@@ -201,7 +201,8 @@ source = ["tgp"]
 omit = [
     "tgp/datasets/*",
     "tgp/imports.py",
-    "tgp/data/collate.py",
+    "tgp/data/pyg_collate.py",
+    "tgp/data/pyg_separate.py",
 ]
 branch = true
 parallel = true

@@ -139,6 +139,21 @@ def test_selectoutput_apply_updates_extra_tensor_args():
     assert so.non_tensor == "keep-me"
 
 
+def test_selectoutput_apply_handles_tuple_and_missing_extra_attr():
+    base = torch.eye(2, dtype=torch.float32)
+    so = SelectOutput(
+        s=base.unsqueeze(0),
+        tuple_extra=(base.clone(), {"inner": base.clone()}),
+    )
+    # Exercise the `hasattr` false branch in apply().
+    so._extra_args.add("missing_attr")
+
+    so.apply(lambda x: x + 2)
+
+    assert torch.equal(so.tuple_extra[0], base + 2)
+    assert torch.equal(so.tuple_extra[1]["inner"], base + 2)
+
+
 def test_data_to_moves_selectoutput_extra_tensors_in_nested_pooled_data():
     root_so = SelectOutput(
         s=torch.eye(2).unsqueeze(0),
@@ -177,6 +192,53 @@ def test_selectoutput_to_moves_batch_and_in_mask():
     assert so_meta.s.device.type == "meta"
     assert so_meta.batch.device.type == "meta"
     assert so_meta.in_mask.device.type == "meta"
+
+
+def test_selectoutput_cpu_moves_batch_when_present():
+    so = SelectOutput(
+        s=torch.eye(2).unsqueeze(0),
+        batch=torch.tensor([0], dtype=torch.long),
+    )
+
+    so.cpu()
+    assert so.batch.device.type == "cpu"
+
+
+def test_selectoutput_cuda_executes_batch_cuda_branch_without_gpu(monkeypatch):
+    class _DummyBatch:
+        def __init__(self):
+            self.calls = []
+
+        def cuda(self, device=None, non_blocking=False):
+            self.calls.append((device, non_blocking))
+            return self
+
+    so = SelectOutput(s=torch.eye(2).unsqueeze(0))
+    so.batch = _DummyBatch()
+
+    monkeypatch.setattr(SelectOutput, "apply", lambda self, func: self)
+    out = so.cuda(device=1, non_blocking=True)
+
+    assert out is so
+    assert so.batch.calls == [(1, True)]
+
+
+def test_selectoutput_cuda_without_batch_skips_batch_cuda(monkeypatch):
+    so = SelectOutput(s=torch.eye(2).unsqueeze(0))
+    so.batch = None
+
+    monkeypatch.setattr(SelectOutput, "apply", lambda self, func: self)
+    out = so.cuda(device=0, non_blocking=False)
+
+    assert out is so
+    assert so.batch is None
+
+
+def test_selectoutput_requires_grad_sets_requires_grad_flag():
+    so = SelectOutput(s=torch.eye(2).unsqueeze(0))
+    so.requires_grad_(True)
+    assert so.s.requires_grad is True
+    assert so.s_inv.requires_grad is True
 
 
 def test_selectoutput_collate_and_separate_preserve_in_mask():
@@ -272,6 +334,19 @@ def test_selectoutput_out_mask_2d_dense_no_batch():
     assert mask.dim() == 2
     assert mask.shape == (1, 2)
     assert torch.equal(mask, get_mask_from_dense_s(s, None))
+
+
+def test_selectoutput_out_mask_returns_none_for_non_matrix_dense():
+    so = SelectOutput(s=torch.ones((1, 2, 2, 2), dtype=torch.float32))
+    assert so.out_mask is None
+
+
+def test_selectoutput_is_expressive_returns_false_for_empty_in_mask():
+    so = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        in_mask=torch.zeros((1, 3), dtype=torch.bool),
+    )
+    assert so.is_expressive is False
 
 
 def test_selectoutput_invalid_init():

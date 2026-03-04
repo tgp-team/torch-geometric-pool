@@ -215,5 +215,203 @@ def test_invalid_lift_op():
         BaseLift(matrix_op="invalid_op")(x, so)
 
 
+def test_lift_dense_multi_graph_raises_on_inconsistent_blocks():
+    lift_matrix = torch.tensor([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=torch.float)
+    x_pool_flat = torch.randn(6, 2)
+    batch = torch.tensor([0, 0, 1], dtype=torch.long)
+    batch_pooled = torch.tensor([0, 0, 1, 1, 2, 2], dtype=torch.long)
+
+    with pytest.raises(ValueError, match="Inconsistent per-graph blocks"):
+        BaseLift._lift_dense_multi_graph(lift_matrix, x_pool_flat, batch, batch_pooled)
+
+
+def test_forward_dense_unbatched_multi_graph_with_global_pooled_features():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.0]], dtype=torch.float
+    )
+    so = SelectOutput(s=lift_matrix, batch=torch.tensor([0, 0, 1, 1], dtype=torch.long))
+    x_pool = torch.tensor([[1.0, 10.0], [2.0, 20.0]], dtype=torch.float)
+
+    out = BaseLift(matrix_op="transpose")(x_pool, so)
+    expected = lift_matrix.matmul(x_pool)
+    torch.testing.assert_close(out, expected)
+
+
+def test_forward_dense_unbatched_multi_graph_raises_on_invalid_pooled_rows():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [0.0, 1.0]], dtype=torch.float
+    )
+    so = SelectOutput(s=lift_matrix, batch=torch.tensor([0, 0, 1, 1], dtype=torch.long))
+    x_pool = torch.randn(3, 2)  # Neither K (=2) nor B*K (=4).
+
+    with pytest.raises(ValueError, match="Unexpected pooled feature shape"):
+        BaseLift(matrix_op="transpose")(x_pool, so)
+
+
+def test_forward_dense_unbatched_multi_graph_raises_on_bad_batch_pooled_length():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.0]], dtype=torch.float
+    )
+    so = SelectOutput(s=lift_matrix, batch=torch.tensor([0, 0, 1, 1], dtype=torch.long))
+    x_pool = torch.tensor(
+        [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0], [4.0, 40.0]], dtype=torch.float
+    )
+
+    with pytest.raises(ValueError, match="batch_pooled has an unexpected length"):
+        BaseLift(matrix_op="transpose")(
+            x_pool, so, batch_pooled=torch.tensor([0, 0, 1], dtype=torch.long)
+        )
+
+
+def test_forward_dense_unbatched_multi_graph_with_default_batch_pooled():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.0]], dtype=torch.float
+    )
+    batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+    so = SelectOutput(s=lift_matrix, batch=batch)
+    x_pool = torch.tensor(
+        [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0], [4.0, 40.0]], dtype=torch.float
+    )
+
+    out = BaseLift(matrix_op="transpose")(x_pool, so)
+    expected = torch.cat(
+        [lift_matrix[:2].matmul(x_pool[:2]), lift_matrix[2:].matmul(x_pool[2:])], dim=0
+    )
+    torch.testing.assert_close(out, expected)
+
+
+def test_forward_dense_unbatched_with_3d_pooled_features_bad_batch_pooled_length():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.0]], dtype=torch.float
+    )
+    so = SelectOutput(s=lift_matrix, batch=torch.tensor([0, 0, 1, 1], dtype=torch.long))
+    x_pool = torch.randn(2, 2, 3)  # [B, K, F]
+
+    with pytest.raises(ValueError, match="batch_pooled has an unexpected length"):
+        BaseLift(matrix_op="transpose")(
+            x_pool, so, batch_pooled=torch.tensor([0, 0, 1], dtype=torch.long)
+        )
+
+
+def test_forward_dense_batched_assignment_expands_compacted_rows():
+    s = torch.tensor(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]],
+            [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+        ],
+        dtype=torch.float,
+    )  # [B=2, N=3, K=3]
+    so = SelectOutput(s=s)
+    x_pool_compact = torch.tensor([[10.0], [20.0], [30.0]], dtype=torch.float)
+
+    out = BaseLift(matrix_op="transpose")(x_pool_compact, so)
+
+    expected_full = torch.tensor(
+        [[10.0], [0.0], [20.0], [0.0], [30.0], [0.0]], dtype=torch.float
+    ).view(2, 3, 1)
+    expected = s.matmul(expected_full)
+    torch.testing.assert_close(out, expected)
+
+
+def test_forward_uses_precomputed_inverse_matrix():
+    lift_matrix = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float)
+    so = SelectOutput(s=lift_matrix, s_inv=lift_matrix.transpose(-2, -1))
+    x_pool = torch.tensor([[5.0, 6.0], [7.0, 8.0]], dtype=torch.float)
+
+    out = BaseLift(matrix_op="precomputed")(x_pool, so)
+    torch.testing.assert_close(out, lift_matrix.matmul(x_pool))
+
+
+def test_forward_dense_unbatched_with_3d_pooled_features_single_graph():
+    lift_matrix = torch.tensor([[1.0, 0.0], [0.25, 0.75]], dtype=torch.float)
+    so = SelectOutput(s=lift_matrix, batch=torch.zeros(2, dtype=torch.long))
+    x_pool = torch.tensor([[[2.0, 4.0], [6.0, 8.0]]], dtype=torch.float)  # [1, K, F]
+
+    out = BaseLift(matrix_op="transpose")(x_pool, so)
+    expected = lift_matrix.matmul(x_pool.squeeze(0))
+    torch.testing.assert_close(out, expected)
+
+
+def test_forward_dense_unbatched_with_3d_pooled_features_multi_graph_default_batch():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.0]], dtype=torch.float
+    )
+    batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+    so = SelectOutput(s=lift_matrix, batch=batch)
+    x_pool = torch.tensor(
+        [[[1.0, 10.0], [2.0, 20.0]], [[3.0, 30.0], [4.0, 40.0]]], dtype=torch.float
+    )  # [B=2, K=2, F=2]
+
+    out = BaseLift(matrix_op="transpose")(x_pool, so)
+    expected = torch.cat(
+        [lift_matrix[:2].matmul(x_pool[0]), lift_matrix[2:].matmul(x_pool[1])], dim=0
+    )
+    torch.testing.assert_close(out, expected)
+
+
+def test_forward_dense_unbatched_multi_graph_with_provided_batch_pooled():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.0]], dtype=torch.float
+    )
+    batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+    so = SelectOutput(s=lift_matrix, batch=batch)
+    x_pool = torch.tensor(
+        [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0], [4.0, 40.0]], dtype=torch.float
+    )
+    batch_pooled = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+    out = BaseLift(matrix_op="transpose")(x_pool, so, batch_pooled=batch_pooled)
+    expected = torch.cat(
+        [
+            lift_matrix[:2].matmul(x_pool[:2]),
+            lift_matrix[2:].matmul(x_pool[2:]),
+        ],
+        dim=0,
+    )
+    torch.testing.assert_close(out, expected)
+
+
+def test_forward_dense_unbatched_with_3d_pooled_features_multi_graph_provided_batch():
+    lift_matrix = torch.tensor(
+        [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.0]], dtype=torch.float
+    )
+    batch = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+    so = SelectOutput(s=lift_matrix, batch=batch)
+    x_pool = torch.tensor(
+        [[[1.0, 10.0], [2.0, 20.0]], [[3.0, 30.0], [4.0, 40.0]]], dtype=torch.float
+    )  # [B=2, K=2, F=2]
+    batch_pooled = torch.tensor([0, 0, 1, 1], dtype=torch.long)
+
+    out = BaseLift(matrix_op="transpose")(x_pool, so, batch_pooled=batch_pooled)
+    expected = torch.cat(
+        [lift_matrix[:2].matmul(x_pool[0]), lift_matrix[2:].matmul(x_pool[1])], dim=0
+    )
+    torch.testing.assert_close(out, expected)
+
+
+def test_forward_dense_batched_assignment_without_expansion():
+    s = torch.tensor(
+        [
+            [[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]],
+            [[0.0, 1.0], [1.0, 0.0], [0.0, 1.0]],
+        ],
+        dtype=torch.float,
+    )  # [B=2, N=3, K=2]
+    so = SelectOutput(s=s)
+    x_pool = torch.tensor([[10.0], [20.0], [30.0], [40.0]], dtype=torch.float)
+
+    out = BaseLift(matrix_op="transpose")(x_pool, so)
+    expected = s.matmul(x_pool.view(2, 2, 1))
+    torch.testing.assert_close(out, expected)
+
+
+def test_base_lift_repr():
+    lift = BaseLift(matrix_op="transpose", reduce_op="mean")
+    repr_str = repr(lift)
+    assert "BaseLift" in repr_str
+    assert "matrix_op=transpose" in repr_str
+    assert "reduce_op=mean" in repr_str
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

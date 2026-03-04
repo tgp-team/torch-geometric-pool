@@ -425,6 +425,98 @@ def test_hook_collate_select_output_handles_torch_sparse_tensors(monkeypatch):
     assert incs is None
 
 
+def test_hook_collate_select_output_sparse_without_s_inv():
+    s1 = torch.sparse_coo_tensor(
+        indices=torch.tensor([[0, 1], [0, 1]]),
+        values=torch.tensor([1.0, 1.0]),
+        size=(2, 2),
+    ).coalesce()
+    s2 = torch.sparse_coo_tensor(
+        indices=torch.tensor([[0, 2], [1, 0]]),
+        values=torch.tensor([0.5, 1.5]),
+        size=(3, 2),
+    ).coalesce()
+    so1 = _FakeSelectOutput(s=s1, s_inv=None)
+    so2 = _FakeSelectOutput(s=s2, s_inv=None)
+    data_list = [_graph(2), _graph(3)]
+    stores = [data_list[0].stores[0], data_list[1].stores[0]]
+
+    out, slices, incs = tgp_collate_module._hook_collate_select_output(
+        key="so",
+        values=[so1, so2],
+        data_list=data_list,
+        stores=stores,
+        increment=True,
+        collate_fn_map=tgp_collate_module._TGP_COLLATE_FN_MAP,
+    )
+
+    assert out.s.is_sparse
+    assert out.s_inv is not None
+    assert slices["s"].shape[1] == 2
+    assert incs is None
+
+
+def test_hook_collate_select_output_dense_without_s_inv_and_empty_batch_chunk():
+    so1 = _FakeSelectOutput(
+        s=torch.empty((0, 2, 2), dtype=torch.float32),
+        s_inv=None,
+        batch=torch.empty((0,), dtype=torch.long),
+    )
+    so2 = _FakeSelectOutput(
+        s=torch.tensor([[[1.0, 0.0], [0.0, 1.0]]], dtype=torch.float32),
+        s_inv=None,
+        batch=torch.tensor([0], dtype=torch.long),
+    )
+    data_list = [_graph(1), _graph(1)]
+    stores = [data_list[0].stores[0], data_list[1].stores[0]]
+
+    out, slices, incs = tgp_collate_module._hook_collate_select_output(
+        key="so",
+        values=[so1, so2],
+        data_list=data_list,
+        stores=stores,
+        increment=True,
+        collate_fn_map=tgp_collate_module._TGP_COLLATE_FN_MAP,
+    )
+
+    assert out.s.shape == (1, 2, 2)
+    assert torch.equal(out.batch, torch.tensor([0], dtype=torch.long))
+    assert torch.equal(slices["batch"], torch.tensor([0, 0, 1]))
+    assert incs is None
+
+
+def test_hook_collate_select_output_dense_2d_without_s_inv():
+    so1 = _FakeSelectOutput(
+        s=torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),
+        s_inv=None,
+    )
+    so2 = _FakeSelectOutput(
+        s=torch.tensor([[0.5, 0.5], [1.0, 0.0]], dtype=torch.float32),
+        s_inv=None,
+    )
+    data_list = [_graph(2), _graph(2)]
+    stores = [data_list[0].stores[0], data_list[1].stores[0]]
+
+    out, slices, incs = tgp_collate_module._hook_collate_select_output(
+        key="so",
+        values=[so1, so2],
+        data_list=data_list,
+        stores=stores,
+        increment=True,
+        collate_fn_map=tgp_collate_module._TGP_COLLATE_FN_MAP,
+    )
+
+    assert torch.equal(
+        out.s,
+        torch.tensor(
+            [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5], [1.0, 0.0]], dtype=torch.float32
+        ),
+    )
+    assert out.s_inv is not None
+    assert torch.equal(slices["s"], torch.tensor([0, 2, 4]))
+    assert incs is None
+
+
 def test_hook_separate_select_output_handles_sparse_tensor_branch(monkeypatch):
     sparse = torch_sparse.SparseTensor.from_dense(torch.eye(2))
     values = _FakeSelectOutput(s=sparse, s_inv=sparse.t())
@@ -456,6 +548,117 @@ def test_hook_separate_select_output_handles_sparse_tensor_branch(monkeypatch):
     assert isinstance(out, _DummySelectOutput)
     assert isinstance(out.s, torch_sparse.SparseTensor)
     assert isinstance(out.s_inv, torch_sparse.SparseTensor)
+
+
+def test_hook_separate_select_output_sparse_tensor_without_s_inv(monkeypatch):
+    sparse = torch_sparse.SparseTensor.from_dense(torch.eye(2))
+    values = _FakeSelectOutput(s=sparse, s_inv=None)
+    slices = {"s": torch.tensor([[0, 0], [2, 2]])}
+    batch = _graph(2)
+
+    class _DummySelectOutput:
+        def __init__(self, s, s_inv, batch=None, **extra_args):
+            self.s = s
+            self.s_inv = s_inv
+            self.batch = batch
+            self._extra_args = set(extra_args.keys())
+            for key, value in extra_args.items():
+                setattr(self, key, value)
+
+    monkeypatch.setattr(tgp_collate_module, "SelectOutput", _DummySelectOutput)
+    out = tgp_collate_module._hook_separate_select_output(
+        key="so",
+        values=values,
+        idx=0,
+        slices=slices,
+        incs=None,
+        batch=batch,
+        store=batch.stores[0],
+        decrement=True,
+        separate_fn_map=tgp_collate_module._TGP_SEPARATE_FN_MAP,
+    )
+
+    assert isinstance(out, _DummySelectOutput)
+    assert isinstance(out.s, torch_sparse.SparseTensor)
+    assert out.s_inv is None
+
+
+def test_hook_separate_select_output_torch_sparse_without_s_inv():
+    values = _FakeSelectOutput(
+        s=torch.sparse_coo_tensor(
+            indices=torch.tensor([[0, 1], [0, 1]]),
+            values=torch.tensor([1.0, 1.0]),
+            size=(2, 2),
+        ).coalesce(),
+        s_inv=None,
+    )
+    slices = {"s": torch.tensor([[0, 0], [2, 2]])}
+    batch = _graph(2)
+
+    out = tgp_collate_module._hook_separate_select_output(
+        key="so",
+        values=values,
+        idx=0,
+        slices=slices,
+        incs=None,
+        batch=batch,
+        store=batch.stores[0],
+        decrement=True,
+        separate_fn_map=tgp_collate_module._TGP_SEPARATE_FN_MAP,
+    )
+
+    assert out.s.is_sparse
+    assert out.s_inv is not None
+
+
+def test_hook_separate_select_output_dense_2d_without_s_inv():
+    values = _FakeSelectOutput(
+        s=torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),
+        s_inv=None,
+    )
+    slices = {"s": torch.tensor([0, 2])}
+    batch = _graph(2)
+
+    out = tgp_collate_module._hook_separate_select_output(
+        key="so",
+        values=values,
+        idx=0,
+        slices=slices,
+        incs=None,
+        batch=batch,
+        store=batch.stores[0],
+        decrement=True,
+        separate_fn_map=tgp_collate_module._TGP_SEPARATE_FN_MAP,
+    )
+
+    assert torch.equal(out.s, values.s)
+    assert out.s_inv is not None
+
+
+def test_hook_separate_select_output_dense_3d_without_s_inv():
+    values = _FakeSelectOutput(
+        s=torch.tensor(
+            [[[1.0, 0.0], [0.0, 1.0]], [[0.2, 0.8], [1.0, 0.0]]], dtype=torch.float32
+        ),
+        s_inv=None,
+    )
+    slices = {"s": torch.tensor([0, 1, 2])}
+    batch = _graph(2)
+
+    out = tgp_collate_module._hook_separate_select_output(
+        key="so",
+        values=values,
+        idx=0,
+        slices=slices,
+        incs=None,
+        batch=batch,
+        store=batch.stores[0],
+        decrement=True,
+        separate_fn_map=tgp_collate_module._TGP_SEPARATE_FN_MAP,
+    )
+
+    assert torch.equal(out.s, values.s[:1])
+    assert out.s_inv is not None
 
 
 def test_hook_separate_select_output_handles_2d_slices_for_dense():

@@ -1,27 +1,35 @@
 import ctypes
 import inspect
+from builtins import __import__ as _builtin_import
 
 import numpy as np
 import pytest
 import torch
 
+import tgp.select.sep_select as sep_select_module
 from tgp.select.sep_select import (
     PartitionTree,
     PartitionTreeNode,
     SEPSelect,
+    _absolute_to_sequential_assignments,
     _adj_mat_to_coding_tree,
     _child_tree_depth,
     _combine_delta,
     _compress_delta,
     _compress_node,
+    _connected_components_undirected,
     _cut_volume,
+    _depth_assignment,
     _depth_one_assignment,
     _graph_parse,
     _id_generator,
+    _identity_hierarchy,
     _layer_first,
     _make_select_output,
     _merge_nodes,
+    _relabel_contiguous,
     _split_subgraphs,
+    _SubgraphData,
     _trans_to_tree,
     _update_depth,
     _update_node,
@@ -32,6 +40,18 @@ def _chain_edge_index(num_nodes: int) -> torch.Tensor:
     row = torch.arange(num_nodes - 1, dtype=torch.long)
     col = row + 1
     return torch.stack([torch.cat([row, col]), torch.cat([col, row])], dim=0)
+
+
+def test_connected_components_import_error(monkeypatch):
+    def fake_import(name, *args, **kwargs):
+        if name == "scipy.sparse.csgraph":
+            raise ImportError("forced missing scipy")
+        return _builtin_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(ImportError, match="SEPSelect requires SciPy"):
+        _connected_components_undirected(np.eye(2))
 
 
 def test_sep_select_forward_basic_and_repr():
@@ -136,6 +156,202 @@ def test_split_subgraphs_and_cluster_branches():
         num_nodes=3,
     )
     assert len(split_with_gap) == 2
+
+
+def test_cluster_subgraph_hierarchy_validation_and_empty():
+    selector = SEPSelect()
+    subgraph = _SubgraphData(
+        node_ids=torch.arange(2, dtype=torch.long),
+        edge_index=_chain_edge_index(2),
+        edge_weight=torch.ones(2, dtype=torch.float32),
+    )
+
+    with pytest.raises(ValueError, match="'levels' must be >= 1"):
+        selector._cluster_subgraph_hierarchy(subgraph=subgraph, levels=0)
+
+    empty_subgraph = _SubgraphData(
+        node_ids=torch.empty((0,), dtype=torch.long),
+        edge_index=torch.empty((2, 0), dtype=torch.long),
+        edge_weight=None,
+    )
+    assignments, num_supernodes = selector._cluster_subgraph_hierarchy(
+        subgraph=empty_subgraph, levels=3
+    )
+
+    assert len(assignments) == 3
+    assert all(assignment.numel() == 0 for assignment in assignments)
+    assert num_supernodes == [0, 0, 0]
+
+
+def test_cluster_subgraph_hierarchy_multi_level_and_global_merge():
+    selector = SEPSelect()
+    subgraph = _SubgraphData(
+        node_ids=torch.arange(3, dtype=torch.long),
+        edge_index=_chain_edge_index(3),
+        edge_weight=torch.ones(4, dtype=torch.float32),
+    )
+
+    assignments, num_supernodes = selector._cluster_subgraph_hierarchy(
+        subgraph=subgraph, levels=2
+    )
+    assert len(assignments) == 2
+    assert len(num_supernodes) == 2
+    assert assignments[0].numel() == 3
+    assert assignments[1].numel() == num_supernodes[0]
+
+    local_hierarchies = [
+        (
+            _SubgraphData(
+                node_ids=torch.tensor([0, 1], dtype=torch.long),
+                edge_index=torch.tensor([[0, 1], [1, 0]], dtype=torch.long),
+                edge_weight=torch.ones(2, dtype=torch.float32),
+            ),
+            [
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.tensor([0, 0], dtype=torch.long),
+            ],
+            [2, 1],
+        ),
+        (
+            _SubgraphData(
+                node_ids=torch.tensor([2], dtype=torch.long),
+                edge_index=torch.empty((2, 0), dtype=torch.long),
+                edge_weight=None,
+            ),
+            [torch.tensor([0], dtype=torch.long), torch.tensor([0], dtype=torch.long)],
+            [1, 1],
+        ),
+    ]
+    outputs = selector._build_global_hierarchy(
+        local_hierarchies=local_hierarchies,
+        num_nodes=3,
+        levels=2,
+        device=torch.device("cpu"),
+    )
+    assert len(outputs) == 2
+    assert outputs[0].num_nodes == 3
+    assert outputs[1].num_nodes == 3
+
+
+def test_multi_level_select_validation_and_runtime_paths(monkeypatch):
+    selector = SEPSelect()
+    edge_index = _chain_edge_index(3)
+
+    with pytest.raises(ValueError, match="'levels' must be >= 1"):
+        selector.multi_level_select(edge_index=edge_index, num_nodes=3, levels=0)
+
+    monkeypatch.setattr(sep_select_module, "_split_subgraphs", lambda **_kwargs: [])
+    with pytest.raises(RuntimeError, match="Could not split any non-empty subgraph"):
+        selector.multi_level_select(edge_index=edge_index, num_nodes=3, levels=1)
+
+    subgraph = _SubgraphData(
+        node_ids=torch.arange(3, dtype=torch.long),
+        edge_index=edge_index,
+        edge_weight=None,
+    )
+    monkeypatch.setattr(
+        sep_select_module, "_split_subgraphs", lambda **_kwargs: [subgraph]
+    )
+    monkeypatch.setattr(
+        selector,
+        "_cluster_subgraph_hierarchy",
+        lambda subgraph, levels: (
+            [torch.zeros(3, dtype=torch.long) for _ in range(levels)],
+            [1 for _ in range(levels)],
+        ),
+    )
+    monkeypatch.setattr(
+        selector,
+        "_build_global_hierarchy",
+        lambda **_kwargs: [
+            _make_select_output(
+                assignment=torch.tensor([0, 0, 0], dtype=torch.long),
+                num_supernodes=1,
+                s_inv_op=selector.s_inv_op,
+            )
+        ],
+    )
+    with pytest.raises(RuntimeError, match="Expected 2 level outputs"):
+        selector.multi_level_select(edge_index=edge_index, num_nodes=3, levels=2)
+
+
+def test_identity_depth_and_sequential_assignment_helpers(monkeypatch):
+    assignments, ks = _identity_hierarchy(
+        num_nodes=3, levels=3, device=torch.device("cpu")
+    )
+    assert len(assignments) == 3
+    assert len(ks) == 3
+    assert torch.equal(assignments[1], torch.arange(3, dtype=torch.long))
+
+    with pytest.raises(RuntimeError, match="Leaf node 1 not found"):
+        _depth_assignment(
+            tree_nodes={0: {"ID": 0, "depth": 0, "parent": None}},
+            num_nodes=2,
+            depth=0,
+            device=torch.device("cpu"),
+        )
+
+    with pytest.raises(RuntimeError, match="Could not find ancestor at depth=1"):
+        _depth_assignment(
+            tree_nodes={0: {"ID": 0, "depth": 0, "parent": None}},
+            num_nodes=1,
+            depth=1,
+            device=torch.device("cpu"),
+        )
+
+    success = _depth_assignment(
+        tree_nodes={
+            0: {"ID": 0, "depth": 0, "parent": 2},
+            2: {"ID": 2, "depth": 1, "parent": None},
+        },
+        num_nodes=1,
+        depth=1,
+        device=torch.device("cpu"),
+    )
+    assert success.tolist() == [2]
+
+    relabeled, k = _relabel_contiguous(torch.tensor([5, 5, 8, 5, 9], dtype=torch.long))
+    assert relabeled.tolist() == [0, 0, 1, 0, 2]
+    assert k == 3
+
+    empty_seq, empty_k = _absolute_to_sequential_assignments([])
+    assert empty_seq == []
+    assert empty_k == []
+
+    seq, num_clusters = _absolute_to_sequential_assignments(
+        [
+            torch.tensor([10, 10, 20], dtype=torch.long),
+            torch.tensor([30, 30, 40], dtype=torch.long),
+        ]
+    )
+    assert len(seq) == 2
+    assert num_clusters == [2, 2]
+    assert seq[1].tolist() == [0, 1]
+
+    with pytest.raises(RuntimeError, match="maps to multiple parents"):
+        _absolute_to_sequential_assignments(
+            [
+                torch.tensor([0, 0], dtype=torch.long),
+                torch.tensor([0, 1], dtype=torch.long),
+            ]
+        )
+
+    call_state = {"n": 0}
+
+    def fake_relabel(_assignment):
+        call_state["n"] += 1
+        if call_state["n"] == 1:
+            return torch.tensor([0, 0], dtype=torch.long), 2
+        return torch.tensor([0, 0], dtype=torch.long), 1
+
+    monkeypatch.setattr(sep_select_module, "_relabel_contiguous", fake_relabel)
+    with pytest.raises(RuntimeError, match="missing parent mapping"):
+        _absolute_to_sequential_assignments(
+            [
+                torch.tensor([7, 7], dtype=torch.long),
+                torch.tensor([8, 8], dtype=torch.long),
+            ]
+        )
 
 
 def test_depth_assignment_and_tree_builders():
