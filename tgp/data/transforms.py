@@ -179,6 +179,7 @@ class SortNodes(BaseTransform):
         return data
 
 
+# TODO: can some of the internal logic be simplified (hashing, collapsing, etc..)?
 class PreCoarsening(BaseTransform):
     r"""A transform that precomputes a hierarchy of pooled (coarsened) graphs
     and attaches them to the input :class:`~torch_geometric.data.Data` object.

@@ -1,0 +1,159 @@
+"""Resolve and validate PyG aggregation operators.
+
+Use :func:`get_aggr` to obtain aggregators by name for :class:`AggrReduce` and
+:class:`GlobalReduce`. For parametrized aggregators (e.g. LSTM, Set2Set), pass
+keyword arguments such as :obj:`in_channels`, :obj:`out_channels`,
+:obj:`processing_steps`.
+"""
+
+import inspect
+from typing import Any, Union
+
+try:
+    from torch_geometric.nn import aggr as _aggr_module
+except Exception:
+    _aggr_module = None
+
+try:
+    from torch_geometric.nn.aggr import Aggregation as _PyGAggregation
+except Exception:
+    _PyGAggregation = None
+
+# Alias -> (PyG class name, default kwargs for parametrized aggrs)
+_AGGR_ALIASES = {
+    "sum": ("SumAggregation", {}),
+    "mean": ("MeanAggregation", {}),
+    "max": ("MaxAggregation", {}),
+    "min": ("MinAggregation", {}),
+    "mul": ("MulAggregation", {}),
+    "var": ("VarAggregation", {}),
+    "std": ("StdAggregation", {}),
+    "softmax": ("SoftmaxAggregation", {}),
+    "power_mean": ("PowerMeanAggregation", {}),
+    "median": ("MedianAggregation", {}),
+    "quantile": ("QuantileAggregation", {}),
+    "lstm": ("LSTMAggregation", {}),
+    "gru": ("GRUAggregation", {}),
+    "set2set": ("Set2Set", {}),
+    "degree_scaler": ("DegreeScalerAggregation", {}),
+    "sort": ("SortAggregation", {}),
+    "multi": ("MultiAggregation", {}),
+    "attentional": ("AttentionalAggregation", {}),
+    "equilibrium": ("EquilibriumAggregation", {}),
+    "mlp": ("MLPAggregation", {}),
+    "deep_sets": ("DeepSetsAggregation", {}),
+    "set_transformer": ("SetTransformerAggregation", {}),
+    "lcm": ("LCMAggregation", {}),
+    "variance_preserving": ("VariancePreservingAggregation", {}),
+    "patch_transformer": ("PatchTransformerAggregation", {}),
+    "graph_multiset_transformer": ("GraphMultisetTransformer", {}),
+}
+
+
+def has_pyg_aggregation() -> bool:
+    """Return :obj:`True` if PyG aggregation modules are available."""
+    return _PyGAggregation is not None
+
+
+def is_pyg_aggregation(obj: Any) -> bool:
+    """Return :obj:`True` when :obj:`obj` is a PyG Aggregation instance."""
+    return _PyGAggregation is not None and isinstance(obj, _PyGAggregation)
+
+
+def resolve_reduce_op(
+    reduce_op: Union[str, Any],
+    **kwargs: Any,
+) -> Any:
+    r"""Resolve :obj:`reduce_op` to a PyG Aggregation instance.
+
+    Args:
+        reduce_op: Either a string alias accepted by :func:`get_aggr` or an
+            already-instantiated PyG Aggregation module.
+        **kwargs: Forwarded to :func:`get_aggr` when :obj:`reduce_op` is a
+            string.
+
+    Returns:
+        A PyG Aggregation instance.
+    """
+    if isinstance(reduce_op, str):
+        return get_aggr(reduce_op, **kwargs)
+    if is_pyg_aggregation(reduce_op):
+        return reduce_op
+    raise TypeError(
+        "reduce_op must be a string alias or a PyG Aggregation instance, "
+        f"got {type(reduce_op)}"
+    )
+
+
+def get_aggr(alias: str, **kwargs: Any) -> Any:
+    r"""Return a PyG :class:`torch_geometric.nn.aggr.Aggregation` instance by alias.
+
+    This is the **aggregation analogue** of :func:`tgp.poolers.get_pooler`:
+    instead of instantiating poolers by alias, :func:`get_aggr` instantiates
+    PyG aggregation modules. Use it with :class:`~tgp.reduce.AggrReduce` or
+    :class:`~tgp.reduce.GlobalReduce` when you prefer to configure aggregation
+    via a string name.
+
+    Args:
+        alias: Name of the aggregator (e.g. :obj:`"sum"`, :obj:`"mean"`,
+            :obj:`"lstm"`, :obj:`"set2set"`). Case-insensitive; dashes are
+            normalized to underscores. The full list of supported aliases is
+            documented in :mod:`tgp.reduce` (see the *Aggregator aliases*
+            section).
+        **kwargs: Passed to the aggregator constructor. Parametrized aggregators
+            typically need :obj:`in_channels`, :obj:`out_channels`, and/or
+            :obj:`processing_steps` (e.g. for Set2Set, LSTM). Any extra
+            keyword arguments that are not accepted by the underlying PyG
+            class are silently dropped.
+
+    Returns:
+        An instance of the requested PyG Aggregation.
+
+    Raises:
+        ImportError: If :obj:`torch_geometric.nn.aggr` is not available.
+        ValueError: If :obj:`alias` is not recognized.
+
+    Example:
+        >>> from tgp.reduce import get_aggr, AggrReduce, GlobalReduce
+        >>> # Inside a pooling layer
+        >>> reducer = AggrReduce(get_aggr("mean"))
+        >>> # For graph-level readout with Set2Set
+        >>> readout_layer = GlobalReduce(
+        ...     reduce_op="set2set", in_channels=64, processing_steps=3
+        ... )
+        >>> x_graph = readout_layer(x, batch=batch)
+    """
+    if _aggr_module is None:
+        raise ImportError(
+            "get_aggr requires torch_geometric.nn.aggr. "
+            "Install PyTorch Geometric to use PyG aggregations."
+        )
+    key = alias.strip().lower().replace("-", "_")
+    if key not in _AGGR_ALIASES:
+        raise ValueError(
+            f"Unknown aggregator alias: {alias!r}. "
+            f"Known aliases: {sorted(_AGGR_ALIASES.keys())}"
+        )
+    class_name, default_kw = _AGGR_ALIASES[key]
+    cls = getattr(_aggr_module, class_name, None)
+    if cls is None:
+        raise ValueError(
+            f"Aggregator {class_name!r} not found in torch_geometric.nn.aggr. "
+            "Your PyG version may not include it."
+        )
+    merged = {**default_kw, **kwargs}
+    # Some PyG aggrs use positional in_channels, out_channels
+    if (
+        key in ("lstm", "gru")
+        and "out_channels" not in merged
+        and "in_channels" in merged
+    ):
+        merged["out_channels"] = merged["in_channels"]
+    # Only pass kwargs that the aggregator's __init__ accepts (e.g. Sum/Mean take none)
+    try:
+        sig = inspect.signature(cls.__init__)
+        allowed = {p for p in sig.parameters if p != "self"}
+    except Exception:
+        allowed = set(merged)
+    merged = {k: v for k, v in merged.items() if k in allowed}
+    return cls(**merged)

@@ -164,7 +164,7 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
-            mask (~torch.Tensor, optional): Unused, kept for API compatibility.
+            mask (~torch.Tensor, optional): Unused input-node validity mask.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): Batch vector
                 :math:`\mathbf{b} \in \{0,\ldots,B-1\}^{N}` for sparse inputs.

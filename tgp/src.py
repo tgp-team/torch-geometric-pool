@@ -10,11 +10,10 @@ from torch_geometric.utils import to_dense_adj, to_dense_batch
 
 from tgp.connect import Connect
 from tgp.lift import Lift
-from tgp.reduce import Reduce, dense_global_reduce, global_reduce
+from tgp.reduce import Reduce
 from tgp.select import Select, SelectOutput
 from tgp.utils import Signature, connectivity_to_edge_index, foo_signature
-from tgp.utils.ops import dense_to_block_diag, is_dense_adj
-from tgp.utils.typing import ReduceType
+from tgp.utils.ops import build_pooled_batch, dense_to_block_diag, is_dense_adj
 
 
 @dataclass
@@ -27,10 +26,10 @@ class PoolingOutput:
         edge_weight (~torch.Tensor, optional): The edge features of the coarsened
             graph. (default: :obj:`None`)
         batch (~torch.Tensor, optional): The batch vector of the pooled nodes.
-        mask (~torch.Tensor, optional): Optional boolean mask of shape :math:`[B, K]` indicating
-            valid supernodes when batched dense output has variable supernode counts (e.g. LaPool,
-            BNPool). When output is sparse, mask is always :obj:`None`. (default: :obj:`None`)
         so (:class:`~tgp.select.SelectOutput`): The selection output. (default: :obj:`None`)
+        mask: Derived from :obj:`so.out_mask` when :obj:`so` is set.
+            This is a pooled-supernode validity mask of shape :math:`[B, K]`
+            (or :math:`[1, K]` for single-graph dense assignments).
         loss (Optional[Dict], optional): The loss dictionary. (default: :obj:`None`)
     """
 
@@ -38,9 +37,13 @@ class PoolingOutput:
     edge_index: Optional[Tensor] = None
     edge_weight: Optional[Tensor] = None
     batch: Optional[Tensor] = None
-    mask: Optional[Tensor] = None
     so: Optional[SelectOutput] = None
     loss: Optional[Dict] = None
+
+    @property
+    def mask(self) -> Optional[Tensor]:
+        """Pooled-supernode validity mask, derived from :obj:`so.out_mask`."""
+        return self.so.out_mask if self.so is not None else None
 
     def __repr__(self) -> str:
         return (
@@ -53,8 +56,18 @@ class PoolingOutput:
             f"loss={list(self.loss.keys()) if self.loss is not None else None})"
         )
 
-    def __iter__(self) -> Iterator:
-        return iter(self.__dict__.values())
+    def __iter__(self) -> Iterator:  # TODO: check this method
+        return iter(
+            (
+                self.x,
+                self.edge_index,
+                self.edge_weight,
+                self.batch,
+                self.mask,
+                self.so,
+                self.loss,
+            )
+        )
 
     @property
     def has_loss(self):
@@ -125,8 +138,6 @@ class SRCPooling(torch.nn.Module):
         cached (bool, optional): If set to :obj:`True`, will cache the
             :class:`~tgp.select.Select` output and the :class:`~tgp.connect.Connect`
             output. (default: :obj:`False`)
-        node_dim (int, optional): The dimension of the node features.
-            (default: :obj:`-2`)
     """
 
     def __init__(
@@ -136,14 +147,12 @@ class SRCPooling(torch.nn.Module):
         lifter: Lift = None,
         connector: Connect = None,
         cached: bool = False,
-        node_dim: int = -2,
     ):
         super().__init__()
         self.selector = selector
         self.reducer = reducer
         self.lifter = lifter
         self.connector = connector
-        self.node_dim = node_dim
         self.cached = cached
         self._so_cached = None
         self._pooled_edge_index = None
@@ -225,20 +234,6 @@ class SRCPooling(torch.nn.Module):
         """Preprocess inputs, if needed."""
         return x, edge_index, None
 
-    def global_pool(
-        self,
-        x: Tensor,
-        reduce_op: ReduceType = "sum",
-        batch: Optional[Tensor] = None,
-        size: Optional[int] = None,
-        mask: Optional[Tensor] = None,
-    ) -> Tensor:
-        r"""Global pooling operation.
-
-        It is just a wrapper for :func:`~tgp.reduce.global_reduce`.
-        """
-        return global_reduce(x, reduce_op, batch, size, self.node_dim, mask=mask)
-
     @property
     def is_dense(self) -> bool:
         """Returns :obj:`True` if the pooler uses dense assignments."""
@@ -319,13 +314,10 @@ class DenseSRCPooling(SRCPooling):
 
     It provides a preprocessing function that transform a batch of graphs in
     sparse representation into a batch of dense graphs.
-    It also specifies how to perform global pooling through the
-    :func:`~tgp.reduce.dense_global_reduce` function.
-
     When :attr:`batched=True`, dense poolers accept either raw sparse inputs
     (which are converted internally) or already-dense padded tensors. In the
-    latter case, an external boolean mask can be provided to mark valid nodes;
-    otherwise a full-ones mask is assumed.
+    latter case, an external input-node validity mask can be provided to mark
+    real (non-padded) nodes; otherwise a full-ones mask is assumed.
 
     Args:
         selector (:class:`~tgp.select.Select`): The *dense* :math:`\texttt{select}` operator.
@@ -340,8 +332,6 @@ class DenseSRCPooling(SRCPooling):
             :meth:`~tgp.src.DenseSRCPooling.preprocessing`. This should only be
             enabled when the same graph is reused across iterations (e.g.,
             transductive single-graph tasks). (default: :obj:`False`)
-        node_dim (int, optional): The dimension of the node features.
-            (default: :obj:`-2`)
         adj_transpose (bool, optional):
             If :obj:`True`, the preprocessing step and
             the :class:`~tgp.connect.DenseConnect` operation returns transposed
@@ -365,7 +355,6 @@ class DenseSRCPooling(SRCPooling):
         lifter: Lift = None,
         connector: Connect = None,
         cached: bool = False,
-        node_dim: int = -2,
         adj_transpose: bool = False,
         batched: bool = True,
         sparse_output: bool = False,
@@ -377,7 +366,6 @@ class DenseSRCPooling(SRCPooling):
             lifter=lifter,
             connector=connector,
             cached=cached,
-            node_dim=node_dim,
         )
         self.batched = batched
         self.sparse_output = sparse_output
@@ -436,8 +424,8 @@ class DenseSRCPooling(SRCPooling):
             of the largest graph in the batch.
             :obj:`adj` is the tensor of shape :math:`[B, N_\text{max}, N_\text{max}]`
             containing the batched and dense adjacency matrices.
-            :obj:`mask` is the tensor of shape :math:`[B, N_\text{max}, F]`
-            indicating which nodes in the batch are valid or padded.
+            :obj:`mask` is the tensor of shape :math:`[B, N_\text{max}]`
+            indicating which nodes in the batch are real or padded.
         """
         if use_cache and self.preprocessing_cache is not None:
             adj = self.preprocessing_cache
@@ -520,33 +508,36 @@ class DenseSRCPooling(SRCPooling):
         batch: Optional[Tensor],
         batch_pooled: Optional[Tensor],
         so: SelectOutput,
-        mask: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor]]:
         """Convert batched dense outputs to block-diagonal sparse representation.
 
-        When :obj:`mask` is provided (shape :math:`[B, K]`), only valid supernodes and
-        edges between them are included in the output (no padding in the sparse
-        representation). When :obj:`mask` is None, all nodes are kept (current behavior).
+        Uses :obj:`so.out_mask` when available so only valid supernodes and
+        edges between them are included. When :obj:`so.out_mask` is :obj:`None`,
+        all pooled nodes are kept.
         """
         B, K = adj_pool.size(0), adj_pool.size(1)
         x_flat = x_pool.reshape(-1, x_pool.size(-1))
+        out_mask = so.out_mask
 
         if batch_pooled is None and batch is not None:
             batch_pooled = self.reducer.reduce_batch(so, batch)
         if batch_pooled is None and B > 1:
-            batch_pooled = torch.arange(B, device=x_pool.device).repeat_interleave(K)
+            batch_pooled = build_pooled_batch(B, K, x_pool.device)
+        if batch_pooled is None and out_mask is not None:
+            # Single graph, no batch, dense path
+            batch_pooled = torch.zeros(B * K, dtype=torch.long, device=x_pool.device)
 
-        if mask is not None:
-            mask_flat = mask.reshape(-1)
-            valid_indices = mask_flat.nonzero(as_tuple=True)[0]
+        if out_mask is not None:
+            valid_flat = out_mask.reshape(-1)
+            valid_indices = valid_flat.nonzero(as_tuple=True)[0]
             num_valid = valid_indices.size(0)
             x_pool = x_flat[valid_indices]
-            batch_pooled = batch_pooled[mask_flat]
+            batch_pooled = batch_pooled[valid_flat]
             # Zero out edges at padded positions so dense_to_block_diag only sees valid edges
             adj_masked = (
                 adj_pool
-                * mask.unsqueeze(-1).to(adj_pool.dtype)
-                * mask.unsqueeze(-2).to(adj_pool.dtype)
+                * out_mask.unsqueeze(-1).to(adj_pool.dtype)
+                * out_mask.unsqueeze(-2).to(adj_pool.dtype)
             )
             edge_index, edge_weight = dense_to_block_diag(adj_masked)
             # Remap node indices from [0 .. B*K-1] to compact [0 .. num_valid-1]
@@ -568,25 +559,6 @@ class DenseSRCPooling(SRCPooling):
             x_pool = x_flat
 
         return x_pool, edge_index, edge_weight, batch_pooled
-
-    def global_pool(
-        self,
-        x: Tensor,
-        reduce_op: ReduceType = "sum",
-        batch: Optional[Tensor] = None,
-        size: Optional[int] = None,
-        mask: Optional[Tensor] = None,
-    ) -> Tensor:
-        r"""Global pooling operation for dense pooling methods.
-
-        When :obj:`mask` is provided (e.g. :obj:`out.mask` from variable-size
-        batched dense poolers like LaPool/BNPool), only valid nodes are aggregated.
-        """
-        if not self.sparse_output:
-            if x.dim() == 2:
-                x = x.unsqueeze(0)
-            return dense_global_reduce(x, reduce_op, self.node_dim, mask=mask)
-        return global_reduce(x, reduce_op, batch, size, self.node_dim)
 
 
 class Precoarsenable:

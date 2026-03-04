@@ -1,16 +1,19 @@
+from .aggr_reduce import AggrReduce
 from .base_reduce import BaseReduce, Reduce
 from .eigenpool_reduce import EigenPoolReduce
-from .global_reduce import dense_global_reduce, global_reduce
+from .get_aggr import get_aggr
+from .global_reduce import GlobalReduce
 
 reduce_functions = [
-    "global_reduce",
-    "dense_global_reduce",
+    "get_aggr",
 ]
 
 reduce_classes = [
+    "AggrReduce",
     "Reduce",
     "BaseReduce",
     "EigenPoolReduce",
+    "GlobalReduce",
 ]
 
 __all__ = reduce_classes + reduce_functions

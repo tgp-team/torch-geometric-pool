@@ -68,11 +68,6 @@ class EdgeContractionPooling(SRCPooling):
               :math:`\mathbf{S}^\top`, the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as
               :math:`\mathbf{S}^+`, the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        reduce_red_op (~tgp.utils.typing.ReduceType, optional): The aggregation function
-            to be applied to nodes in the same cluster. Can be any string admitted by
-            :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
-            (default: :obj:`sum`)
         connect_red_op (~tgp.typing.ConnectionType, optional): The aggregation function to
             be applied to all edges connecting nodes assigned to supernodes :math:`i` and
             :math:`j`. Can be any string of class :class:`~tgp.utils.typing.ConnectionType`
@@ -99,7 +94,6 @@ class EdgeContractionPooling(SRCPooling):
         add_to_edge_score: float = 0.5,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
-        reduce_red_op: ReduceType = "sum",
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
         remove_self_loops: bool = True,
@@ -114,7 +108,7 @@ class EdgeContractionPooling(SRCPooling):
                 add_to_edge_score=add_to_edge_score,
                 s_inv_op=s_inv_op,
             ),
-            reducer=BaseReduce(reduce_op=reduce_red_op),
+            reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
                 reduce_op=connect_red_op,

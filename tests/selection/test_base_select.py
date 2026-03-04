@@ -2,7 +2,9 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
+from tgp.data import PooledBatch
 from tgp.select.base_select import Select, SelectOutput, cluster_to_s
+from tgp.utils.ops import get_mask_from_dense_s
 
 
 def test_cluster_to_s_as_edge_index():
@@ -139,14 +141,16 @@ def test_selectoutput_apply_updates_extra_tensor_args():
 
 def test_data_to_moves_selectoutput_extra_tensors_in_nested_pooled_data():
     root_so = SelectOutput(
-        s=torch.eye(2),
+        s=torch.eye(2).unsqueeze(0),
         theta=torch.ones(2, 2),
         theta_list=[torch.zeros(2, 2)],
+        in_mask=torch.tensor([[True, False]], dtype=torch.bool),
     )
     pooled_so = SelectOutput(
-        s=torch.eye(2),
+        s=torch.eye(2).unsqueeze(0),
         theta=torch.ones(2, 2),
         theta_list=[torch.zeros(2, 2)],
+        in_mask=torch.tensor([[True, True]], dtype=torch.bool),
     )
     data = Data(so=root_so, pooled_data=[Data(so=pooled_so)])
 
@@ -155,9 +159,119 @@ def test_data_to_moves_selectoutput_extra_tensors_in_nested_pooled_data():
     assert data.so.s.device.type == "meta"
     assert data.so.theta.device.type == "meta"
     assert data.so.theta_list[0].device.type == "meta"
+    assert data.so.in_mask.device.type == "meta"
     assert data.pooled_data[0].so.s.device.type == "meta"
     assert data.pooled_data[0].so.theta.device.type == "meta"
     assert data.pooled_data[0].so.theta_list[0].device.type == "meta"
+    assert data.pooled_data[0].so.in_mask.device.type == "meta"
+
+
+def test_selectoutput_to_moves_batch_and_in_mask():
+    so = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        batch=torch.tensor([0], dtype=torch.long),
+        in_mask=torch.tensor([[True, True, False]], dtype=torch.bool),
+    )
+
+    so_meta = so.clone().to("meta")
+    assert so_meta.s.device.type == "meta"
+    assert so_meta.batch.device.type == "meta"
+    assert so_meta.in_mask.device.type == "meta"
+
+
+def test_selectoutput_collate_and_separate_preserve_in_mask():
+    so_1 = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        in_mask=torch.tensor([[True, True, False]], dtype=torch.bool),
+    )
+    so_2 = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        in_mask=torch.tensor([[True, False, False]], dtype=torch.bool),
+    )
+
+    batch = PooledBatch.from_data_list([Data(so=so_1), Data(so=so_2)])
+    assert batch.so.in_mask.shape == (2, 3)
+    assert torch.equal(batch.so.in_mask[0], so_1.in_mask[0])
+    assert torch.equal(batch.so.in_mask[1], so_2.in_mask[0])
+
+    separated_0 = batch.get_example(0)
+    separated_1 = batch.get_example(1)
+    assert torch.equal(separated_0.so.in_mask, so_1.in_mask)
+    assert torch.equal(separated_1.so.in_mask, so_2.in_mask)
+
+
+def test_selectoutput_collate_rejects_partial_in_mask():
+    so_with_mask = SelectOutput(
+        s=torch.eye(3).unsqueeze(0),
+        in_mask=torch.tensor([[True, True, False]], dtype=torch.bool),
+    )
+    so_without_mask = SelectOutput(s=torch.eye(3).unsqueeze(0))
+
+    with pytest.raises(ValueError, match="different extra attributes"):
+        PooledBatch.from_data_list([Data(so=so_with_mask), Data(so=so_without_mask)])
+
+
+def test_selectoutput_in_mask_must_be_2d():
+    # in_mask is batched only: must be 2D [B, N]
+    s = torch.eye(4)
+    with pytest.raises(ValueError, match="in_mask must be 2D"):
+        SelectOutput(s=s, in_mask=torch.tensor([True, True, False, True]))
+    # 2D is accepted
+    so = SelectOutput(
+        s=s.unsqueeze(0).expand(2, 4, 4),
+        in_mask=torch.ones(2, 4, dtype=torch.bool),
+    )
+    assert so.in_mask.shape == (2, 4)
+
+
+def test_selectoutput_in_mask_requires_batched_dense_s():
+    s = torch.eye(4)
+    with pytest.raises(ValueError, match="only supported for batched dense"):
+        SelectOutput(s=s, in_mask=torch.ones(1, 4, dtype=torch.bool))
+
+
+def test_selectoutput_in_mask_shape_must_match_s():
+    s = torch.eye(4).unsqueeze(0).expand(2, 4, 4)
+    with pytest.raises(ValueError, match="must have shape"):
+        SelectOutput(s=s, in_mask=torch.ones(2, 5, dtype=torch.bool))
+
+
+def test_selectoutput_out_mask_2d_dense_with_batch():
+    """out_mask returns [B, K] for 2D dense s with batch (unbatched dense poolers)."""
+    # Two graphs: graph 0 has 3 nodes, graph 1 has 2 nodes; K=4 clusters
+    # s[0:3] belong to graph 0, s[3:5] to graph 1
+    s = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.5, 0.5, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    batch = torch.tensor([0, 0, 0, 1, 1])
+    so = SelectOutput(s=s, batch=batch)
+    mask = so.out_mask
+    assert mask is not None
+    assert mask.dim() == 2
+    assert mask.shape == (2, 4)
+    expected = get_mask_from_dense_s(s, batch)
+    assert torch.equal(mask, expected)
+    # Graph 0 uses clusters 0, 1, 2; graph 1 uses clusters 1, 3
+    assert mask[0, 0] and mask[0, 1] and mask[0, 2] and not mask[0, 3]
+    assert not mask[1, 0] and mask[1, 1] and not mask[1, 2] and mask[1, 3]
+
+
+def test_selectoutput_out_mask_2d_dense_no_batch():
+    """out_mask returns [1, K] for 2D dense s without batch (single graph)."""
+    s = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32)
+    so = SelectOutput(s=s)
+    mask = so.out_mask
+    assert mask is not None
+    assert mask.dim() == 2
+    assert mask.shape == (1, 2)
+    assert torch.equal(mask, get_mask_from_dense_s(s, None))
 
 
 def test_selectoutput_invalid_init():

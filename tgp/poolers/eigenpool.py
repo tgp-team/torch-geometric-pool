@@ -1,7 +1,6 @@
 import warnings
 from typing import Optional, Union
 
-import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 
@@ -10,6 +9,7 @@ from tgp.lift import EigenPoolLift
 from tgp.reduce import EigenPoolReduce
 from tgp.select import EigenPoolSelect, SelectOutput
 from tgp.src import BasePrecoarseningMixin, DenseSRCPooling, PoolingOutput
+from tgp.utils.ops import build_pooled_batch
 from tgp.utils.typing import LiftType, SinvType
 
 
@@ -186,7 +186,8 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
             so (~tgp.select.SelectOutput, optional):
                 Pre-computed selection output. (default: :obj:`None`)
             mask (~torch.Tensor, optional):
-                Unused, kept for API compatibility. (default: :obj:`None`)
+                Unused input-node validity mask.
+                (default: :obj:`None`)
             batch (~torch.Tensor, optional):
                 Batch vector for sparse multi-graph inputs. (default: :obj:`None`)
             batch_pooled (~torch.Tensor, optional):
@@ -207,9 +208,7 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
                 B, K, F = x.shape
                 x_pool = x.view(-1, F)
                 if batch_pooled is None:
-                    batch_pooled = torch.arange(
-                        B, dtype=torch.long, device=x.device
-                    ).repeat_interleave(K)
+                    batch_pooled = build_pooled_batch(B, K, x.device)
             return self.lift(
                 x_pool=x_pool,
                 so=so,

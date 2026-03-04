@@ -330,10 +330,16 @@ def _collate(
             batch_collated = None
             batch_slices = None
 
-        # Handle extra_args (excluding batch which is now a proper attribute)
+        # Handle extra_args (excluding batch which is a first-class attribute).
+        extra_keys = set(elem._extra_args)
+        for v in values[1:]:
+            if set(v._extra_args) != extra_keys:
+                raise ValueError(
+                    "Cannot collate SelectOutput objects with different extra attributes."
+                )
         extra_args = dict()
         extra_slices = dict()
-        for k in elem._extra_args:
+        for k in sorted(extra_keys):
             attr_values = [getattr(v, k) for v in values]
             k_value, k_slices, k_incs = _collate(
                 key,

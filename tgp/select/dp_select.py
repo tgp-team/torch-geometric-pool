@@ -150,9 +150,10 @@ class DPSelect(MLPSelect):
                 If :obj:`batched_representation=True`, expected shape is :math:`\mathbb{R}^{B \times N \times F}`.
                 If :obj:`batched_representation=False`, expected shape is :math:`\mathbb{R}^{N \times F}`,
                 where :math:`N` is the total number of nodes across all graphs in the batch.
-            mask (~torch.Tensor, optional): Mask matrix :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}`
-                indicating the valid nodes for each graph. Only used when :obj:`batched_representation=True`.
-                (default: :obj:`None`)
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+                :obj:`True` on real (non-padded) nodes. Only used when
+                :obj:`batched_representation=True`. (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`,
                 which indicates to which graph in the batch each node belongs.
                 Only used when :obj:`batched_representation=False`.

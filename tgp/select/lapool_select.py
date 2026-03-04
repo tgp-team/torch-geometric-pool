@@ -18,6 +18,7 @@ from tgp.utils import (
     check_and_filter_edge_weights,
     connectivity_to_edge_index,
     is_dense_adj,
+    is_multi_graph_batch,
 )
 from tgp.utils.typing import SinvType
 
@@ -162,9 +163,9 @@ class LaPoolSelect(Select):
                 to which graph in the batch each node belongs.
                 (default: :obj:`None`)
             mask (~torch.Tensor, optional):
-                Mask matrix :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph (batched mode only).
-                (default: :obj:`None`)
+                Input-node validity mask :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}`
+                with :obj:`True` on real (non-padded) nodes in each graph
+                (batched mode only). (default: :obj:`None`)
             num_nodes (int, optional):
                 The total number of nodes of the graphs in the batch.
                 (default: :obj:`None`)
@@ -191,7 +192,7 @@ class LaPoolSelect(Select):
                 )
 
             s = self._forward_batched(x, edge_index, mask)
-            return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask)
+            return SelectOutput(s=s, s_inv_op=self.s_inv_op, in_mask=mask)
 
         if x.dim() != 2:
             raise ValueError("x must have shape [N, F].")
@@ -316,11 +317,7 @@ class LaPoolSelect(Select):
         num_nodes: int,
     ) -> Tensor:
         # Multi-graph: run single-graph path per graph, pad to K_max, concatenate
-        if (
-            batch is not None
-            and batch.numel() > 0
-            and int(batch.min().item()) != int(batch.max().item())
-        ):
+        if is_multi_graph_batch(batch):
             edge_index, edge_weight = connectivity_to_edge_index(
                 edge_index, edge_weight
             )

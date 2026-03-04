@@ -170,10 +170,10 @@ class DMoNPooling(DenseSRCPooling):
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
-            mask (~torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes in each graph. Only used when inputs are already
-                dense/padded. (default: :obj:`None`)
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+                :obj:`True` on real (non-padded) nodes in each graph. Only used
+                when inputs are already dense/padded. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 
@@ -259,9 +259,9 @@ class DMoNPooling(DenseSRCPooling):
             adj (~torch.Tensor): The dense adjacency matrix.
             S (~torch.Tensor): The dense assignment matrix.
             adj_pooled (~torch.Tensor): The pooled adjacency matrix.
-            mask (~torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes for each graph. (default: :obj:`None`)
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+                :obj:`True` on real (non-padded) nodes. (default: :obj:`None`)
 
         Returns:
             dict: A dictionary with the different terms of

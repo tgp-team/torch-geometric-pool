@@ -82,47 +82,186 @@ def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
     return edge_index, edge_weight
 
 
+# TODO: mask out entries with value < eps? maybe useful in bnpool and in general to filter out weak assignments
 def get_mask_from_dense_s(
     s: Tensor,
     batch: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Build a dense boolean mask of shape :math:`[B, K]` indicating which
-    supernodes have at least one assigned node.
+    r"""Build a pooled-supernode validity mask from a dense assignment matrix.
 
-    Use this when returning a dense :class:`~tgp.src.PoolingOutput`
-    (e.g. :obj:`sparse_output=False`) so that downstream layers and global
-    pooling can ignore padding. Works for both batched and unbatched paths,
-    and for both dense and sparse assignment matrices :obj:`s`.
+    The returned mask has shape :math:`[B, K]`, where each entry is :obj:`True`
+    iff supernode :math:`k` has at least one assigned input node in graph :math:`b`.
+
+    This helper supports both dense assignment layouts:
+    - :math:`s \in \mathbb{R}^{B \times N \times K}` (batched dense path).
+    - :math:`s \in \mathbb{R}^{N \times K}` with optional :obj:`batch`:
+      - if :obj:`batch` is provided, :math:`N` may contain nodes from multiple graphs;
+      - if :obj:`batch` is :obj:`None`, it is treated as a single graph and the
+        output has shape :math:`[1, K]`.
 
     Args:
-        s (~torch.Tensor): Assignment matrix of shape :math:`[N, K]` or :math:`[B, N, K]`.
-        batch: Batch vector of shape :math:`[N]` when multiple graphs are
-            present (unbatched path with batch). If :obj:`None`, returns
-            mask of shape :math:`[1, K]`.
+        s (~torch.Tensor): Dense assignment tensor of shape :math:`[N, K]` or
+            :math:`[B, N, K]`.
+        batch (~torch.Tensor, optional): Node-to-graph assignment of shape
+            :math:`[N]` for the 2D case.
 
     Returns:
-        Boolean tensor of shape :math:`[B, K]` with :math:`B=1` when
-        :obj:`batch` is :obj:`None`.
+        ~torch.Tensor: Boolean validity mask of shape :math:`[B, K]`.
     """
-    K = s.size(-1)
+    num_supernodes = s.size(-1)
     device = s.device
 
     assert not s.is_sparse, "s must be a dense tensor"
+    if s.dim() not in (2, 3):
+        raise ValueError(f"s must have shape [N, K] or [B, N, K], got ndim={s.dim()}")
+
     # Dense S: [N, K] or [B, N, K]
     if s.dim() == 3:
         mask = s.sum(dim=-2) > 0
         return mask
-    # 2D [N, K]: single graph (batch None) or multi-graph (batch provided)
+    # 2D [N, K]: single graph (batch None) or multi-graph sparse-batch (batch provided)
     if batch is None:
         mask = (s.sum(dim=-2) > 0).unsqueeze(0)
         return mask
     batch_size = int(batch.max().item()) + 1
-    mask = torch.zeros(batch_size, K, dtype=torch.bool, device=device)
+    mask = torch.zeros(batch_size, num_supernodes, dtype=torch.bool, device=device)
     for b in range(batch_size):
         node_mask = batch == b
         if node_mask.any():
             mask[b] = s[node_mask].sum(dim=0) > 0
     return mask
+
+
+def is_multi_graph_batch(batch: Optional[Tensor]) -> bool:
+    r"""Return :obj:`True` if :obj:`batch` represents more than one graph.
+
+    Args:
+        batch (~torch.Tensor, optional): Node-to-graph assignment vector.
+
+    Returns:
+        bool: :obj:`True` when :obj:`batch` is not :obj:`None`, non-empty, and
+        contains at least two distinct graph ids.
+    """
+    return (
+        batch is not None
+        and batch.numel() > 0
+        and int(batch.min().item()) != int(batch.max().item())
+    )
+
+
+def build_pooled_batch(
+    batch_size: int,
+    num_supernodes: int,
+    device: torch.device,
+    dtype: torch.dtype = torch.long,
+) -> Tensor:
+    r"""Build a pooled batch vector for block-structured pooled outputs.
+
+    The returned vector has shape :math:`[B \cdot K]` and follows:
+    :math:`[0, \ldots, 0, 1, \ldots, 1, \ldots, B-1, \ldots, B-1]`,
+    where each graph id is repeated :math:`K` times.
+
+    This is the standard layout when each input graph contributes exactly
+    :math:`K` pooled supernodes stored contiguously.
+    """
+    return torch.arange(batch_size, dtype=dtype, device=device).repeat_interleave(
+        num_supernodes
+    )
+
+
+def apply_dense_node_mask(
+    x: Tensor,
+    mask: Tensor,
+) -> Tuple[Tensor, Tensor]:
+    r"""Flatten dense node features and keep only valid rows from :obj:`mask`.
+
+    Args:
+        x (~torch.Tensor): Dense node features of shape ``[B, N, F]``.
+        mask (~torch.Tensor): Boolean validity mask of shape ``[B, N]``.
+
+    Returns:
+        tuple:
+            - **x_valid** (*~torch.Tensor*): Valid rows from ``x`` with shape
+              ``[N_valid, F]``.
+            - **batch_valid** (*~torch.Tensor*): Graph ids for each valid row
+              with shape ``[N_valid]``.
+    """
+    if x.dim() != 3:
+        raise ValueError(
+            f"apply_dense_node_mask expects x to be 3D [B, N, F], got ndim={x.dim()}"
+        )
+    if mask.dim() != 2 or tuple(mask.shape) != tuple(x.shape[:2]):
+        raise ValueError(
+            "apply_dense_node_mask expects mask shape "
+            f"[B, N]={tuple(x.shape[:2])}, got {tuple(mask.shape)}"
+        )
+
+    B, N, F = x.shape
+    valid = mask.reshape(-1).nonzero(as_tuple=True)[0]
+    x_flat = x.reshape(B * N, F)
+    batch_flat = torch.arange(B, device=x.device, dtype=torch.long).repeat_interleave(N)
+    return x_flat[valid], batch_flat[valid]
+
+
+def expand_compacted_rows(
+    x_compact: Tensor,
+    valid_mask: Optional[Tensor],
+    expected_rows: int,
+) -> Tensor:
+    r"""Expand a compact row-wise tensor back to a padded dense layout.
+
+    This helper takes a compact representation containing only valid rows and
+    a boolean validity mask over the full layout, then reconstructs the full
+    tensor by placing compact rows at valid positions and filling invalid rows
+    with zeros.
+
+    Args:
+        x_compact (~torch.Tensor): Compact tensor of shape ``[N_valid, *]``.
+        valid_mask (~torch.Tensor, optional): Boolean mask over the full layout.
+            It is flattened internally and must contain :obj:`expected_rows`
+            entries (for example, shape ``[B, K]`` for pooled supernodes).
+        expected_rows (int): Number of rows in the reconstructed dense tensor.
+
+    Returns:
+        ~torch.Tensor: Padded tensor of shape ``[expected_rows, *]``.
+
+    .. admonition:: Example
+
+        Let ``B=3`` and ``K=4``. Suppose valid pooled slots are:
+
+        ``valid_mask = [[1, 1, 0, 0], [1, 0, 1, 1], [1, 0, 0, 0]]``.
+
+        Then ``expected_rows = B*K = 12``, while a compact feature tensor might
+        have only ``N_valid = 6`` rows:
+
+        ``x_compact.shape = [6, F]``.
+
+        Flattening ``valid_mask`` yields valid indices ``[0, 1, 4, 6, 7, 8]``.
+        The output has shape ``[12, F]`` with compact rows written at those
+        indices and zeros elsewhere.
+    """
+    if x_compact.dim() == 0:
+        raise ValueError("x_compact must be at least 1D with a row dimension.")
+
+    if valid_mask is None or valid_mask.numel() != expected_rows:
+        got = None if valid_mask is None else int(valid_mask.numel())
+        raise ValueError(
+            "Cannot expand compact rows: valid_mask must contain exactly "
+            f"{expected_rows} entries (got {got})."
+        )
+
+    valid_indices = valid_mask.reshape(-1).nonzero(as_tuple=True)[0]
+    if valid_indices.size(0) != x_compact.size(0):
+        raise ValueError(
+            "Cannot expand compact rows: x_compact has "
+            f"{x_compact.size(0)} rows but valid_mask marks "
+            f"{valid_indices.size(0)} valid rows."
+        )
+
+    out_shape = (expected_rows, *x_compact.shape[1:])
+    x_padded = x_compact.new_zeros(out_shape)
+    x_padded[valid_indices] = x_compact
+    return x_padded
 
 
 def is_dense_adj(edge_index: Adj) -> bool:

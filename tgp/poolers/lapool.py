@@ -8,7 +8,6 @@ from tgp.lift import BaseLift
 from tgp.reduce import BaseReduce
 from tgp.select import LaPoolSelect, SelectOutput
 from tgp.src import DenseSRCPooling, PoolingOutput
-from tgp.utils import get_mask_from_dense_s
 from tgp.utils.typing import LiftType, ReduceType, SinvType
 
 
@@ -55,11 +54,6 @@ class LaPooling(DenseSRCPooling):
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        reduce_red_op (~tgp.utils.typing.ReduceType, optional):
-            The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
-            (default: :obj:`sum`)
         connect_red_op (~tgp.typing.ConnectionType, optional):
             The aggregation function to be applied to all edges connecting nodes assigned
             to supernodes :math:`i` and :math:`j`.
@@ -89,7 +83,6 @@ class LaPooling(DenseSRCPooling):
         edge_weight_norm: bool = False,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
-        reduce_red_op: ReduceType = "sum",
         lift_red_op: ReduceType = "sum",
         batched: bool = True,
         sparse_output: bool = False,
@@ -100,7 +93,7 @@ class LaPooling(DenseSRCPooling):
                 batched_representation=batched,
                 s_inv_op=s_inv_op,
             ),
-            reducer=BaseReduce(reduce_op=reduce_red_op),
+            reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=DenseConnect(
                 remove_self_loops=remove_self_loops,
@@ -154,8 +147,10 @@ class LaPooling(DenseSRCPooling):
                 batches. Pass `out.batch` from the pooling call. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
-            mask (~torch.Tensor, optional): Optional boolean mask indicating valid nodes
-                in each graph. Only used when inputs are already dense/padded.
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}`, where :obj:`True`
+                marks real (non-padded) nodes. Only used when inputs are already
+                dense/padded.
                 (default: :obj:`None`)
 
         Returns:
@@ -195,7 +190,6 @@ class LaPooling(DenseSRCPooling):
             )
 
             if self.sparse_output:
-                mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
                 x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
                     self._finalize_sparse_output(
                         x_pool=x_pooled,
@@ -203,7 +197,6 @@ class LaPooling(DenseSRCPooling):
                         batch=batch,
                         batch_pooled=batch_pooled,
                         so=so,
-                        mask=mask_pool,
                     )
                 )
                 return PoolingOutput(
@@ -214,8 +207,7 @@ class LaPooling(DenseSRCPooling):
                     so=so,
                 )
 
-            mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
-            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, mask=mask_pool)
+            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so)
 
         # === Unbatched path ===
         # Select
@@ -242,18 +234,12 @@ class LaPooling(DenseSRCPooling):
             batch_pooled=batch_pooled,
         )
 
-        mask_pool = (
-            get_mask_from_dense_s(s=so.s, batch=batch)
-            if not self.sparse_output
-            else None
-        )
         out = PoolingOutput(
             x=x_pooled,
             edge_index=edge_index_pooled,
             edge_weight=edge_weight_pooled,
             batch=batch_pooled,
             so=so,
-            mask=mask_pool,
         )
         return out
 

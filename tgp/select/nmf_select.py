@@ -7,7 +7,7 @@ from torch_geometric.typing import Adj
 from torch_geometric.utils import to_dense_adj
 
 from tgp.select import Select, SelectOutput
-from tgp.utils.ops import connectivity_to_edge_index
+from tgp.utils.ops import connectivity_to_edge_index, is_multi_graph_batch
 from tgp.utils.typing import SinvType
 
 
@@ -151,11 +151,7 @@ class NMFSelect(Select):
         )
         device = edge_index_conv.device
 
-        is_single_graph = (
-            batch is None
-            or batch.numel() == 0
-            or int(batch.min().item()) == int(batch.max().item())
-        )
+        is_single_graph = not is_multi_graph_batch(batch)
 
         # Single sparse graph: return [N, actual_k].
         if is_single_graph:

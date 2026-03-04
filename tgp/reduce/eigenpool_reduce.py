@@ -6,6 +6,7 @@ from torch_geometric.utils import unbatch
 
 from tgp.reduce.base_reduce import Reduce
 from tgp.select import SelectOutput
+from tgp.utils.ops import is_multi_graph_batch
 from tgp.utils.typing import ReduceType
 
 
@@ -21,6 +22,10 @@ class EigenPoolReduce(Reduce):
 
     then :math:`\mathbf{X}_{\text{pool,raw}}` is reshaped from mode-major layout
     :math:`[H \cdot K, F]` to :math:`[K, H \cdot F]`.
+
+    :obj:`return_batched` is only used when returning multi-graph results (stack
+    vs concatenate). EigenPool uses 2D inputs with a batch vector; there is no
+    separate dense path.
 
     Args:
         num_modes (int, optional):
@@ -86,14 +91,15 @@ class EigenPoolReduce(Reduce):
                 method uses :obj:`so.batch` when available.
                 (default: :obj:`None`)
             edge_index (~torch.Tensor, optional):
-                Unused for EigenPooling; kept for API compatibility.
+                Unused by EigenPooling.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional):
-                Unused for EigenPooling; kept for API compatibility.
+                Unused by EigenPooling.
                 (default: :obj:`None`)
             return_batched (bool, optional):
-                If :obj:`True`, returns :math:`[B, K, H \cdot F]` for multi-graph
-                batches and :math:`[1, K, H \cdot F]` for single graphs.
+                Only used for multi-graph batches. If :obj:`True`, returns
+                :math:`[B, K, H \cdot F]`; otherwise concatenated :math:`[B \cdot K, H \cdot F]`.
+                For single graphs, if :obj:`True` returns :math:`[1, K, H \cdot F]`.
                 (default: :obj:`False`)
 
         Returns:
@@ -106,11 +112,7 @@ class EigenPoolReduce(Reduce):
         num_clusters = so.s.size(-1)
         theta = so.theta
 
-        is_multi_graph = (
-            batch is not None
-            and batch.numel() > 0
-            and int(batch.min().item()) != int(batch.max().item())
-        )
+        is_multi_graph = is_multi_graph_batch(batch)
 
         # Single graph case: directly pool with theta and reshape
         if not is_multi_graph:

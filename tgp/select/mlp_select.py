@@ -84,7 +84,7 @@ class MLPSelect(Select):
         return x
 
     def _apply_mask(self, s: Tensor, mask: Optional[Tensor]) -> Tensor:
-        """Apply a node mask to batched assignment matrices when provided."""
+        """Apply an input-node validity mask to batched assignment matrices."""
         if mask is not None:
             s = s * mask.unsqueeze(-1)
         return s
@@ -99,7 +99,7 @@ class MLPSelect(Select):
     ) -> SelectOutput:
         """Create a SelectOutput with the correct batched/unbatched fields."""
         if self.batched_representation:
-            return SelectOutput(s=s, s_inv_op=self.s_inv_op, mask=mask, **extra)
+            return SelectOutput(s=s, s_inv_op=self.s_inv_op, in_mask=mask, **extra)
         return SelectOutput(s=s, s_inv_op=self.s_inv_op, batch=batch, **extra)
 
     def forward(
@@ -120,9 +120,9 @@ class MLPSelect(Select):
                 If :obj:`batched_representation=False`, expected shape is
                 :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`, where :math:`N`
                 is the total number of nodes across all graphs in the batch.
-            mask (~torch.Tensor, optional): Mask matrix
-                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` indicating
-                the valid nodes for each graph. Only used when
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
+                :obj:`True` on real (non-padded) nodes. Only used when
                 :obj:`batched_representation=True`. (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates

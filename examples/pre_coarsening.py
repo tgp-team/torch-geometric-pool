@@ -7,7 +7,7 @@ from torch_geometric.datasets import TUDataset
 from torch_geometric.nn import ARMAConv
 
 from tgp.data import PoolDataLoader, PreCoarsening
-from tgp.reduce import global_reduce
+from tgp.reduce import GlobalReduce
 
 seed_everything(8)
 
@@ -89,7 +89,10 @@ for schedule_name, level_specs in pooling_schedules.items():
                     )
                 )
 
-            # Readout layer
+            # Readout
+            self.readout = GlobalReduce(reduce_op="sum")
+
+            # Classifier
             self.lin = torch.nn.Linear(hidden_channels, num_classes)
 
         def forward(self, data):
@@ -107,12 +110,12 @@ for schedule_name, level_specs in pooling_schedules.items():
                 x = conv(x, pooled.edge_index, pooled.edge_weight)
                 x = F.relu(x)
 
-            # Global pooling
-            x = global_reduce(
+            # Readout: mask only for dense x (3D)
+            readout_mask = getattr(pooled, "mask", None) if x.dim() == 3 else None
+            x = self.readout(
                 x,
-                reduce_op="sum",
                 batch=pooled.batch,
-                mask=getattr(pooled, "mask", None),
+                mask=readout_mask,
             )
 
             # Readout layer

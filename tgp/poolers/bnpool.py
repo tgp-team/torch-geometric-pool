@@ -13,7 +13,6 @@ from tgp.src import DenseSRCPooling, PoolingOutput
 from tgp.utils import (
     batched_negative_edge_sampling,
     connectivity_to_edge_index,
-    get_mask_from_dense_s,
     negative_edge_sampling,
 )
 from tgp.utils.losses import (
@@ -261,8 +260,10 @@ class BNPool(DenseSRCPooling):
                 (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
-            mask (~torch.Tensor, optional): Optional boolean mask indicating valid nodes
-                in each graph. Only used when inputs are already dense/padded.
+            mask (~torch.Tensor, optional): Input-node validity mask
+                :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}`, where :obj:`True`
+                marks real (non-padded) nodes. Only used when inputs are already
+                dense/padded.
                 (default: :obj:`None`)
 
         Returns:
@@ -296,7 +297,6 @@ class BNPool(DenseSRCPooling):
             loss = self.compute_loss(adj, mask, so)
 
             if self.sparse_output:
-                mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
                 x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
                     self._finalize_sparse_output(
                         x_pool=x_pooled,
@@ -304,7 +304,6 @@ class BNPool(DenseSRCPooling):
                         batch=batch,
                         batch_pooled=batch_pooled,
                         so=so,
-                        mask=mask_pool,
                     )
                 )
                 return PoolingOutput(
@@ -316,10 +315,7 @@ class BNPool(DenseSRCPooling):
                     loss=loss,
                 )
 
-            mask_pool = (so.s.sum(dim=-2) > 0) if so.s.dim() == 3 else None
-            return PoolingOutput(
-                x=x_pooled, edge_index=adj_pool, so=so, loss=loss, mask=mask_pool
-            )
+            return PoolingOutput(x=x_pooled, edge_index=adj_pool, so=so, loss=loss)
 
         # === Unbatched (sparse-loss) path ===
         # Select
@@ -342,11 +338,6 @@ class BNPool(DenseSRCPooling):
             batch_pooled=batch_pooled,
         )
 
-        mask_pool = (
-            get_mask_from_dense_s(s=so.s, batch=batch)
-            if not self.sparse_output
-            else None
-        )
         return PoolingOutput(
             x=x_pooled,
             edge_index=edge_index_pooled,
@@ -354,7 +345,6 @@ class BNPool(DenseSRCPooling):
             batch=batch_pooled,
             so=so,
             loss=loss,
-            mask=mask_pool,
         )
 
     def compute_loss(self, adj, mask, so) -> dict:
@@ -377,8 +367,8 @@ class BNPool(DenseSRCPooling):
 
         Args:
             adj (~torch.Tensor): True adjacency matrix of shape :math:`(B, N, N)` to reconstruct.
-            mask (~torch.Tensor): Boolean node mask of shape :math:`(B, N)` indicating valid nodes.
-                Used to handle variable-sized graphs within batches.
+            mask (~torch.Tensor): Input-node validity mask of shape :math:`(B, N)`,
+                where :obj:`True` marks real (non-padded) nodes.
             so (:class:`~tgp.select.SelectOutput`): Selection output containing:
                 - :attr:`s`: Soft assignment matrix :math:`\mathbf{S} \in \mathbb{R}^{B \times N \times K}`
                 - :attr:`q_z`: Posterior Beta distributions for stick-breaking variables

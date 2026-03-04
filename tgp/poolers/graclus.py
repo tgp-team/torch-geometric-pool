@@ -42,11 +42,6 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
 
-        reduce_red_op (~tgp.utils.typing.ReduceType, optional):
-            The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
-            (default: :obj:`sum`)
         lift_red_op (~tgp.typing.ReduceType, optional):
             The aggregation function to be applied to the lifted node features.
             Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
@@ -72,7 +67,6 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
         self,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
-        reduce_red_op: ReduceType = "sum",
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
         cached: bool = False,
@@ -82,7 +76,7 @@ class GraclusPooling(BasePrecoarseningMixin, SRCPooling):
     ):
         super().__init__(
             selector=GraclusSelect(s_inv_op=s_inv_op),
-            reducer=BaseReduce(reduce_op=reduce_red_op),
+            reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
                 reduce_op=connect_red_op,

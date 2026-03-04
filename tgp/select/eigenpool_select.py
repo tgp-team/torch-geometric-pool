@@ -10,7 +10,7 @@ from torch_geometric.typing import Adj
 from torch_geometric.utils import to_dense_adj
 
 from tgp.select.base_select import Select, SelectOutput
-from tgp.utils.ops import connectivity_to_edge_index
+from tgp.utils.ops import connectivity_to_edge_index, is_multi_graph_batch
 from tgp.utils.typing import SinvType
 
 
@@ -283,11 +283,7 @@ def eigenpool_select(
     if num_nodes == 0:
         raise ValueError("Cannot perform eigenpool selection on empty graph.")
 
-    is_multi_graph = (
-        batch is not None
-        and batch.numel() > 0
-        and int(batch.min().item()) != int(batch.max().item())
-    )
+    is_multi_graph = is_multi_graph_batch(batch)
 
     # Single graph case: compute one assignment and pooling matrix for the entire graph.
     if not is_multi_graph:
@@ -438,7 +434,7 @@ class EigenPoolSelect(Select):
 
         Args:
             x (~torch.Tensor, optional):
-                Node features (unused; kept for API compatibility). (default: :obj:`None`)
+                Node features (unused by EigenPooling). (default: :obj:`None`)
             edge_index (~torch_geometric.typing.Adj, optional):
                 Graph connectivity.
             edge_weight (~torch.Tensor, optional):

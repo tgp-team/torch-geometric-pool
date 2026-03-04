@@ -94,7 +94,6 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         self,
         lift: LiftType = "precomputed",
         s_inv_op: SinvType = "transpose",
-        reduce_red_op: ReduceType = "sum",
         connect_red_op: ConnectionType = "sum",
         lift_red_op: ReduceType = "sum",
         cached: bool = False,
@@ -104,7 +103,7 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
     ):
         super().__init__(
             selector=SEPSelect(s_inv_op=s_inv_op),
-            reducer=BaseReduce(reduce_op=reduce_red_op),
+            reducer=BaseReduce(),
             lifter=BaseLift(matrix_op=lift, reduce_op=lift_red_op),
             connector=SparseConnect(
                 reduce_op=connect_red_op,

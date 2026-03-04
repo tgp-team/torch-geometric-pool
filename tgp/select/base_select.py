@@ -8,7 +8,12 @@ from torch import Tensor
 from torch_geometric.typing import Adj
 
 from tgp.imports import is_sparsetensor
-from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
+from tgp.utils.ops import (
+    connectivity_to_edge_index,
+    get_assignments,
+    get_mask_from_dense_s,
+    pseudo_inverse,
+)
 
 
 def cluster_to_s(
@@ -101,6 +106,7 @@ class SelectOutput:
         weight: Optional[Tensor] = None,
         s_inv_op: Optional[str] = "transpose",
         batch: Optional[Tensor] = None,
+        in_mask: Optional[Tensor] = None,
         **extra_args,
     ):
         super().__init__()
@@ -172,11 +178,34 @@ class SelectOutput:
             self.set_s_inv(s_inv_op)
 
         self.batch = batch
+        self.in_mask = self._validate_in_mask(in_mask)
 
         self._extra_args = set()
+        if self.in_mask is not None:
+            self._extra_args.add("in_mask")
         for k, v in extra_args.items():
             setattr(self, k, v)
             self._extra_args.add(k)
+
+    def _validate_in_mask(self, in_mask: Optional[Tensor]) -> Optional[Tensor]:
+        if in_mask is None:
+            return None
+        if in_mask.dim() != 2:
+            raise ValueError(
+                "SelectOutput.in_mask must be 2D with shape [B, N] (batched representations only)."
+            )
+        if not self.is_dense or self.s.dim() != 3:
+            raise ValueError(
+                "SelectOutput.in_mask is only supported for batched dense assignments "
+                "with shape [B, N, K]."
+            )
+        expected_shape = self.s.shape[:2]
+        if in_mask.shape != expected_shape:
+            raise ValueError(
+                f"SelectOutput.in_mask must have shape {tuple(expected_shape)}, "
+                f"got {tuple(in_mask.shape)}."
+            )
+        return in_mask.to(torch.bool)
 
     @property
     def is_expressive(self) -> bool:
@@ -190,9 +219,10 @@ class SelectOutput:
         if isinstance(row_sum, Tensor) and row_sum.is_sparse:
             row_sum = row_sum.to_dense()
 
-        if "mask" in self._extra_args:
-            mask = getattr(self, "mask")
-            row_sum = row_sum[mask]
+        if self.in_mask is not None:
+            row_sum = row_sum[self.in_mask]
+        if row_sum.numel() == 0:
+            return False
         constant = row_sum[0]
 
         return torch.allclose(
@@ -200,6 +230,25 @@ class SelectOutput:
         ) and not torch.allclose(
             constant, torch.tensor(0, dtype=constant.dtype, device=constant.device)
         )
+
+    @property
+    def out_mask(self) -> Optional[Tensor]:
+        """Boolean validity mask on pooled supernodes with shape :math:`[B, K]`.
+
+        This is inferred from the dense assignment matrix :obj:`s` and marks
+        which supernodes are actually used (have at least one assigned node):
+        - :obj:`s.dim() == 3` (:math:`[B, N, K]`): one mask row per graph.
+        - :obj:`s.dim() == 2` (:math:`[N, K]`):
+          - with :obj:`batch`: one mask row per graph in :obj:`batch`;
+          - without :obj:`batch`: single-graph mask of shape :math:`[1, K]`.
+
+        Returns :obj:`None` for sparse assignments.
+        """
+        if not isinstance(self.s, Tensor) or self.s.is_sparse:
+            return None
+        if self.s.dim() in (2, 3):
+            return get_mask_from_dense_s(self.s, self.batch)
+        return None
 
     @property
     def is_sparse(self) -> bool:

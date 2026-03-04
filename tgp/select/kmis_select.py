@@ -227,8 +227,6 @@ class KMISSelect(Select):
               the transpose of :math:`\mathbf{S}`.
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        node_dim (int, optional):
-            The node dimension in the input feature matrix. (default: :obj:`-2`)
     """
 
     _heuristics = {None, "greedy", "w-greedy"}
@@ -242,7 +240,6 @@ class KMISSelect(Select):
         score_heuristic: Optional[str] = "greedy",
         force_undirected: bool = False,
         s_inv_op: SinvType = "transpose",
-        node_dim: int = -2,
     ):
         super(KMISSelect, self).__init__()
 
@@ -254,7 +251,6 @@ class KMISSelect(Select):
         self.order_k = order_k
         self.scorer = scorer
         self.score_heuristic = score_heuristic
-        self.node_dim = node_dim
         self.force_undirected = force_undirected
         self.s_inv_op = s_inv_op
 
