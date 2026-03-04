@@ -80,24 +80,25 @@ It focuses on public‑facing API/behavior, intended usage, and design tradeoffs
 - **Unbatching in BaseReduce** for dense multi-graph (dense :math:`[N, K]` with a
   batch vector) is **unchanged**: each graph is processed separately for memory
   efficiency when using unbatched dense poolers (:obj:`batched=False`).
-- **get_aggr(alias, **kwargs)**: New helper in :obj:`tgp.reduce` to obtain PyG
+-- **get_aggr(alias, **kwargs)**: New helper in :obj:`tgp.reduce` to obtain PyG
   Aggregation instances by string (e.g. :obj:`"sum"`, :obj:`"mean"`, :obj:`"lstm"`,
-  :obj:`"set2set"`). Use with :obj:`AggrReduce` and :obj:`readout`. Parametrized
-  aggregators accept kwargs such as :obj:`in_channels`, :obj:`out_channels`,
-  :obj:`processing_steps`.
+  :obj:`"set2set"`). Use with :obj:`AggrReduce` and :class:`~tgp.reduce.GlobalReduce`.
+  Parametrized aggregators accept kwargs such as :obj:`in_channels`,
+  :obj:`out_channels`, :obj:`processing_steps`.
 - **Readout** is **no longer a method** on pooler classes. Use
-  :obj:`tgp.reduce.readout(x, reduce_op=..., batch=..., mask=...)` directly. When
-  :obj:`reduce_op` is a string or a PyG Aggregation, readout uses :obj:`AggrReduce`
-  internally with :obj:`so=None` (one cluster per graph). **Mask is only supported
-  for dense x** (3D): sparse masks and invalid dense mask shapes raise
-  :class:`ValueError`.
+  :class:`tgp.reduce.GlobalReduce` for graph-level readout instead. Instantiate
+  it once in your model's ``__init__`` (e.g. ``self.readout = GlobalReduce("sum")``)
+  and call it in ``forward`` as ``self.readout(x, batch=..., mask=...)``. When
+  :obj:`reduce_op` is a string or a PyG Aggregation, :class:`GlobalReduce` uses
+  :obj:`AggrReduce` internally with :obj:`so=None` (one cluster per graph).
+  **Mask is only supported for dense x** (3D): sparse masks and invalid dense
+  mask shapes raise :class:`ValueError`.
 - **AggrReduce** supports :obj:`so=None` for graph-level readout (one cluster per
   graph, or single graph → one vector). **Dense** :class:`~tgp.select.SelectOutput`
   assignments are not supported; use :obj:`BaseReduce` for dense/soft reductions.
 - **Sparse readout size semantics:** for 2D sparse readout, :obj:`size` is only
   valid when :obj:`batch` is explicitly provided. Passing :obj:`size` with
   :obj:`batch=None` raises :class:`ValueError` (strict API).
-- **return_batched:** :obj:`AggrReduce` does not support :obj:`return_batched=True`.
 - **Bug fix:** LSTM (and similar) aggregation now receives index sorted by
   destination in the sparse path.
 
@@ -158,25 +159,25 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 ### Readout (graph-level aggregation)
 
-- **`readout(...)`** is the single graph-level readout function. Import from
-  `tgp.reduce`: `from tgp.reduce import readout`. It infers sparse vs dense from
-  the tensor shape: 2D `[N, F]` is treated as sparse (use `batch` for grouping);
-  3D `[B, N, F]` as dense. **Node dimension is fixed:** `x` must be `[N, F]` or
-  `[B, N, F]` (nodes on the second-to-last dimension); there is no `node_dim` parameter.
+- **`GlobalReduce`** is the graph-level readout module. Import from
+  `tgp.reduce`: `from tgp.reduce import GlobalReduce`. It infers sparse vs dense
+  from the tensor shape: 2D `[N, F]` is treated as sparse (use `batch` for
+  grouping); 3D `[B, N, F]` as dense. **Node dimension is fixed:** `x` must be
+  `[N, F]` or `[B, N, F]` (nodes on the second-to-last dimension); there is no
+  `node_dim` parameter.
 - **Reduce op:** Only PyG-style aggregators are supported (string alias or
   `torch_geometric.nn.aggr.Aggregation` instance). The `"any"` reduce is not
   supported; use `"sum"`, `"mean"`, `"max"`, `"min"`, or parametrized aggrs
-  (e.g. `"lstm"`, `"set2set"`) via `get_aggr(reduce_op, **kwargs)`.
-- **Mask:** `readout` performs strict mask validation: for sparse (2D) x,
-  passing :obj:`mask` raises :class:`ValueError`;
-  for dense x, :obj:`mask` must have shape `[B, N]` and wrong shapes raise
-  :class:`ValueError`.
+  (e.g. `"lstm"`, `"set2set"`) via `GlobalReduce(reduce_op, **kwargs)` or
+  `get_aggr(reduce_op, **kwargs)` with :class:`AggrReduce`.
+- **Mask:** `GlobalReduce` performs strict mask validation: for sparse (2D) x,
+  passing :obj:`mask` raises :class:`ValueError`; for dense x, :obj:`mask` must
+  have shape `[B, N]` and wrong shapes raise :class:`ValueError`.
 - **Sparse size semantics:** for sparse readout, :obj:`size` is only valid when
   :obj:`batch` is provided. With :obj:`batch=None`, pass no :obj:`size` and
-  readout returns a single-graph output of shape `[1, F]`.
-- **Poolers no longer have a `readout` method.** Call `readout(x, reduce_op=...,
-  batch=..., mask=...)` directly on the pooled node features (use `mask` only when
-  `x` is 3D).
+  `GlobalReduce` returns a single-graph output of shape `[1, F]`.
+- **Poolers no longer have a `readout` method.** Call `GlobalReduce` modules
+  directly on the pooled node features (use `mask` only when `x` is 3D).
 
 ## API / Behavior Changes
 
@@ -260,10 +261,12 @@ This flag determines the appropriate downstream MP/global pooling layers.
 
 ## Migration Notes
 
-- **Readout:** Replace `global_reduce(x, ...)` and `dense_global_reduce(x, ...)`
-  with `readout(x, ...)`. Replace `pooler.global_pool(x, ...)` with
-  `readout(x, ...)`. Remove `node_dim` from pooler constructors and from
-  KMIS if you used it.
+- **Readout:** Replace `global_reduce(x, ...)`, `dense_global_reduce(x, ...)`,
+  and `readout(x, ...)` with :class:`GlobalReduce` modules (e.g.
+  `self.readout = GlobalReduce("sum")` in `__init__` and
+  `x = self.readout(x, batch=..., mask=...)` in `forward`). Replace
+  `pooler.global_pool(x, ...)` with calls to a `GlobalReduce` instance. Remove
+  `node_dim` from pooler constructors and from KMIS if you used it.
 - If you previously relied on `block_diags_output` or `unbatched_output`,
   update to `sparse_output`.
 - Use `_u` pooler names (e.g., `bnpool_u`, `lap_u`) to select unbatched dense modes.

@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from tgp.poolers import GraclusPooling
-from tgp.reduce import readout
+from tgp.reduce import GlobalReduce
 from tgp.select import SelectOutput
 from tgp.src import PoolingOutput
 
@@ -21,7 +21,8 @@ def test_graclus_forward(pooler_test_graph_sparse):
     assert isinstance(next(iter(out)), torch.Tensor)
     assert out.has_loss is False
     assert out.get_loss_value() == 0.0
-    assert isinstance(readout(x, batch=batch), torch.Tensor)
+    reducer = GlobalReduce(reduce_op="sum")
+    assert isinstance(reducer(x, batch=batch), torch.Tensor)
     assert pooler.get_forward_signature() is not None
     assert pooler.data_transforms() is None
 

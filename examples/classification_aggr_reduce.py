@@ -15,7 +15,7 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
 from tgp.poolers import get_pooler, pooler_map
-from tgp.reduce import AggrReduce, get_aggr, readout
+from tgp.reduce import AggrReduce, GlobalReduce, get_aggr
 
 seed_everything(8)
 
@@ -90,6 +90,7 @@ def run_pooler_aggr(pooler_name: str, aggr_name: str, hidden_channels: int = 64)
                 self.conv2 = DenseGCNConv(pool_hidden, hidden_channels)
             else:
                 self.conv2 = GCNConv(pool_hidden, hidden_channels)
+            self.readout = GlobalReduce(reduce_op=aggr_name, **aggr_kwargs)
             self.lin = torch.nn.Linear(readout_dim, num_classes)
 
         def forward(self, x, edge_index, edge_weight, batch=None):
@@ -103,13 +104,7 @@ def run_pooler_aggr(pooler_name: str, aggr_name: str, hidden_channels: int = 64)
                 x = F.relu(self.conv2(x_pool, adj_pool, out.edge_weight))
             # Readout: mask only for dense x (3D)
             readout_mask = mask_pool if (x.dim() == 3) else None
-            x = readout(
-                x,
-                reduce_op=aggr_name,
-                batch=out.batch,
-                mask=readout_mask,
-                **aggr_kwargs,
-            )
+            x = self.readout(x, batch=out.batch, mask=readout_mask)
             x = self.lin(x)
             aux = (
                 sum(out.get_loss_value()) if out.loss is not None else torch.tensor(0.0)

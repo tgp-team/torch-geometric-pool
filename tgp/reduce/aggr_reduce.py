@@ -68,13 +68,10 @@ class AggrReduce(Reduce):
         *,
         batch: Optional[Tensor] = None,
         size: Optional[int] = None,
-        return_batched: bool = False,
         **kwargs,
     ) -> Tuple[Tensor, Optional[Tensor]]:
         # Path 1: readout mode (`so=None`) aggregates directly to one output per graph.
         if so is None:
-            if return_batched:
-                raise ValueError("AggrReduce does not support return_batched=True.")
             return self._readout_without_select_output(x, batch=batch, size=size)
 
         if batch is None and so.batch is not None:
@@ -82,8 +79,6 @@ class AggrReduce(Reduce):
 
         # Path 2: sparse assignment matrix.
         if so.s.is_sparse:
-            if return_batched:
-                raise ValueError("AggrReduce does not support return_batched=True.")
             src = x[so.node_index] * so.weight.view(-1, 1)
             x_pool = _aggregate_sorted(
                 self.aggr, src, so.cluster_index, dim_size=so.num_supernodes

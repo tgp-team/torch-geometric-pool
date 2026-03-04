@@ -8,7 +8,7 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
 from tgp.poolers import get_pooler, pooler_map
-from tgp.reduce import readout
+from tgp.reduce import GlobalReduce
 
 seed_everything(8)  # Reproducibility
 
@@ -86,7 +86,10 @@ for POOLER, value in pooler_map.items():  # Use all poolers
                         in_channels=pool_hidden, out_channels=hidden_channels
                     )
 
-                # Readout layer
+                # Readout
+                self.readout = GlobalReduce(reduce_op="sum")
+
+                # Classifier
                 self.lin = torch.nn.Linear(hidden_channels, num_classes)
 
             def forward(self, x, edge_index, edge_weight, batch=None):
@@ -110,7 +113,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
                 # Readout: mask only for dense x (3D)
                 readout_mask = mask_pool if (x.dim() == 3) else None
-                x = readout(x, reduce_op="sum", batch=out.batch, mask=readout_mask)
+                x = self.readout(x, batch=out.batch, mask=readout_mask)
 
                 # Readout layer
                 x = self.lin(x)

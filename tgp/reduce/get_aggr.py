@@ -1,7 +1,7 @@
 """Resolve and validate PyG aggregation operators.
 
 Use :func:`get_aggr` to obtain aggregators by name for :class:`AggrReduce` and
-:func:`readout`. For parametrized aggregators (e.g. LSTM, Set2Set), pass
+:class:`GlobalReduce`. For parametrized aggregators (e.g. LSTM, Set2Set), pass
 keyword arguments such as :obj:`in_channels`, :obj:`out_channels`,
 :obj:`processing_steps`.
 """
@@ -114,13 +114,14 @@ def get_aggr(alias: str, **kwargs: Any) -> Any:
         ValueError: If :obj:`alias` is not recognized.
 
     Example:
-        >>> from tgp.reduce import get_aggr, AggrReduce, readout
+        >>> from tgp.reduce import get_aggr, AggrReduce, GlobalReduce
         >>> # Inside a pooling layer
         >>> reducer = AggrReduce(get_aggr("mean"))
         >>> # For graph-level readout with Set2Set
-        >>> x_graph = readout(
-        ...     x, reduce_op="set2set", in_channels=64, processing_steps=3
+        >>> readout_layer = GlobalReduce(
+        ...     reduce_op="set2set", in_channels=64, processing_steps=3
         ... )
+        >>> x_graph = readout_layer(x, batch=batch)
     """
     if _aggr_module is None:
         raise ImportError(

@@ -8,7 +8,7 @@ The most general interface is :class:`~tgp.reduce.Reduce`, which is the
 parent class for every :math:`\texttt{reduce}` operator in :mod:`tgp`.
 
 For graph-level aggregation, :class:`~tgp.reduce.AggrReduce` and
-:func:`~tgp.reduce.readout` rely on PyG's
+:class:`~tgp.reduce.GlobalReduce` rely on PyG's
 :class:`torch_geometric.nn.aggr.Aggregation` modules. The helper
 function :func:`~tgp.reduce.get_aggr` lets you obtain these aggregators
 by **string alias**, mirroring how :func:`tgp.poolers.get_pooler`
@@ -16,14 +16,17 @@ instantiates poolers by alias.
 
 .. code-block:: python
 
-   from tgp.reduce import get_aggr, AggrReduce, readout
+   from tgp.reduce import get_aggr, AggrReduce, GlobalReduce
 
    # Aggregator instance from alias
    aggr = get_aggr("mean")
    reducer = AggrReduce(aggr)
 
-   # Use directly in readout
-   x_graph = readout(x, reduce_op="set2set", in_channels=64, processing_steps=3)
+   # Graph-level readout with GlobalReduce
+   readout_layer = GlobalReduce(
+       reduce_op="set2set", in_channels=64, processing_steps=3
+   )
+   x_graph = readout_layer(x, batch=batch)
 
 Aggregator aliases
 ------------------

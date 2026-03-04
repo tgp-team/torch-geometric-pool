@@ -10,7 +10,7 @@ from torch_geometric.nn import GCNConv, PANConv
 from torch_sparse import SparseTensor
 
 from tgp.poolers import get_pooler, pooler_map
-from tgp.reduce import readout
+from tgp.reduce import GlobalReduce
 
 POOLER = "pan"
 pooler_cls = pooler_map[POOLER]
@@ -59,7 +59,10 @@ class Net(torch.nn.Module):
         # Second MP layer
         self.conv2 = GCNConv(in_channels=hidden_channels, out_channels=hidden_channels)
 
-        # Readout layer
+        # Readout
+        self.readout = GlobalReduce(reduce_op="sum")
+
+        # Classifier
         self.lin = torch.nn.Linear(hidden_channels, num_classes)
 
     def forward(self, x, edge_index, edge_weight, batch=None):
@@ -81,7 +84,7 @@ class Net(torch.nn.Module):
 
         # Readout: mask only for dense x (3D)
         readout_mask = getattr(out, "mask", None) if x.dim() == 3 else None
-        x = readout(x, reduce_op="sum", batch=out.batch, mask=readout_mask)
+        x = self.readout(x, batch=out.batch, mask=readout_mask)
 
         # Readout layer
         x = self.lin(x)
