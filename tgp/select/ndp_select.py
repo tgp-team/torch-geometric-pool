@@ -19,7 +19,7 @@ from tgp.utils.typing import SinvType
 
 
 class NDPSelect(Select):
-    r"""The select operator for Node Decimation Pooling (:class:`~tgp.pooler.NDPPooling`),
+    r"""The select operator for Node Decimation Pooling (:class:`~tgp.poolers.NDPPooling`),
     as presented in the paper `"Hierarchical Representation Learning in Graph Neural Networks with
     Node Decimation Pooling" <https://arxiv.org/abs/1910.11436>`_ (Bianchi et al., TNNLS 2020).
 
@@ -28,14 +28,14 @@ class NDPSelect(Select):
     while the other side is dropped.
 
     Args:
-        s_inv_op (~tgp.typing.SinvType, optional):
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
@@ -58,7 +58,7 @@ class NDPSelect(Select):
         Args:
             edge_index (~torch_geometric.typing.Adj, optional):
                 The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                It can either be a ``torch_sparse.SparseTensor`` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):
@@ -158,7 +158,7 @@ class NDPSelect(Select):
         Args:
             total_volume (float): Total graph volume used to normalize
                 the cut value.
-            L (~scipy.sparse.csr.csr_matrix):
+            L (scipy.sparse.csr_matrix):
                 The (unweighted) Laplacian.
             z (~numpy.ndarray):
                 Partition vector of shape :math:`[N, 1]` with entries in :math:`\{-1, 1\}`.

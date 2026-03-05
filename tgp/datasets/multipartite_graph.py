@@ -45,7 +45,7 @@ class MultipartiteGraphDataset(InMemoryDataset):
         return "data.pt"
 
     def download(self):
-        """Download the multipartite dataset archive into :obj:`raw_dir`."""
+        """Download the multipartite dataset archive into ``raw_dir``."""
         download_url(self.url, self.raw_dir)
 
     def process(self):

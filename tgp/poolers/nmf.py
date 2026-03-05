@@ -33,7 +33,7 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
 
     Notes:
         - This implementation supports sparse inputs and multi-graph batches via
-          :obj:`edge_index` + :obj:`batch`.
+          ``edge_index`` + ``batch``.
         - Dense padded batched inputs (:math:`[B, N, N]`) are not supported.
 
     Args:
@@ -63,23 +63,23 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
             adjacency matrices, so that they could be passed "as is" to the dense
             message-passing layers.
             (default: :obj:`True`)
-        lift (~tgp.typing.LiftType, optional):
+        lift (~tgp.utils.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"precomputed"`` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the ``"s_inv"`` attribute of the :class:`~tgp.select.SelectOutput`.
+            - ``"transpose"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        s_inv_op (~tgp.typing.SinvType, optional):
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
         batched (bool, optional):
             Kept for API compatibility. Dense padded batched mode is unsupported
@@ -158,7 +158,7 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
                 Sparse connectivity in one of the formats supported by
                 :class:`~torch_geometric.typing.Adj`.
-                If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
+                If ``lifting`` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): Edge weights for sparse inputs.
                 (default: :obj:`None`)
@@ -226,7 +226,7 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
         num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
-        """Precompute pooling outputs while forcing a fixed cluster count :obj:`k`."""
+        """Precompute pooling outputs while forcing a fixed cluster count ``k``."""
         # Keep assignment width fixed to k across samples during dataset pre-transform.
         return super().precoarsening(
             edge_index=edge_index,

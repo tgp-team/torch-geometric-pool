@@ -27,14 +27,14 @@ class NMFSelect(Select):
     Args:
         k (int):
             Number of clusters or supernodes in the pooler graph.
-        s_inv_op (~tgp.typing.SinvType, optional):
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
@@ -131,15 +131,15 @@ class NMFSelect(Select):
 
         Args:
             edge_index (~torch_geometric.typing.Adj): Graph connectivity.
-                Sparse graph connectivity (:obj:`edge_index`, SparseTensor, or torch COO).
+                Sparse graph connectivity (``edge_index``, SparseTensor, or torch COO).
             edge_weight (~torch.Tensor, optional): Edge weights for sparse inputs.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional): Batch vector for sparse inputs.
                 (default: :obj:`None`)
             num_nodes (int, optional): Number of nodes for sparse inputs when it
-                cannot be inferred from :obj:`edge_index`. (default: :obj:`None`)
+                cannot be inferred from ``edge_index``. (default: :obj:`None`)
             fixed_k (bool, optional): If :obj:`True`, force assignment width to
-                exactly :obj:`k` for single sparse graphs by right-padding zero
+                exactly ``k`` for single sparse graphs by right-padding zero
                 columns. Useful for pre-coarsening where per-sample outputs are
                 collated together. (default: :obj:`False`)
 

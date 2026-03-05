@@ -27,7 +27,7 @@ class PoolingOutput:
             graph. (default: :obj:`None`)
         batch (~torch.Tensor, optional): The batch vector of the pooled nodes.
         so (:class:`~tgp.select.SelectOutput`): The selection output. (default: :obj:`None`)
-        mask: Derived from :obj:`so.out_mask` when :obj:`so` is set.
+        mask: Derived from ``so.out_mask`` when ``so`` is set.
             This is a pooled-supernode validity mask of shape :math:`[B, K]`
             (or :math:`[1, K]` for single-graph dense assignments).
         loss (Optional[Dict], optional): The loss dictionary. (default: :obj:`None`)
@@ -42,7 +42,7 @@ class PoolingOutput:
 
     @property
     def mask(self) -> Optional[Tensor]:
-        """Pooled-supernode validity mask, derived from :obj:`so.out_mask`."""
+        """Pooled-supernode validity mask, derived from ``so.out_mask``."""
         return self.so.out_mask if self.so is not None else None
 
     def __repr__(self) -> str:
@@ -75,15 +75,15 @@ class PoolingOutput:
         return bool(isinstance(self.loss, dict) and len(self.loss) > 0)
 
     def get_loss_value(self, name: str = None) -> Union[float, List[float]]:
-        r"""Returns the value of the loss with name :obj:`name` or all losses.
-        If the pooling output does not have a loss, it returns :obj:`0`.
+        r"""Returns the value of the loss with name ``name`` or all losses.
+        If the pooling output does not have a loss, it returns ``0``.
 
         Args:
             name (str, optional): The name of the loss to return. If :obj:`None`, returns all losses.
                 (default: :obj:`None`)
 
         Returns:
-            Union[float, List[float]]: The value of the loss :obj:`name` or all losses.
+            Union[float, List[float]]: The value of the loss ``name`` or all losses.
         """
         if not self.has_loss:
             return 0
@@ -248,9 +248,7 @@ class SRCPooling(torch.nn.Module):
 
     @property
     def has_loss(self) -> bool:
-        r"""Returns :obj:`True` if the pooler has implemented the
-        :meth:`~tgp.SRCPooling.compute_loss` method.
-        """
+        r"""Returns :obj:`True` if the pooler overrides ``compute_loss``."""
         return self.compute_loss.__qualname__.split(".")[0] != "SRCPooling"
 
     @property
@@ -280,12 +278,12 @@ class SRCPooling(torch.nn.Module):
 
     @classmethod
     def get_signature(cls) -> Signature:
-        """Get signature of the pooler's :obj:`__init__` function."""
+        """Get signature of the pooler's ``__init__`` function."""
         return foo_signature(cls)
 
     @classmethod
     def get_forward_signature(cls) -> Signature:
-        """Get signature of the pooler's :obj:`forward` function."""
+        """Get signature of the pooler's ``forward`` function."""
         return foo_signature(cls.forward)
 
     @staticmethod
@@ -305,7 +303,7 @@ class SRCPooling(torch.nn.Module):
         return "\n".join(out)
 
     def extra_repr_args(self) -> dict:
-        """Add extra arguments to :meth:`~tgp.SRCPooling.__repr__`."""
+        """Add extra arguments to :meth:`~tgp.src.SRCPooling.__repr__`."""
         return {}
 
 
@@ -314,7 +312,7 @@ class DenseSRCPooling(SRCPooling):
 
     It provides a preprocessing function that transform a batch of graphs in
     sparse representation into a batch of dense graphs.
-    When :attr:`batched=True`, dense poolers accept either raw sparse inputs
+    When ``batched=True``, dense poolers accept either raw sparse inputs
     (which are converted internally) or already-dense padded tensors. In the
     latter case, an external input-node validity mask can be provided to mark
     real (non-padded) nodes; otherwise a full-ones mask is assumed.
@@ -414,18 +412,16 @@ class DenseSRCPooling(SRCPooling):
                 (default: :obj:`None`)
             use_cache (bool, optional):
                 If :obj:`True`, it stores the preprocessed adjacency matrix in
-                :attr:`preprocessing_cache`. This is intended for static, single-graph
+                ``preprocessing_cache``. This is intended for static, single-graph
                 inputs. (default: :obj:`False`)
 
         Returns:
-            (x, adj, mask) tuple[~torch.Tensor, ~torch.Tensor, ~torch.Tensor]:
-            :obj:`x` is the batched node features with
-            shape :math:`[B, N_\text{max}, F]`, where :math:`N_\text{max}` is the size
-            of the largest graph in the batch.
-            :obj:`adj` is the tensor of shape :math:`[B, N_\text{max}, N_\text{max}]`
-            containing the batched and dense adjacency matrices.
-            :obj:`mask` is the tensor of shape :math:`[B, N_\text{max}]`
-            indicating which nodes in the batch are real or padded.
+            tuple[~torch.Tensor, ~torch.Tensor, ~torch.Tensor]:
+                A tuple ``(x, adj, mask)`` where ``x`` contains batched node features
+                of shape :math:`[B, N_\text{max}, F]`, ``adj`` contains batched dense
+                adjacencies of shape :math:`[B, N_\text{max}, N_\text{max}]`, and
+                ``mask`` marks real versus padded nodes with shape
+                :math:`[B, N_\text{max}]`.
         """
         if use_cache and self.preprocessing_cache is not None:
             adj = self.preprocessing_cache
@@ -511,8 +507,8 @@ class DenseSRCPooling(SRCPooling):
     ) -> Tuple[Tensor, Tensor, Tensor, Optional[Tensor]]:
         """Convert batched dense outputs to block-diagonal sparse representation.
 
-        Uses :obj:`so.out_mask` when available so only valid supernodes and
-        edges between them are included. When :obj:`so.out_mask` is :obj:`None`,
+        Uses ``so.out_mask`` when available so only valid supernodes and
+        edges between them are included. When ``so.out_mask`` is :obj:`None`,
         all pooled nodes are kept.
         """
         B, K = adj_pool.size(0), adj_pool.size(1)

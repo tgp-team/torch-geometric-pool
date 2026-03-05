@@ -33,54 +33,54 @@ class ASAPooling(SRCPooling):
         in_channels (int): Size of each input sample.
         ratio (float or int): Graph pooling ratio, which is used to compute
             :math:`k = \lceil \mathrm{ratio} \cdot N \rceil`, or the value
-            of :math:`k` itself, depending on whether the type of :obj:`ratio`
-            is :obj:`float` or :obj:`int`. (default: :obj:`0.5`)
+            of :math:`k` itself, depending on whether the type of ``ratio``
+            is :obj:`float` or :obj:`int`. (default: ``0.5``)
         GNN (~torch.nn.Module, optional): A graph neural network layer for
             using intra-cluster properties.
             Especially helpful for graphs with higher degree of neighborhood
             (one of :class:`~torch_geometric.nn.conv.GraphConv`,
             :class:`~torch_geometric.nn.conv.GCNConv` or
-            any GNN which supports the :obj:`edge_weight` parameter).
+            any GNN which supports the ``edge_weight`` parameter).
             (default: :obj:`None`)
         dropout (float, optional): Dropout probability of the normalized
             attention coefficients which exposes each node to a stochastically
-            sampled neighborhood during training. (default: :obj:`0`)
+            sampled neighborhood during training. (default: ``0``)
         negative_slope (float, optional): LeakyReLU angle of the negative
-            slope. (default: :obj:`0.2`)
+            slope. (default: ``0.2``)
         nonlinearity (str or callable, optional):
             The non-linearity to use when computing the score.
-            (default: :obj:`"tanh"`)
+            (default: ``"tanh"``)
         lift (~tgp.utils.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"precomputed"`` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the ``"s_inv"`` attribute of the :class:`~tgp.select.SelectOutput`.
+            - ``"transpose"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        connect_red_op (~tgp.typing.ConnectionType, optional):
+        connect_red_op (~tgp.utils.typing.ConnectionType, optional):
             The aggregation function to be applied to all edges connecting nodes assigned
             to supernodes :math:`i` and :math:`j`.
             Can be any string of class :class:`~tgp.utils.typing.ConnectionType` admitted by
             :obj:`~torch_geometric.utils.coalesce`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
-        lift_red_op (~tgp.typing.ReduceType, optional):
+            e.g., ``'sum'``, ``'mean'``, ``'max'``)
+            (default: ``"sum"``)
+        lift_red_op (~tgp.utils.typing.ReduceType, optional):
             The aggregation function to be applied to the lifted node features.
             Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
             :obj:`~torch_geometric.utils.scatter`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
+            e.g., ``'sum'``, ``'mean'``, ``'max'``)
+            (default: ``"sum"``)
         remove_self_loops (bool, optional):
             If :obj:`True`, the self-loops will be removed from the adjacency matrix.
             (default: :obj:`True`)
@@ -178,7 +178,7 @@ class ASAPooling(SRCPooling):
                 It can either be a :class:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
-                If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
+                If ``lifting`` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
                 containing the weights of the edges.

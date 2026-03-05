@@ -70,23 +70,23 @@ class BNPool(DenseSRCPooling):
             The actual number of active clusters is learned through the stick-breaking process.
         alpha_DP (float, optional): Prior concentration parameter :math:`\alpha` of the Dirichlet Process.
             Controls the expected number of clusters. Higher values encourage more clusters.
-            (default: :obj:`1.0`)
+            (default: ``1.0``)
         K_var (float, optional): Variance :math:`\sigma^2` of the Gaussian prior on the cluster connectivity matrix :math:`\mathbf{K}`.
-            (default: :obj:`1.0`)
+            (default: ``1.0``)
         K_mu (float, optional): Mean parameter for the cluster connectivity prior. The prior mean matrix is constructed as
             :math:`\mathbf{K}_{\mu} = \mu \mathbf{I} - \mu (\mathbf{1}\mathbf{1}^{\top} - \mathbf{I})`.
-            (default: :obj:`10.0`)
+            (default: ``10.0``)
         K_init (float, optional): Initial value for the cluster connectivity matrix :math:`\mathbf{K}`.
-            (default: :obj:`1.0`)
+            (default: ``1.0``)
         eta (float, optional): Weights the KL divergence loss term.
-            (default: :obj:`1.0`)
+            (default: ``1.0``)
         train_K (bool, optional): If :obj:`True`, the cluster connectivity matrix :math:`\mathbf{K}` is learnable.
             If :obj:`False`, :math:`\mathbf{K}` is fixed to its initial value.
             (default: :obj:`True`)
         act (str, optional): Activation function for the MLP in :class:`~tgp.select.DPSelect`.
             (default: :obj:`None`)
         dropout (float, optional): Dropout rate in the MLP of :class:`~tgp.select.DPSelect`.
-            (default: :obj:`0.0`)
+            (default: ``0.0``)
         remove_self_loops (bool, optional):
             If :obj:`True`, the self-loops will be removed from the adjacency matrix.
             (default: :obj:`True`)
@@ -102,24 +102,24 @@ class BNPool(DenseSRCPooling):
             adjacency matrices, so that they could be passed "as is" to the dense
             message-passing layers.
             (default: :obj:`True`)
-        lift (~tgp.typing.LiftType, optional):
+        lift (~tgp.utils.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"precomputed"`` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the ``"s_inv"`` attribute of the :class:`tgp.select.SelectOutput`.
+            - ``"transpose"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
 
-        s_inv_op (~tgp.typing.SinvType, optional):
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
         cache_preprocessing (bool, optional):
             If :obj:`True`, caches the dense adjacency produced during preprocessing.
@@ -251,13 +251,13 @@ class BNPool(DenseSRCPooling):
                 each graph, and feature dimension :math:`F`.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
                 In batched mode, this accepts sparse connectivity
-                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                (``edge_index``, ``torch_sparse.SparseTensor``, or torch COO),
                 which is internally converted to a dense padded tensor
                 :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`, or an
                 already dense adjacency tensor with the same shape.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): Edge weights associated with
-                :obj:`adj` when sparse connectivity is provided.
+                ``adj`` when sparse connectivity is provided.
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
@@ -265,7 +265,7 @@ class BNPool(DenseSRCPooling):
                 nodes. Required in sparse mode and optional in dense mode.
                 (default: :obj:`None`)
             batch_pooled (~torch.Tensor, optional): Optional precomputed batch
-                assignment for pooled nodes, used when :obj:`lifting=True`.
+                assignment for pooled nodes, used when ``lifting=True``.
                 (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
@@ -390,7 +390,7 @@ class BNPool(DenseSRCPooling):
                   (see :func:`~tgp.utils.losses.kl_loss`)
                 - :obj:`'K_prior'`: Cluster connectivity prior loss :math:`\mathcal{L}_{\mathbf{K}}`
                   (see :func:`~tgp.utils.losses.cluster_connectivity_prior_loss`).
-                  Set to :obj:`0.0` if :attr:`train_K=False`.
+                  Set to ``0.0`` if :attr:`train_K=False`.
 
         Note:
             The total training loss is typically computed as:

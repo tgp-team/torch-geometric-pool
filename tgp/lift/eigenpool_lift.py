@@ -14,7 +14,7 @@ class EigenPoolLift(Lift):
     r"""The :math:`\texttt{lift}` operator for EigenPooling.
 
     It uses the pooling matrix :math:`\boldsymbol{\Theta}` stored in
-    :obj:`so.theta` and lifts pooled features back to node space as:
+    ``so.theta`` and lifts pooled features back to node space as:
 
     .. math::
         \mathbf{X}_{\text{lift}} =
@@ -26,10 +26,10 @@ class EigenPoolLift(Lift):
     Args:
         num_modes (int, optional):
             Number of eigenvector modes :math:`H`. Kept for API symmetry with the
-            EigenPool components. (default: :obj:`5`)
+            EigenPool components. (default: ``5``)
         reduce_op (~tgp.utils.typing.ReduceType, optional):
             Kept for API compatibility with :class:`~tgp.lift.Lift`.
-            (default: :obj:`"sum"`)
+            (default: ``"sum"``)
     """
 
     def __init__(
@@ -93,10 +93,10 @@ class EigenPoolLift(Lift):
                 :math:`[B\cdot K, H\cdot F]`, or :math:`[B, K, H\cdot F]`.
             so (~tgp.select.SelectOutput, optional):
                 Output of the :math:`\texttt{select}` operator with dense
-                assignment matrix :obj:`so.s` and pooling matrix :obj:`so.theta`.
+                assignment matrix ``so.s`` and pooling matrix ``so.theta``.
             batch (~torch.Tensor, optional):
                 Batch vector for original nodes. If :obj:`None`, this method uses
-                :obj:`so.batch` when available. (default: :obj:`None`)
+                ``so.batch`` when available. (default: :obj:`None`)
             batch_pooled (~torch.Tensor, optional):
                 Batch vector for pooled nodes in multi-graph lifting.
                 (default: :obj:`None`)

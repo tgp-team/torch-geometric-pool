@@ -94,9 +94,9 @@ def get_mask_from_dense_s(
     Supported dense assignment layouts are
     :math:`s \in \mathbb{R}^{B \times N \times K}` and
     :math:`s \in \mathbb{R}^{N \times K}`.
-    When :obj:`s` is 2D and :obj:`batch` is provided, rows in :obj:`s` can
-    belong to multiple graphs according to :obj:`batch`.
-    When :obj:`s` is 2D and :obj:`batch` is :obj:`None`, :obj:`s` is treated as
+    When ``s`` is 2D and ``batch`` is provided, rows in ``s`` can
+    belong to multiple graphs according to ``batch``.
+    When ``s`` is 2D and ``batch`` is :obj:`None`, ``s`` is treated as
     a single graph and the output shape is :math:`[1, K]`.
 
     Args:
@@ -133,13 +133,13 @@ def get_mask_from_dense_s(
 
 
 def is_multi_graph_batch(batch: Optional[Tensor]) -> bool:
-    r"""Return :obj:`True` if :obj:`batch` represents more than one graph.
+    r"""Return :obj:`True` if ``batch`` represents more than one graph.
 
     Args:
         batch (~torch.Tensor, optional): Node-to-graph assignment vector.
 
     Returns:
-        bool: :obj:`True` when :obj:`batch` is not :obj:`None`, non-empty, and
+        bool: :obj:`True` when ``batch`` is not :obj:`None`, non-empty, and
         contains at least two distinct graph ids.
     """
     return (
@@ -173,7 +173,7 @@ def apply_dense_node_mask(
     x: Tensor,
     mask: Tensor,
 ) -> Tuple[Tensor, Tensor]:
-    r"""Flatten dense node features and keep only valid rows from :obj:`mask`.
+    r"""Flatten dense node features and keep only valid rows from ``mask``.
 
     Args:
         x (~torch.Tensor): Dense node features of shape ``[B, N, F]``.
@@ -218,7 +218,7 @@ def expand_compacted_rows(
     Args:
         x_compact (~torch.Tensor): Compact tensor of shape ``[N_valid, *]``.
         valid_mask (~torch.Tensor, optional): Boolean mask over the full layout.
-            It is flattened internally and must contain :obj:`expected_rows`
+            It is flattened internally and must contain ``expected_rows``
             entries (for example, shape ``[B, K]`` for pooled supernodes).
         expected_rows (int): Number of rows in the reconstructed dense tensor.
 
@@ -265,7 +265,7 @@ def expand_compacted_rows(
 
 
 def is_dense_adj(edge_index: Adj) -> bool:
-    r"""Return :obj:`True` if :attr:`edge_index` looks like a dense adjacency matrix.
+    r"""Return :obj:`True` if ``edge_index`` looks like a dense adjacency matrix.
 
     Accepts a batched dense tensor of shape :math:`(B, N, N)` or a single dense
     adjacency matrix of shape :math:`(N, N)`.
@@ -344,7 +344,7 @@ def postprocess_adj_pool_sparse(
     edge_weight_norm: bool = False,
     batch_pooled: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    r"""Postprocess a sparse pooled adjacency in :obj:`edge_index` format.
+    r"""Postprocess a sparse pooled adjacency in ``edge_index`` format.
 
     Args:
         edge_index (~torch.Tensor): Edge indices of shape :math:`(2, E)`.
@@ -357,7 +357,7 @@ def postprocess_adj_pool_sparse(
             normalization to edge weights. (default: :obj:`False`)
         edge_weight_norm (bool, optional): If :obj:`True`, normalizes edge
             weights by the maximum absolute value per graph. Requires
-            :attr:`batch_pooled`. (default: :obj:`False`)
+            ``batch_pooled``. (default: :obj:`False`)
         batch_pooled (~torch.Tensor, optional): Batch vector for pooled nodes of
             shape :math:`(N,)`, used for per-graph normalization.
             (default: :obj:`None`)
@@ -427,17 +427,17 @@ def connectivity_to_edge_index(
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""Convert sparse connectivity to edge index and optional weights.
 
-    Accepts :obj:`edge_index` as a :math:`(2, E)` tensor, a torch COO sparse
-    tensor, or a :obj:`torch_sparse.SparseTensor` (not dense batched adjacency),
+    Accepts ``edge_index`` as a :math:`(2, E)` tensor, a torch COO sparse
+    tensor, or a ``torch_sparse.SparseTensor`` (not dense batched adjacency),
     and returns a canonical :math:`(2, E)` edge index plus optional edge weights
     of shape :math:`(E,)`.
 
     Args:
         edge_index (~torch_geometric.typing.Adj): Graph connectivity as a dense
             :math:`(2, E)` tensor, torch COO sparse tensor, or
-            :obj:`torch_sparse.SparseTensor`.
+            ``torch_sparse.SparseTensor``.
         edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`
-            when :attr:`edge_index` is a dense tensor. Ignored for sparse types.
+            when ``edge_index`` is a dense tensor. Ignored for sparse types.
             (default: :obj:`None`)
 
     Returns:
@@ -476,11 +476,11 @@ def connectivity_to_torch_coo(
     Args:
         edge_index (~torch_geometric.typing.Adj): Graph connectivity as a dense
             :math:`(2, E)` tensor, torch COO sparse tensor, or
-            :obj:`torch_sparse.SparseTensor`.
+            ``torch_sparse.SparseTensor``.
         edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`
-            when :attr:`edge_index` is a dense :math:`(2, E)` tensor.
+            when ``edge_index`` is a dense :math:`(2, E)` tensor.
             (default: :obj:`None`)
-        num_nodes (int, optional): Number of nodes. Inferred from :attr:`edge_index`
+        num_nodes (int, optional): Number of nodes. Inferred from ``edge_index``
             if :obj:`None`. (default: :obj:`None`)
 
     Returns:
@@ -488,8 +488,8 @@ def connectivity_to_torch_coo(
         :math:`(N, N)`.
 
     Raises:
-        ValueError: If :attr:`edge_index` is not a :obj:`~torch.Tensor` or
-            :obj:`torch_sparse.SparseTensor`.
+        ValueError: If ``edge_index`` is not a :obj:`~torch.Tensor` or
+            ``torch_sparse.SparseTensor``.
     """
     # Validate input type first
     if not isinstance(edge_index, Tensor) and not is_sparsetensor(edge_index):
@@ -528,27 +528,27 @@ def connectivity_to_sparsetensor(
     edge_weight: Optional[Tensor] = None,
     num_nodes: Optional[int] = None,
 ):
-    r"""Convert sparse connectivity to a :obj:`torch_sparse.SparseTensor`.
+    r"""Convert sparse connectivity to a ``torch_sparse.SparseTensor``.
 
-    Requires the :obj:`torch_sparse` package. Accepts the same input types as
+    Requires the ``torch_sparse`` package. Accepts the same input types as
     :func:`connectivity_to_edge_index` (edge index, torch COO, or SparseTensor;
     not dense batched adjacency).
 
     Args:
         edge_index (~torch_geometric.typing.Adj): Graph connectivity as a dense
             :math:`(2, E)` tensor, torch COO sparse tensor, or
-            :obj:`torch_sparse.SparseTensor`.
+            ``torch_sparse.SparseTensor``.
         edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`
-            when :attr:`edge_index` is a dense tensor. (default: :obj:`None`)
+            when ``edge_index`` is a dense tensor. (default: :obj:`None`)
         num_nodes (int, optional): Number of nodes. Inferred if :obj:`None`.
             (default: :obj:`None`)
 
     Returns:
-        ~torch_sparse.SparseTensor: A :obj:`torch_sparse.SparseTensor` of shape
+        ~torch_sparse.SparseTensor: A ``torch_sparse.SparseTensor`` of shape
         :math:`(N, N)`.
 
     Raises:
-        ImportError: If :obj:`torch_sparse` is not installed.
+        ImportError: If ``torch_sparse`` is not installed.
     """
     if not HAS_TORCH_SPARSE:
         raise ImportError(
@@ -585,32 +585,32 @@ def negative_edge_sampling(
     method: str = "auto",
     force_undirected: bool = False,
 ) -> Tensor:
-    r"""Sample random negative edges for a graph from :attr:`edge_index`.
+    r"""Sample random negative edges for a graph from ``edge_index``.
 
     This function supports both standard and bipartite graphs.
-    For bipartite inputs (:obj:`num_nodes=(num_src, num_dst)`),
-    :obj:`force_undirected` is ignored.
+    For bipartite inputs (``num_nodes=(num_src, num_dst)``),
+    ``force_undirected`` is ignored.
 
     Args:
         edge_index (~torch.Tensor): The edge indices of shape :math:`(2, E)`.
         num_nodes (int or Tuple[int, int], optional): The number of nodes,
-            *i.e.* :obj:`max_val + 1` of :attr:`edge_index`.
-            If given as a tuple, then :obj:`edge_index` is interpreted as a
-            bipartite graph with shape :obj:`(num_src_nodes, num_dst_nodes)`.
+            *i.e.* ``max_val + 1`` of ``edge_index``.
+            If given as a tuple, then ``edge_index`` is interpreted as a
+            bipartite graph with shape ``(num_src_nodes, num_dst_nodes)``.
             (default: :obj:`None`)
         num_neg_samples (int, optional): The (approximate) number of negative
             samples to return.
             If set to :obj:`None`, will try to return a negative edge for every
             positive edge. (default: :obj:`None`)
         method (str, optional): The method to use for negative sampling,
-            *i.e.* :obj:`"sparse"`, :obj:`"dense"`, or :obj:`"auto"`.
+            *i.e.* ``"sparse"``, ``"dense"``, or ``"auto"``.
             This is a memory/runtime trade-off.
-            :obj:`"sparse"` will work on any graph of any size, but it could
+            ``"sparse"`` will work on any graph of any size, but it could
             retrieve a different number of negative samples.
-            :obj:`"dense"` will work only on small graphs since it enumerates
+            ``"dense"`` will work only on small graphs since it enumerates
             all possible edges.
-            :obj:`"auto"` will automatically choose the best method.
-            (default: :obj:`"auto"`)
+            ``"auto"`` will automatically choose the best method.
+            (default: ``"auto"``)
         force_undirected (bool, optional): If set to :obj:`True`, sampled
             negative edges will be undirected. (default: :obj:`False`)
 
@@ -720,7 +720,7 @@ def batched_negative_edge_sampling(
     r"""Sample random negative edges independently for each graph in a batch.
 
     This applies :func:`~tgp.utils.ops.negative_edge_sampling` graph-by-graph
-    using :attr:`batch`, then concatenates all sampled negative edges in the
+    using ``batch``, then concatenates all sampled negative edges in the
     original global node indexing space.
 
     Args:
@@ -728,15 +728,15 @@ def batched_negative_edge_sampling(
         batch (~torch.Tensor or Tuple[~torch.Tensor, ~torch.Tensor]): Batch vector
             :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which assigns each
             node to a specific example.
-            If given as a tuple, then :obj:`edge_index` is interpreted as a
+            If given as a tuple, then ``edge_index`` is interpreted as a
             bipartite graph connecting two different node types.
         num_neg_samples (int, optional): The number of negative samples to
             return for each graph in the batch. If set to :obj:`None`,
             will try to return a negative edge for every positive edge.
             (default: :obj:`None`)
         method (str, optional): The method to use for negative sampling,
-            *i.e.* :obj:`"sparse"`, :obj:`"dense"`, or :obj:`"auto"`.
-            (default: :obj:`"auto"`)
+            *i.e.* ``"sparse"``, ``"dense"``, or ``"auto"``.
+            (default: ``"auto"``)
         force_undirected (bool, optional): If set to :obj:`True`, sampled
             negative edges will be undirected. (default: :obj:`False`)
 
@@ -927,7 +927,7 @@ def weighted_degree(
         weights (~torch.Tensor, optional): Edge weights tensor of shape
             :math:`(E,)`. (default: :obj:`None`)
         num_nodes (int, optional): The number of nodes, *i.e.*
-            :obj:`max_val + 1` of :attr:`index`. (default: :obj:`None`)
+            ``max_val + 1`` of ``index``. (default: :obj:`None`)
 
     Returns:
         ~torch.Tensor: Degree vector of shape :math:`(N,)`.
@@ -951,16 +951,16 @@ def add_remaining_self_loops(
     r"""Adds remaining self loops to the adjacency matrix.
 
     This method extends the method :obj:`~torch_geometric.utils.add_remaining_self_loops`
-    by allowing to pass a :obj:`SparseTensor` or torch COO sparse tensor as input.
+    by allowing to pass a ``SparseTensor`` or torch COO sparse tensor as input.
 
     Args:
         edge_index (~torch.Tensor or SparseTensor): The edge indices.
         edge_weight (~torch.Tensor, optional): One-dimensional edge weights.
             (default: :obj:`None`)
         fill_value (float, optional): The fill value of the diagonal.
-            (default: :obj:`1.`)
+            (default: ``1.``)
         num_nodes (int, optional): The number of nodes, *i.e.*
-            :obj:`max_val + 1` of :attr:`edge_index`. (default: :obj:`None`)
+            ``max_val + 1`` of ``edge_index``. (default: :obj:`None`)
     """
     if is_sparsetensor(edge_index):
         if num_nodes is not None and num_nodes != edge_index.size(0):
@@ -1028,9 +1028,9 @@ def delta_gcn_matrix(
         edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
             (default: :obj:`None`)
         delta (float, optional): Delta parameter for heterophilic message passing. When
-            :math:`\delta > 1`, promotes high-frequency (non-smooth) signals. (default: :obj:`2.0`)
+            :math:`\delta > 1`, promotes high-frequency (non-smooth) signals. (default: ``2.0``)
         num_nodes (int, optional): Number of nodes. If :obj:`None`, inferred from
-            :obj:`edge_index`. (default: :obj:`None`)
+            ``edge_index``. (default: :obj:`None`)
 
     Returns:
         tuple:
@@ -1101,7 +1101,7 @@ def create_one_hot_tensor(num_nodes, kept_node_tensor, device, dtype=None):
         num_nodes (int): Total number of nodes :math:`N`.
         kept_node_tensor (~torch.Tensor): Indices of kept nodes of shape :math:`(K,)`.
         device (~torch.device): Device to create the tensor on.
-        dtype (~torch.dtype, optional): Desired dtype. (default: :obj:`torch.float32`)
+        dtype (~torch.dtype, optional): Desired dtype. (default: ``torch.float32``)
 
     Returns:
         ~torch.Tensor: One-hot matrix of shape :math:`(N, K + 1)`, where column
@@ -1180,7 +1180,7 @@ def propagate_assignments_sparse(
 
     Args:
         assignments (~torch.Tensor): Assignment vector of shape :math:`(N,)`,
-            with :obj:`0` for unassigned nodes and :obj:`1..K` for cluster indices.
+            with ``0`` for unassigned nodes and :obj:`1..K` for cluster indices.
         edge_index (~torch.Tensor): Edge indices of shape :math:`(2, E)`.
         kept_node_tensor (~torch.Tensor): Indices of kept nodes (supernodes).
         mask (~torch.Tensor): Boolean mask of assigned nodes of shape :math:`(N,)`.
@@ -1287,16 +1287,16 @@ def get_assignments(
             These nodes will serve as cluster centers. Can be a tensor or list of integers.
         edge_index (~torch.Tensor, optional): Graph connectivity in COO format of shape
             :math:`(2, E)` where :math:`E` is the number of edges. Required when
-            :obj:`max_iter > 0` for graph-aware assignment. (default: :obj:`None`)
+            ``max_iter > 0`` for graph-aware assignment. (default: :obj:`None`)
         max_iter (int, optional): Maximum number of message passing iterations.
-            If :obj:`0`, uses only random assignment. Higher values allow more distant
-            nodes to be assigned through graph connectivity. (default: :obj:`5`)
+            If ``0``, uses only random assignment. Higher values allow more distant
+            nodes to be assigned through graph connectivity. (default: ``5``)
         batch (~torch.Tensor, optional): Batch assignment vector of shape :math:`(N,)`
             indicating which graph each node belongs to. When provided, ensures nodes
             are only assigned to supernodes within the same graph. (default: :obj:`None`)
         num_nodes (int, optional): Total number of nodes in the graph(s). If :obj:`None`,
-            inferred from :obj:`edge_index` or :obj:`batch`. Must be provided if both
-            :obj:`edge_index` and :obj:`batch` are :obj:`None`. (default: :obj:`None`)
+            inferred from ``edge_index`` or ``batch``. Must be provided if both
+            ``edge_index`` and ``batch`` are :obj:`None`. (default: :obj:`None`)
 
     Returns:
         ~torch.Tensor: Assignment mapping tensor of shape :math:`(2, N)` where the first
@@ -1305,9 +1305,9 @@ def get_assignments(
         are renumbered to be consecutive starting from :math:`0`.
 
     Raises:
-        ValueError: If :obj:`num_nodes`, :obj:`batch`, and :obj:`edge_index` are all
+        ValueError: If ``num_nodes``, ``batch``, and ``edge_index`` are all
             :obj:`None` (cannot determine graph size).
-        ValueError: If :obj:`max_iter > 0` but :obj:`edge_index` is :obj:`None`
+        ValueError: If ``max_iter > 0`` but ``edge_index`` is :obj:`None`
             (cannot perform graph-aware assignment).
     """
     if isinstance(kept_node_indices, torch.Tensor):

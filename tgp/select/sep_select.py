@@ -51,7 +51,7 @@ class SEPSelect(Select):
     Args:
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from
-            the select matrix. (default: :obj:`"transpose"`)
+            the select matrix. (default: ``"transpose"``)
     """
 
     def __init__(self, s_inv_op: SinvType = "transpose"):
@@ -363,7 +363,7 @@ def _split_subgraphs(
     """Split a batched graph into per-graph local COO representations.
 
     Unlike :func:`torch_geometric.utils.unbatch`, this function correctly
-    filters edge-level tensors (e.g., :obj:`edge_weight`) with edge masks.
+    filters edge-level tensors (e.g., ``edge_weight``) with edge masks.
     """
     if batch.numel() == 0:
         return []

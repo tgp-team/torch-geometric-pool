@@ -20,7 +20,7 @@ def maximal_matching(
     set.
 
     The algorithm greedily selects the edges in their canonical order. If a
-    permutation :obj:`perm` is provided, the edges are extracted following
+    permutation ``perm`` is provided, the edges are extracted following
     that permutation instead.
 
     This method implements `Blelloch's Alogirithm
@@ -81,7 +81,7 @@ def maximal_matching_cluster(
     as singletons.
 
     The algorithm greedily selects the edges in their canonical order. If a
-    permutation :obj:`perm` is provided, the nodes are extracted following
+    permutation ``perm`` is provided, the nodes are extracted following
     that permutation instead.
 
     This method returns both the matching and the clustering.
@@ -129,10 +129,10 @@ class EdgeContractionSelect(Select):
         edge_score_method (callable, optional):
             The function to apply to compute the edge score from raw edge scores. By default,
             this is the softmax over all incoming edges for each node.
-            This function takes in a :obj:`raw_edge_score` tensor of shape
-            :obj:`[num_nodes]`, an :obj:`edge_index` tensor and the number of
-            nodes :obj:`num_nodes`, and produces a new tensor of the same size
-            as :obj:`raw_edge_score` describing normalized edge scores.
+            This function takes in a ``raw_edge_score`` tensor of shape
+            ``[num_nodes]``, an ``edge_index`` tensor and the number of
+            nodes ``num_nodes``, and produces a new tensor of the same size
+            as ``raw_edge_score`` describing normalized edge scores.
             Included functions are
             :func:`~tgp.select.EdgeContractionSelect.compute_edge_score_softmax`,
             :func:`~tgp.select.EdgeContractionSelect.compute_edge_score_tanh`, and
@@ -140,11 +140,11 @@ class EdgeContractionSelect(Select):
             (default: :func:`~tgp.select.EdgeContractionSelect.compute_edge_score_softmax`)
         dropout (float, optional):
             The probability with which to drop edge scores during training.
-            (default: :obj:`0.0`)
+            (default: ``0.0``)
         add_to_edge_score (float, optional):
             A value to be added to each computed edge score.
             Adding this greatly helps with unpooling stability.
-            (default: :obj:`0.5`)
+            (default: ``0.5``)
     """
 
     def __init__(

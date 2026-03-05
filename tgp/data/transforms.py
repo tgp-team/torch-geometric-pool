@@ -40,7 +40,7 @@ class NormalizeAdj(BaseTransform):
     Args:
         delta (int, optional):
             Scaling factor for the Laplacian.
-            (default: :obj:`0.85`)
+            (default: ``0.85``)
     """
 
     def __init__(self, delta: float = 0.85) -> None:
@@ -152,7 +152,7 @@ class SortNodes(BaseTransform):
         Args:
             data (~torch_geometric.data.Data):
                 A Data object containing graph data with attributes
-                :attr:`edge_index`, :attr:`y`, :attr:`x`, and optionally :attr:`edge_attr`.
+                ``edge_index``, ``y``, ``x``, and optionally ``edge_attr``.
 
         Returns:
             ~torch_geometric.data.Data: The data object with sorted nodes and updated attributes.
@@ -198,31 +198,31 @@ class PreCoarsening(BaseTransform):
     width), while others customize the full rollout (for example,
     :meth:`~tgp.poolers.SEPPooling.multi_level_precoarsening`).
     Poolers must be non-trainable, i.e., they should not have learnable parameters.
-    The graph is recursively coarsened for as many levels as given in :obj:`poolers`.
+    The graph is recursively coarsened for as many levels as given in ``poolers``.
     At each level, a coarsened adjacency matrix and, optionally, a pooled batch is
     computed. The result is stored as a list of intermediate pooled subgraphs in
     :class:`~torch_geometric.data.Data`, which downstream GNN models can consume.
 
     Args:
-        poolers (PoolersArg):
+        poolers:
             Per-level pooler configuration. Can be a single pooler or a
             sequence of level configs. A single value is treated as one level.
             Each entry can be one of:
 
             - a pre-instantiated pooler instance;
-            - a pooler alias string, e.g. :obj:`"ndp"`;
-            - a tuple :obj:`("eigen", {"k": 5})`;
-            - a dictionary with keys :obj:`{"pooler": "<name>", ...kwargs}`
-              or :obj:`{"name": "<name>", ...kwargs}`.
+            - a pooler alias string, e.g. ``"ndp"``;
+            - a tuple ``("eigen", {"k": 5})``;
+            - a dictionary with keys ``{"pooler": "<name>", ...kwargs}``
+              or ``{"name": "<name>", ...kwargs}``.
 
             To use the same pooler for multiple levels, pass a sequence
-            (e.g. :obj:`[pooler, pooler, pooler]` or :obj:`["ndp", "ndp", "ndp"]`).
+            (e.g. ``[pooler, pooler, pooler]`` or ``["ndp", "ndp", "ndp"]``).
         input_key (str, optional):
             The key in the data object from which to read the graph data.
             If :obj:`None`, uses the default data object.
         output_key (str, optional):
             The key in the data object where the pooled graphs will be stored.
-            Defaults to :obj:`"pooled_data"`.
+            Defaults to ``"pooled_data"``.
     """
 
     def __init__(

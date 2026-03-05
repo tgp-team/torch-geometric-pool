@@ -26,7 +26,7 @@ With <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/r
 All pooling layers in <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp are implemented following the SRC (Select, Reduce, Connect) framework, introduced in [Understanding Pooling in Graph Neural Networks](https://arxiv.org/abs/2110.05292), which ensures a consistent API across all methods and seamless interoperability.
 
 * **All your pooling operators in one place.**
-Choose from a variety of pooling methods, including sparse techniques like Top-K, NDPPooling, GraclusPooling, and dense methods such as Diffpool and MinCutPool. Each operator adheres to the modular SRC framework, allowing to quickly echange them within the same GNN architecture and combine with standard message-passing layers.
+Choose from a variety of pooling methods, including sparse techniques like Top-K, NDPPooling, GraclusPooling, and dense methods such as DiffPool and MinCutPooling. Each operator adheres to the modular SRC framework, allowing you to quickly exchange methods within the same GNN architecture and combine them with standard message-passing layers.
 
 * **Precomputed & On-the-Fly Pooling.**
 Accelerate training by precomputing the coarse graph (assignments and connectivity) for methods like NDPPooling or GraclusPooling. Alternatively, use on-the-fly pooling (e.g., Top-K or MinCut) that computes assignments dynamically and supports end-to-end gradient flow.
@@ -35,7 +35,7 @@ Accelerate training by precomputing the coarse graph (assignments and connectivi
 Quickly create any pooler by name (e.g., `"topk"`, `"ndp"`, `"diff"`, `"mincut"`). Pass a configuration dict for hyperparameters, and receive a fully initialized pooling layer that conforms to the unified SRC interface.
 
 * **Tweak and create new pooling layers.**
-Thanks to the modular SRC framework, the components of different pooling layers <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp can be easily combined with each other, replaced with existing modules or with completely new ones.
+Thanks to the modular SRC framework, the components of different pooling layers in <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp can be easily combined, replaced with existing modules, or swapped for entirely new ones.
 
 ## Getting Started
 

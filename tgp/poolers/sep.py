@@ -27,7 +27,7 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         to using only a depth-2 tree view (nodes -> first supernodes -> root). To use
         deeper SEP hierarchies (depth > 2) as intended by the original method,
         use pre-coarsening via
-        :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening` (or
+        :meth:`~tgp.poolers.SEPPooling.multi_level_precoarsening` (or
         :class:`~tgp.data.transforms.PreCoarsening` with repeated ``"sep"``
         levels).
 
@@ -84,10 +84,10 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
         lift (~tgp.utils.typing.LiftType, optional):
             Operation used by :class:`~tgp.lift.BaseLift` to compute
             :math:`\mathbf{S}_\text{inv}` during lifting.
-            (default: :obj:`"precomputed"`)
+            (default: ``"precomputed"``)
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             Operation used to compute :math:`\mathbf{S}_\text{inv}` in
-            :class:`~tgp.select.SelectOutput`. (default: :obj:`"transpose"`)
+            :class:`~tgp.select.SelectOutput`. (default: ``"transpose"``)
     """
 
     def __init__(
@@ -131,10 +131,10 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
                 where :math:`N` is the number of nodes in the batch and
                 :math:`F` is the number of node features.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                It can either be a ``torch_sparse.SparseTensor`` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
-                If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
+                If ``lifting`` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): A vector of shape  :math:`[E]` or :math:`[E, 1]`
                 containing the weights of the edges.
@@ -149,7 +149,7 @@ class SEPPooling(BasePrecoarseningMixin, SRCPooling):
 
         Returns:
             ~tgp.src.PoolingOutput or ~torch.Tensor:
-                Pooled output if :obj:`lifting=False`, otherwise lifted features.
+                Pooled output if ``lifting=False``, otherwise lifted features.
         """
         if lifting:
             # Lift

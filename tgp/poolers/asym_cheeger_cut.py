@@ -45,11 +45,11 @@ class AsymCheegerCutPooling(DenseSRCPooling):
             of the :math:`\texttt{select}` operator.
         dropout (float, optional):
             Dropout probability in the MLP of the :math:`\texttt{select}` operator.
-            (default: :obj:`0.0`)
+            (default: ``0.0``)
         totvar_coeff (float):
-            Coefficient for graph total variation loss term. (default: :obj:`1.0`)
+            Coefficient for graph total variation loss term. (default: ``1.0``)
         balance_coeff (float):
-            Coefficient for asymmetric norm loss term. (default: :obj:`1.0`)
+            Coefficient for asymmetric norm loss term. (default: ``1.0``)
         remove_self_loops (bool, optional):
             If :obj:`True`, the self-loops will be removed from the adjacency matrix.
             (default: :obj:`True`)
@@ -69,23 +69,23 @@ class AsymCheegerCutPooling(DenseSRCPooling):
             If :obj:`True`, caches the dense adjacency produced during preprocessing.
             This should only be enabled when the same graph is reused across iterations.
             (default: :obj:`False`)
-        lift (~tgp.typing.LiftType, optional):
+        lift (~tgp.utils.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"precomputed"`` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the ``"s_inv"`` attribute of the :class:`~tgp.select.SelectOutput`.
+            - ``"transpose"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        s_inv_op (~tgp.typing.SinvType, optional):
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
@@ -156,13 +156,13 @@ class AsymCheegerCutPooling(DenseSRCPooling):
                 each graph, and feature dimension :math:`F`.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
                 In batched mode, this accepts sparse connectivity
-                (:obj:`edge_index`, :obj:`~torch_sparse.SparseTensor`, or torch COO),
+                (``edge_index``, ``torch_sparse.SparseTensor``, or torch COO),
                 which is internally converted to a dense padded tensor
                 :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`, or an
                 already dense adjacency tensor with the same shape.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): Edge weights associated with
-                :obj:`adj` when sparse connectivity is provided.
+                ``adj`` when sparse connectivity is provided.
                 (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
                 (default: :obj:`None`)
@@ -174,7 +174,7 @@ class AsymCheegerCutPooling(DenseSRCPooling):
                 nodes. Required in sparse mode and optional in dense mode.
                 (default: :obj:`None`)
             batch_pooled (~torch.Tensor, optional): Optional precomputed batch
-                assignment for pooled nodes, used when :obj:`lifting=True`.
+                assignment for pooled nodes, used when ``lifting=True``.
                 (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
@@ -287,7 +287,7 @@ class AsymCheegerCutPooling(DenseSRCPooling):
     ) -> dict:
         """Computes the auxiliary loss terms for unbatched (sparse) mode.
 
-        This method is used when :attr:`batched=False` and operates on sparse
+        This method is used when ``batched=False`` and operates on sparse
         adjacency matrices without requiring padding or densification.
 
         Args:
@@ -298,8 +298,8 @@ class AsymCheegerCutPooling(DenseSRCPooling):
 
         Returns:
             dict: A dictionary with the different terms of the auxiliary loss:
-                - :obj:`'total_variation_loss'`: The sparse total variation loss.
-                - :obj:`'balance_loss'`: The unbatched asymmetric norm loss.
+                - ``'total_variation_loss'``: The sparse total variation loss.
+                - ``'balance_loss'``: The unbatched asymmetric norm loss.
         """
         edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
             edge_index, edge_weight

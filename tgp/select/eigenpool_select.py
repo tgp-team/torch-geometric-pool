@@ -233,24 +233,24 @@ def eigenpool_select(
         k (int):
             Number of clusters (supernodes).
         edge_weight (~torch.Tensor, optional):
-            Edge weights associated with :obj:`edge_index`. (default: :obj:`None`)
+            Edge weights associated with ``edge_index``. (default: :obj:`None`)
         batch (~torch.Tensor, optional):
             Batch vector :math:`\mathbf{b} \in \{0,\dots,B-1\}^N` for multi-graph inputs.
             (default: :obj:`None`)
         num_nodes (int, optional):
-            Total number of nodes. Useful when :obj:`edge_index` is empty.
+            Total number of nodes. Useful when ``edge_index`` is empty.
             (default: :obj:`None`)
         fixed_k (bool, optional):
-            If :obj:`True`, always use exactly :obj:`k` output clusters
+            If :obj:`True`, always use exactly ``k`` output clusters
             (allowing empty clusters). If :obj:`False`, single-graph mode
             may reduce the effective number of clusters for tiny graphs.
             (default: :obj:`False`)
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             Operation used to compute :math:`\mathbf{S}_\text{inv}` stored in
-            :class:`~tgp.select.SelectOutput`. (default: :obj:`"transpose"`)
+            :class:`~tgp.select.SelectOutput`. (default: ``"transpose"``)
         num_modes (int, optional):
             Number of eigenvector modes :math:`H` used to build
-            :math:`\boldsymbol{\Theta}`. (default: :obj:`5`)
+            :math:`\boldsymbol{\Theta}`. (default: ``5``)
         normalized (bool, optional):
             If :obj:`True`, uses the normalized Laplacian for eigenvectors.
             (default: :obj:`True`)
@@ -259,8 +259,8 @@ def eigenpool_select(
         ~tgp.select.SelectOutput:
             Selection output with:
 
-            - :obj:`s`: dense one-hot assignment matrix :math:`[N, K]`
-            - :obj:`theta`: pooling matrix :math:`\boldsymbol{\Theta}` (or a list
+            - ``s``: dense one-hot assignment matrix :math:`[N, K]`
+            - ``theta``: pooling matrix :math:`\boldsymbol{\Theta}` (or a list
               of per-graph matrices for multi-graph batches)
     """
     edge_index_conv, edge_weight_conv = connectivity_to_edge_index(
@@ -398,9 +398,9 @@ class EigenPoolSelect(Select):
             Number of clusters (supernodes).
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             Operation used to compute :math:`\mathbf{S}_\text{inv}` from
-            :math:`\mathbf{S}`. (default: :obj:`"transpose"`)
+            :math:`\mathbf{S}`. (default: ``"transpose"``)
         num_modes (int, optional):
-            Number of eigenvector modes :math:`H`. (default: :obj:`5`)
+            Number of eigenvector modes :math:`H`. (default: ``5``)
         normalized (bool, optional):
             If :obj:`True`, use the normalized Laplacian. (default: :obj:`True`)
     """
@@ -438,7 +438,7 @@ class EigenPoolSelect(Select):
             edge_index (~torch_geometric.typing.Adj, optional):
                 Graph connectivity.
             edge_weight (~torch.Tensor, optional):
-                Edge weights associated with :obj:`edge_index`. (default: :obj:`None`)
+                Edge weights associated with ``edge_index``. (default: :obj:`None`)
             batch (~torch.Tensor, optional):
                 Batch vector for multi-graph inputs. (default: :obj:`None`)
             num_nodes (int, optional):
@@ -448,8 +448,8 @@ class EigenPoolSelect(Select):
             ~tgp.select.SelectOutput:
                 Selection output with:
 
-                - :obj:`s`: assignment matrix :math:`\mathbf{S}`
-                - :obj:`theta`: pooling matrix :math:`\boldsymbol{\Theta}`
+                - ``s``: assignment matrix :math:`\mathbf{S}`
+                - ``theta``: pooling matrix :math:`\boldsymbol{\Theta}`
         """
         return eigenpool_select(
             edge_index=edge_index,

@@ -67,15 +67,15 @@ class DPSelect(MLPSelect):
             :class:`~torch_geometric.nn.models.mlp.MLP`.
         dropout (float, optional): Dropout probability in the
             :class:`~torch_geometric.nn.models.mlp.MLP`.
-            (default: :obj:`0.0`)
-        s_inv_op (~tgp.typing.SinvType, optional):
+            (default: ``0.0``)
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
 
     Note:
@@ -147,23 +147,23 @@ class DPSelect(MLPSelect):
 
         Args:
             x (~torch.Tensor): Node feature tensor.
-                If :obj:`batched_representation=True`, expected shape is :math:`\mathbb{R}^{B \times N \times F}`.
-                If :obj:`batched_representation=False`, expected shape is :math:`\mathbb{R}^{N \times F}`,
+                If ``batched_representation=True``, expected shape is :math:`\mathbb{R}^{B \times N \times F}`.
+                If ``batched_representation=False``, expected shape is :math:`\mathbb{R}^{N \times F}`,
                 where :math:`N` is the total number of nodes across all graphs in the batch.
             mask (~torch.Tensor, optional): Input-node validity mask
                 :math:`\mathbf{M} \in {\{ 0, 1 \}}^{B \times N}` with
                 :obj:`True` on real (non-padded) nodes. Only used when
-                :obj:`batched_representation=True`. (default: :obj:`None`)
+                ``batched_representation=True``. (default: :obj:`None`)
             batch (~torch.Tensor, optional): The batch vector :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`,
                 which indicates to which graph in the batch each node belongs.
-                Only used when :obj:`batched_representation=False`.
+                Only used when ``batched_representation=False``.
                 (default: :obj:`None`)
 
         Returns:
             :class:`~tgp.select.SelectOutput`: The output of :math:`\texttt{select}` operator.
-                If :obj:`batched_representation=True`, the assignment matrix :math:`\mathbf{S}` has shape
+                If ``batched_representation=True``, the assignment matrix :math:`\mathbf{S}` has shape
                 :math:`\mathbb{R}^{B \times N \times K}`.
-                If :obj:`batched_representation=False`, the assignment matrix :math:`\mathbf{S}` has shape
+                If ``batched_representation=False``, the assignment matrix :math:`\mathbf{S}` has shape
                 :math:`\mathbb{R}^{N \times K}`.
         """
         x = self._prepare_inputs(x)

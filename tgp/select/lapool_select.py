@@ -77,7 +77,7 @@ def _dense_cosine_similarity(
 
 
 class LaPoolSelect(Select):
-    r"""The select operator for the LaPool operator (:class:`~tgp.pooler.LaPoolPooling`)
+    r"""The select operator for the LaPool operator (:class:`~tgp.poolers.LaPooling`)
     as proposed in the paper `Towards Interpretable Sparse Graph Representation Learning
     with Laplacian Pooling <https://arxiv.org/abs/1905.11577>`_. (Emmanuel Noutahi et al., 2019).
 
@@ -99,7 +99,7 @@ class LaPoolSelect(Select):
     + :math:`\beta` is a regularization vector that is applied element-wise to the selection matrix.
 
     Args:
-        shortest_path_reg (bool, optional): If :obj:`True`, :math:`\beta` it is equal to
+        shortest_path_reg (bool, optional): If :obj:`True`, :math:`\beta` is equal to
             the inverse of the shortest path between each node and its corresponding leader
             (this can be expensive since it runs on CPU). Otherwise :math:`\beta=1`.
         batched_representation (bool, optional):
@@ -109,14 +109,14 @@ class LaPoolSelect(Select):
             sparse adjacency in one of the formats supported by
             :class:`~torch_geometric.typing.Adj` (or a dense :math:`[N, N]` tensor).
             (default: :obj:`True`)
-        s_inv_op (~tgp.typing.SinvType, optional):
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
@@ -152,7 +152,7 @@ class LaPoolSelect(Select):
                 where :math:`N` is the number of nodes in the batch and
                 :math:`F` is the number of node features.
             edge_index (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                It can either be a ``torch_sparse.SparseTensor`` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
                 For batched dense inputs, it also accepts dense adjacency tensors of shape

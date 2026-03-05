@@ -50,14 +50,14 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
 
     Notes:
         - This implementation supports sparse inputs and multi-graph batches via
-          :obj:`edge_index` + :obj:`batch`.
+          ``edge_index`` + ``batch``.
         - Dense padded batched inputs (:math:`[B, N, N]`) are **not** supported.
 
     Args:
         k (int):
             Number of clusters (supernodes) in the pooled graph.
         num_modes (int, optional):
-            Number of eigenvector modes :math:`H`. (default: :obj:`5`)
+            Number of eigenvector modes :math:`H`. (default: ``5``)
         normalized (bool, optional):
             If :obj:`True`, use the normalized Laplacian. (default: :obj:`True`)
         cached (bool, optional):
@@ -72,13 +72,13 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
             Passed to the connector for adjacency post-processing. (default: :obj:`True`)
         lift (~tgp.utils.typing.LiftType, optional):
             Kept for API compatibility. EigenPooling always uses eigenvector-based
-            lifting and ignores this option. (default: :obj:`"precomputed"`)
+            lifting and ignores this option. (default: ``"precomputed"``)
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             Operation used to compute :math:`\mathbf{S}_\text{inv}` in
-            :class:`~tgp.select.SelectOutput`. (default: :obj:`"transpose"`)
+            :class:`~tgp.select.SelectOutput`. (default: ``"transpose"``)
         batched (bool, optional):
             Kept for API compatibility. Dense batched mode is unsupported and this
-            option is ignored. Use sparse inputs with :obj:`batch` instead.
+            option is ignored. Use sparse inputs with ``batch`` instead.
             (default: :obj:`False`)
         sparse_output (bool, optional):
             If :obj:`True`, return sparse pooled connectivity. (default: :obj:`False`)
@@ -179,10 +179,10 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
             adj (~torch_geometric.typing.Adj, optional):
                 Sparse graph connectivity (edge index, :class:`~torch_sparse.SparseTensor`,
                 or torch COO tensor). Internally interpreted as
-                :math:`\mathbf{A}_{\text{ext}}`; required when :obj:`lifting=False`.
+                :math:`\mathbf{A}_{\text{ext}}`; required when ``lifting=False``.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional):
-                Edge weights associated with :obj:`adj`. (default: :obj:`None`)
+                Edge weights associated with ``adj``. (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional):
                 Pre-computed selection output. (default: :obj:`None`)
             mask (~torch.Tensor, optional):
@@ -199,7 +199,7 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
 
         Returns:
             ~tgp.src.PoolingOutput or ~torch.Tensor:
-                Pooled output if :obj:`lifting=False`, otherwise lifted features.
+                Pooled output if ``lifting=False``, otherwise lifted features.
         """
         if lifting:
             # Lift expects 2D x_pool [N, F]; flatten if we got dense batched [B, K, F]
@@ -259,7 +259,7 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
         num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
-        """Precompute pooling outputs with a fixed assignment width :obj:`k`."""
+        """Precompute pooling outputs with a fixed assignment width ``k``."""
         # In pre-coarsening, fix the assignment width to k across samples so
         # batched collation can concatenate dense SelectOutput.s safely.
         return super().precoarsening(

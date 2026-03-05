@@ -24,53 +24,53 @@ class TopkPooling(SRCPooling):
         ratio (float or int):
             The graph pooling ratio, which is used to compute
             :math:`k = \lceil \mathrm{ratio} \cdot N \rceil`, or the value
-            of :math:`k` itself, depending on whether the type of :obj:`ratio`
+            of :math:`k` itself, depending on whether the type of ``ratio``
             is :obj:`float` or :obj:`int`.
-            This value is ignored if :obj:`min_score` is not :obj:`None`.
-            (default: :obj:`0.5`)
+            This value is ignored if ``min_score`` is not :obj:`None`.
+            (default: ``0.5``)
         min_score (float, optional): Minimal node score :math:`\tilde{\alpha}`
             which is used to compute indices of pooled nodes
             :math:`\mathbf{i} = \mathbf{s}_i > \tilde{\alpha}`.
-            When this value is not :obj:`None`, the :obj:`ratio` argument is
+            When this value is not :obj:`None`, the ``ratio`` argument is
             ignored. (default: :obj:`None`)
         multiplier (float, optional):
             Coefficient by which features gets multiplied after pooling.
-            This can be useful for large graphs and when :obj:`min_score` is used.
-            (default: :obj:`1`)
+            This can be useful for large graphs and when ``min_score`` is used.
+            (default: ``1``)
         nonlinearity (str or callable, optional):
             The non-linearity to use when computing the score.
-            (default: :obj:`"tanh"`)
+            (default: ``"tanh"``)
         lift (~tgp.utils.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"precomputed"`` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the ``"s_inv"`` attribute of the :class:`~tgp.select.SelectOutput`.
+            - ``"transpose"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        connect_red_op (~tgp.typing.ConnectionType, optional):
+        connect_red_op (~tgp.utils.typing.ConnectionType, optional):
             The aggregation function to be applied to all edges connecting nodes assigned
             to supernodes :math:`i` and :math:`j`.
             Can be any string of class :class:`~tgp.utils.typing.ConnectionType` admitted by
             :obj:`~torch_geometric.utils.coalesce`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
-        lift_red_op (~tgp.typing.ReduceType, optional):
+            e.g., ``'sum'``, ``'mean'``, ``'max'``)
+            (default: ``"sum"``)
+        lift_red_op (~tgp.utils.typing.ReduceType, optional):
             The aggregation function to be applied to the lifted node features.
             Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
             :obj:`~torch_geometric.utils.scatter`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
+            e.g., ``'sum'``, ``'mean'``, ``'max'``)
+            (default: ``"sum"``)
         remove_self_loops (bool, optional):
             If :obj:`True`, the self-loops will be removed from the adjacency matrix.
             (default: :obj:`True`)
@@ -138,7 +138,7 @@ class TopkPooling(SRCPooling):
                 It can either be a :class:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
-                If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
+                If ``lifting`` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): A vector of shape
                 :math:`[E]` containing the weights of the edges.
@@ -151,7 +151,7 @@ class TopkPooling(SRCPooling):
             attn (~torch.Tensor, optional):
                 Optional node-level matrix to use
                 for computing attention scores instead of using the node
-                feature matrix :obj:`x`. (default: :obj:`None`)
+                feature matrix ``x``. (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
 

@@ -36,7 +36,7 @@ class EigenPoolConnect(DenseConnect):
         \end{cases}
 
     and :math:`\boldsymbol{\Omega}` is the hard cluster membership matrix returned
-    by :class:`~tgp.select.EigenPoolSelect` (i.e., :obj:`so.s`), with
+    by :class:`~tgp.select.EigenPoolSelect` (i.e., ``so.s``), with
     :math:`c_i = \arg\max_k \Omega_{ik}`.
 
     Input representations:
@@ -50,7 +50,7 @@ class EigenPoolConnect(DenseConnect):
           :math:`[B, K, K]` (edge weights are :obj:`None`).
         - Unbatched sparse inputs return either a dense adjacency
           :math:`[B, K, K]` or a block-diagonal sparse adjacency
-          :math:`[B*K, B*K]` depending on :attr:`sparse_output`.
+          :math:`[B*K, B*K]` depending on ``sparse_output``.
 
     Args:
         remove_self_loops (bool, optional):
@@ -166,9 +166,9 @@ class EigenPoolConnect(DenseConnect):
                 any format supported by :class:`~torch_geometric.typing.Adj`.
             so (~tgp.select.SelectOutput):
                 Output of the :math:`\texttt{select}` operator. The assignment
-                matrix :attr:`so.s` must be dense.
+                matrix ``so.s`` must be dense.
             edge_weight (~torch.Tensor, optional):
-                Edge weights associated with :obj:`edge_index` for sparse inputs.
+                Edge weights associated with ``edge_index`` for sparse inputs.
                 (default: :obj:`None`)
             batch (~torch.Tensor, optional):
                 Batch vector for sparse multi-graph inputs. If :obj:`None`, all

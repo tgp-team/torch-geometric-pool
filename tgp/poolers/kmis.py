@@ -20,7 +20,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
     The :math:`k`-MIS pooling method selects a subset of nodes based on their score and
     a maximum independent set strategy. The pooling operates by first scoring nodes and
     then selecting a maximal independent set of nodes, where the score of each node is
-    computed using one of the provided methods in the attribute :attr:`scorer`. The
+    computed using one of the provided methods in the attribute ``scorer``. The
     selected nodes are then pooled using the specified aggregation functions, with
     options to lift the node features using different matrix inversion strategies.
 
@@ -31,34 +31,34 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
 
     Args:
         in_channels (int, optional):
-            Size of each input sample. Ignored if :obj:`scorer` is not
-            :obj:`"linear"`. (default: :obj:`None`)
+            Size of each input sample. Ignored if ``scorer`` is not
+            ``"linear"``. (default: :obj:`None`)
         order_k (int):
-            The :math:`k`-th order for the independent set. (default: :obj:`1`)
+            The :math:`k`-th order for the independent set. (default: ``1``)
         scorer (str or Callable):
             A function that computes a score for each node. Nodes with higher score
             have a higher chance of being selected for pooling. It can be one of:
 
-            - :obj:`"linear"` (default): Uses a sigmoid-activated linear layer to
-              compute the scores. :obj:`in_channels` and :obj:`score_passthrough`
+            - ``"linear"`` (default): Uses a sigmoid-activated linear layer to
+              compute the scores. ``in_channels`` and ``score_passthrough``
               must be set when using this option.
-            - :obj:`"random"`: Assigns a random score in :math:`[0, 1]` to each
+            - ``"random"``: Assigns a random score in :math:`[0, 1]` to each
               node.
-            - :obj:`"constant"`: Assigns a constant score of :math:`1` to each node.
-            - :obj:`"canonical"`: Assigns the score :math:`-i` to the :math:`i`-th
+            - ``"constant"``: Assigns a constant score of :math:`1` to each node.
+            - ``"canonical"``: Assigns the score :math:`-i` to the :math:`i`-th
               node.
-            - :obj:`"first"` (or :obj:`"last"`): Uses the first (or last) feature
+            - ``"first"`` (or ``"last"``): Uses the first (or last) feature
               dimension of :math:`\mathbf{X}` as the node scores.
-            - :obj:`"degree"`: Uses the degree of each node as the score.
+            - ``"degree"``: Uses the degree of each node as the score.
             - A custom function: Accepts the arguments
-              :obj:`(x, edge_index, edge_weight, batch)` and must return a
-              one-dimensional :class:`~torch.FloatTensor`.
+              ``(x, edge_index, edge_weight, batch)`` and must return a
+              one-dimensional :class:`~torch.Tensor`.
         score_heuristic (str, optional):
             Heuristic to increase the total score of selected nodes. Given an initial
             score vector :math:`\mathbf{s} \in \mathbb{R}^n`, options include:
 
             - :obj:`None`: No heuristic applied.
-            - :obj:`"greedy"` (default): Computes the updated score
+            - ``"greedy"`` (default): Computes the updated score
               :math:`\mathbf{s}'` as
 
               .. math::
@@ -66,7 +66,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
                   \mathbf{1}
 
               where :math:`\oslash` is element-wise division.
-            - :obj:`"w-greedy"`: Computes the updated score :math:`\mathbf{s}'` as
+            - ``"w-greedy"``: Computes the updated score :math:`\mathbf{s}'` as
 
               .. math::
                   \mathbf{s}' = \mathbf{s} \oslash (\mathbf{A} + \mathbf{I})^k
@@ -77,38 +77,38 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         lift (~tgp.utils.typing.LiftType, optional):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"precomputed"`` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the ``"s_inv"`` attribute of the :class:`~tgp.select.SelectOutput`.
+            - ``"transpose"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
         reduce_red_op (~tgp.utils.typing.ReduceType, optional):
             If :obj:`None`, node features are taken by indexing the MIS nodes (no reduction).
             Otherwise the reducer is used; the reduce step always computes :math:`\mathbf{S}^\top \mathbf{X}`.
-            (default: :obj:`"sum"`)
-        connect_red_op (~tgp.typing.ConnectionType, optional):
+            (default: ``"sum"``)
+        connect_red_op (~tgp.utils.typing.ConnectionType, optional):
             The aggregation function to be applied to all edges connecting nodes assigned
             to supernodes :math:`i` and :math:`j`.
             Can be any string of class :class:`~tgp.utils.typing.ConnectionType` admitted by
             :obj:`~torch_geometric.utils.coalesce`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
-        lift_red_op (~tgp.typing.ReduceType, optional):
+            e.g., ``'sum'``, ``'mean'``, ``'max'``)
+            (default: ``"sum"``)
+        lift_red_op (~tgp.utils.typing.ReduceType, optional):
             The aggregation function to be applied to the lifted node features.
             Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
             :obj:`~torch_geometric.utils.scatter`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
+            e.g., ``'sum'``, ``'mean'``, ``'max'``)
+            (default: ``"sum"``)
         remove_self_loops (bool, optional):
             Whether to remove self-loops from the graph after coarsening.
             (default: :obj:`True`)
@@ -121,7 +121,7 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
         cached (bool, optional):
             If set to :obj:`True`, the output of the :math:`\texttt{select}` and :math:`\texttt{select}`
             operations will be cached, so that they do not need to be recomputed.
-            If :obj:`True`, the scorer cannot be :obj:`"linear"`.
+            If :obj:`True`, the scorer cannot be ``"linear"``.
             (default: :obj:`False`)
     """
 
@@ -189,10 +189,10 @@ class KMISPooling(BasePrecoarseningMixin, SRCPooling):
                 where :math:`N` is the number of nodes in the batch and
                 :math:`F` is the number of node features.
             adj (~torch_geometric.typing.Adj, optional): The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                It can either be a ``torch_sparse.SparseTensor`` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
-                If :obj:`lifting` is :obj:`False`, it cannot be :obj:`None`.
+                If ``lifting`` is :obj:`False`, it cannot be :obj:`None`.
                 (default: :obj:`None`)
             edge_weight (~torch.Tensor, optional): A vector of shape
                 :math:`[E]` containing the weights of the edges.

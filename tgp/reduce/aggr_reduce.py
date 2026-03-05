@@ -15,7 +15,7 @@ def _sort_by_cluster_index(src: Tensor, cluster_index: Tensor) -> Tuple[Tensor, 
 
     Note:
         In :class:`~tgp.select.SelectOutput`, the index of pooled nodes is
-        exposed as :obj:`cluster_index`. In this module, "cluster" and
+        exposed as ``cluster_index``. In this module, "cluster" and
         "supernode" refer to the same concept.
     """
     cluster_index_sorted, perm = torch.sort(cluster_index, stable=True)
@@ -33,17 +33,17 @@ class AggrReduce(Reduce):
     r"""Reduce operator that wraps a PyG :class:`torch_geometric.nn.aggr.Aggregation`.
 
     Aggregates node features within each supernode using the given aggregation module.
-    Supports sparse assignment matrices and graph-level readout mode (:obj:`so=None`).
+    Supports sparse assignment matrices and graph-level readout mode (``so=None``).
     Dense :class:`~tgp.select.SelectOutput` assignments are not supported:
     use :class:`~tgp.reduce.BaseReduce` for dense/soft reductions.
 
     In :class:`~tgp.select.SelectOutput`, pooled-node indices are named
-    :obj:`cluster_index` for historical reasons; here this is equivalent to
+    ``cluster_index`` for historical reasons; here this is equivalent to
     "supernode index".
 
-    :obj:`so=None` is supported for graph-level readout: all nodes are assigned to one
-    supernode per graph (using :obj:`batch` as supernode index), or to a single supernode
-    when :obj:`batch` is :obj:`None`.
+    ``so=None`` is supported for graph-level readout: all nodes are assigned to one
+    supernode per graph (using ``batch`` as supernode index), or to a single supernode
+    when ``batch`` is :obj:`None`.
 
     Args:
         aggr: A PyG Aggregation instance (e.g. :class:`torch_geometric.nn.aggr.SumAggregation`,
@@ -77,15 +77,15 @@ class AggrReduce(Reduce):
                 :math:`[B, N, F]`.
             so (~tgp.select.SelectOutput, optional): Select output containing
                 assignment information. If :obj:`None`, performs graph-level
-                readout using :obj:`batch`.
+                readout using ``batch``.
             batch (~torch.Tensor, optional): Batch vector assigning each node
                 to a graph.
             size (int, optional): Expected number of pooled nodes (readout
-                groups). If :obj:`None`, inferred from :obj:`so` or
-                :obj:`batch`.
+                groups). If :obj:`None`, inferred from ``so`` or
+                ``batch``.
 
         Returns:
-            tuple: A pair :obj:`(x_pool, batch_pool)` with pooled features and
+            tuple: A pair ``(x_pool, batch_pool)`` with pooled features and
             pooled batch indices.
         """
         # Path 1: readout mode (`so=None`) aggregates directly to one output per graph.
@@ -116,7 +116,7 @@ class AggrReduce(Reduce):
         batch: Optional[Tensor] = None,
         size: Optional[int] = None,
     ) -> Tuple[Tensor, Optional[Tensor]]:
-        r"""Readout fast-path for :obj:`so=None` (one pooled supernode per graph)."""
+        r"""Readout fast-path for ``so=None`` (one pooled supernode per graph)."""
         if x.dim() == 3:
             B, N, _ = x.shape
             num_supernodes = size if size is not None else B

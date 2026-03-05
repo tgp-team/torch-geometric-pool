@@ -89,7 +89,7 @@ def _missing_required_init_kwargs(pooler_cls, provided_kwargs: dict) -> list[str
 
 
 def get_pooler(pooler_name: str, **kwargs):
-    """Return a pooling operator initialized with filtered **kwargs.
+    """Return a pooling operator initialized with filtered ``**kwargs``.
 
     Args:
         pooler_name (str): Name of the pooler.

@@ -33,7 +33,7 @@ class DenseConnect(Connect):
           :math:`[B, K, K]` (edge weights are :obj:`None`).
         - Unbatched sparse inputs return either a dense adjacency
           :math:`[B, K, K]` or a block-diagonal sparse adjacency
-          :math:`[B*K, B*K]` depending on :attr:`sparse_output`.
+          :math:`[B*K, B*K]` depending on ``sparse_output``.
 
     It computes the pooled adjacency matrix as:
 
@@ -226,7 +226,7 @@ class DenseConnect(Connect):
                 of the formats supported by :class:`~torch_geometric.typing.Adj`.
             so (~tgp.select.SelectOutput):
                 The output of the :math:`\texttt{select}` operator. The assignment
-                matrix :attr:`so.s` must be a **dense** tensor.
+                matrix ``so.s`` must be a **dense** tensor.
             edge_weight (~torch.Tensor, optional):
                 A vector of shape :math:`[E]` or :math:`[E, 1]` containing the
                 weights of the edges for unbatched inputs. (default: :obj:`None`)

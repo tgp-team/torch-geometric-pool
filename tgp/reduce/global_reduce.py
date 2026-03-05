@@ -9,7 +9,7 @@ from .get_aggr import resolve_reduce_op
 
 
 def _validate_dense_mask(mask: Optional[Tensor], x: Tensor) -> None:
-    """Validate dense readout mask shape against :obj:`x`."""
+    """Validate dense readout mask shape against ``x``."""
     if mask is None:
         return
     if mask.dim() != 2 or tuple(mask.shape) != tuple(x.shape[:2]):
@@ -22,15 +22,15 @@ class GlobalReduce(AggrReduce):
     r"""Graph-level readout as a module wrapping :class:`AggrReduce`.
 
     This module aggregates node features to one vector per graph, supporting both
-    sparse inputs ``[N, F]`` with an optional :obj:`batch` vector and dense inputs
-    ``[B, N, F]`` with an optional boolean :obj:`mask` of shape ``[B, N]``.
+    sparse inputs ``[N, F]`` with an optional ``batch`` vector and dense inputs
+    ``[B, N, F]`` with an optional boolean ``mask`` of shape ``[B, N]``.
 
     Args:
         reduce_op: Aggregation to use: a string alias (e.g. ``\"sum\"``, ``\"mean\"``,
             ``\"max\"``, ``\"min\"``, ``\"lstm\"``, ``\"set2set\"``) or a PyG
             :class:`torch_geometric.nn.aggr.Aggregation` instance. Strings are
             resolved via :func:`~tgp.reduce.get_aggr`.
-        **aggr_kwargs: Passed to :func:`~tgp.reduce.get_aggr` when :obj:`reduce_op`
+        **aggr_kwargs: Passed to :func:`~tgp.reduce.get_aggr` when ``reduce_op``
             is a string (e.g. ``in_channels``, ``out_channels``, ``processing_steps``).
     """
 
@@ -48,17 +48,17 @@ class GlobalReduce(AggrReduce):
         r"""Aggregate node features to one vector per graph.
 
         Infers sparse vs dense from ``x.ndim``: 2D ``[N, F]`` is sparse (use
-        :obj:`batch` for grouping); 3D ``[B, N, F]`` is dense (reduce over the
+        ``batch`` for grouping); 3D ``[B, N, F]`` is dense (reduce over the
         node dimension). Nodes must be on the second-to-last dimension.
 
         Args:
             x: Node features. Shape ``[N, F]`` (sparse) or ``[B, N, F]`` (dense).
             batch: Batch vector for sparse ``x``, shape ``[N]``. Ignored for dense.
-            size: Number of graphs for sparse readout when :obj:`batch` is provided.
-                Passing :obj:`size` with sparse ``x`` and :obj:`batch=None` raises
+            size: Number of graphs for sparse readout when ``batch`` is provided.
+                Passing ``size`` with sparse ``x`` and ``batch=None`` raises
                 :class:`ValueError`.
             mask: Input-node validity mask for batched (dense) ``x`` only, shape
-                ``[B, N]``. Passing :obj:`mask` with sparse ``x`` or with a
+                ``[B, N]``. Passing ``mask`` with sparse ``x`` or with a
                 mismatched shape raises :class:`ValueError`.
 
         Returns:

@@ -68,9 +68,9 @@ class Reduce(nn.Module):
 
         Args:
             x (~torch.Tensor):
-                The node feature matrix. For a sparse pooler, :obj:`x` has shape :math:`[N, F]`,
+                The node feature matrix. For a sparse pooler, ``x`` has shape :math:`[N, F]`,
                 where :math:`N` is the number of nodes in the batch and :math:`F` is the number of node features.
-                For a dense pooler, :obj:`x` has shape :math:`[B, N, F]`, where :math:`B` is the batch size.
+                For a dense pooler, ``x`` has shape :math:`[B, N, F]`, where :math:`B` is the batch size.
             so (~tgp.select.SelectOutput): The output of the :math:`\texttt{select}` operator.
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
@@ -89,15 +89,15 @@ class BaseReduce(Reduce):
     r"""The basic :math:`\texttt{reduce}` operator that computes :math:`\mathbf{S}^\top \mathbf{X}`.
 
     For **sparse** assignment :math:`\mathbf{S}`, this is implemented as a sum over nodes
-    in each cluster (with optional weighting by :obj:`so.s.values()`). For **dense**
+    in each cluster (with optional weighting by ``so.s.values()``). For **dense**
     assignment, it is a matrix multiply :math:`\mathbf{S}^\top \mathbf{X}`.
 
     For dense multi-graph batches (dense :math:`[N, K]` with a batch vector), each graph
     is processed separately (unbatch then per-graph matmul) for memory efficiency when
-    using unbatched dense poolers (:obj:`batched=False`).
+    using unbatched dense poolers (``batched=False``).
 
     For dense unbatched assignments :math:`[N, K]` with multi-graph batches,
-    :obj:`return_batched=True` returns :math:`[B, K, F]`; otherwise
+    ``return_batched=True`` returns :math:`[B, K, F]`; otherwise
     :math:`[B \cdot K, F]`. For dense batched assignments :math:`[B, N, K]`,
     output is always :math:`[B, K, F]`.
     """
@@ -118,9 +118,9 @@ class BaseReduce(Reduce):
 
         Args:
             x (~torch.Tensor):
-                The node feature matrix. For a sparse pooler, :obj:`x` has shape :math:`[N, F]`,
+                The node feature matrix. For a sparse pooler, ``x`` has shape :math:`[N, F]`,
                 where :math:`N` is the number of nodes in the batch and :math:`F` is the number of node features.
-                For a dense pooler, :obj:`x` has shape :math:`[B, N, F]`, where :math:`B` is the batch size.
+                For a dense pooler, ``x`` has shape :math:`[B, N, F]`, where :math:`B` is the batch size.
             so (~tgp.select.SelectOutput): The output of the :math:`\texttt{select}` operator.
             batch (torch.Tensor, optional): The batch vector
                 :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates

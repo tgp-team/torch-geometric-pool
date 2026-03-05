@@ -35,7 +35,7 @@ class EXPWL1Dataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        """Return the raw pickle filename expected in :obj:`raw_dir`."""
+        """Return the raw pickle filename expected in ``raw_dir``."""
         return ["EXPWL1.pkl"]
 
     @property
@@ -44,7 +44,7 @@ class EXPWL1Dataset(InMemoryDataset):
         return "data.pt"
 
     def download(self):
-        """Download the EXPWL1 pickle file into :obj:`raw_dir`."""
+        """Download the EXPWL1 pickle file into ``raw_dir``."""
         download_url(self.url, self.raw_dir)
 
     def process(self):

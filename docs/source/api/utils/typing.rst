@@ -6,26 +6,25 @@ Typing
 Type aliases
 ------------
 
-.. py:data:: SinvType
-   :type: typing.Literal["transpose", "inverse"]
+.. py:class:: SinvType
 
    Strategy used to compute :math:`\mathbf{S}_{\text{inv}}` from the
    assignment matrix :math:`\mathbf{S}`.
+   Backed by ``typing.Literal["transpose", "inverse"]``.
 
-.. py:data:: ReduceType
-   :type: str
+.. py:class:: ReduceType
 
    Reduction alias forwarded to backend reducers/aggregators.
    Supported values depend on the backend context (e.g., scatter reductions
-   or PyG aggregation aliases).
+   or PyG aggregation aliases). Backed by :obj:`str`.
 
-.. py:data:: LiftType
-   :type: typing.Literal["transpose", "inverse", "precomputed"]
+.. py:class:: LiftType
 
    Strategy used by lift operators when mapping pooled features back to
    original nodes.
+   Backed by ``typing.Literal["transpose", "inverse", "precomputed"]``.
 
-.. py:data:: ConnectionType
-   :type: typing.Literal["sum", "mean", "min", "max", "mul"]
+.. py:class:: ConnectionType
 
    Edge aggregation mode used when constructing pooled connectivity.
+   Backed by ``typing.Literal["sum", "mean", "min", "max", "mul"]``.

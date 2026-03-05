@@ -15,19 +15,19 @@ class TopkSelect(Select):
     r"""The top-:math:`k` :math:`\texttt{select}` operator used by
     scoring-based pooling methods.
 
-    **Behavior based on** :obj:`in_channels`:
+    **Behavior based on** ``in_channels``:
 
-    - **When** :obj:`in_channels` **is** :obj:`None` **or** :obj:`<= 1`: The operator does not learn
+    - **When** ``in_channels`` **is** :obj:`None` **or** ``<= 1``: The operator does not learn
       a projection vector and directly uses the input as node scores (optionally applying
       the activation function). This mode is useful when you want to provide pre-computed
       scores directly.
 
-    - **When** :obj:`in_channels` **is** :obj:`> 1`: The operator learns a projection vector
+    - **When** ``in_channels`` **is** ``> 1``: The operator learns a projection vector
       :math:`\mathbf{p}` and computes scores by projecting the input features.
 
     **Score computation:**
 
-    If :obj:`min_score` is :obj:`None`, computes:
+    If ``min_score`` is :obj:`None`, computes:
 
     .. math::
         \mathbf{s} &= \begin{cases}
@@ -40,7 +40,7 @@ class TopkSelect(Select):
     .. math::
         \mathbf{i} = \mathrm{top}_k(\mathbf{s})
 
-    If :obj:`min_score` is a value :math:`\tilde{\alpha} \in [0,1]`, computes:
+    If ``min_score`` is a value :math:`\tilde{\alpha} \in [0,1]`, computes:
 
     .. math::
         \mathbf{s} &= \begin{cases}
@@ -58,11 +58,11 @@ class TopkSelect(Select):
     **Input handling:**
 
     - **2D input** :math:`\mathbf{X} \in \mathbb{R}^{N \times F}`: Standard node feature matrix.
-    - **1D input** :math:`\mathbf{x} \in \mathbb{R}^{N}`: When :obj:`in_channels` :obj:`<= 1`, used directly
-      as scores. When :obj:`in_channels` :obj:`> 1`, reshaped to :math:`\mathbb{R}^{N \times 1}` and projected.
+    - **1D input** :math:`\mathbf{x} \in \mathbb{R}^{N}`: When ``in_channels`` ``<= 1``, used directly
+      as scores. When ``in_channels`` ``> 1``, reshaped to :math:`\mathbb{R}^{N \times 1}` and projected.
 
     Warning:
-        When providing pre-computed scores, set :obj:`act` to :obj:`"identity"` or :obj:`"linear"`
+        When providing pre-computed scores, set ``act`` to ``"identity"`` or ``"linear"``
         to avoid applying an activation function.
 
     The :class:`~tgp.select.SelectOutput` contains a sparse assignment
@@ -71,36 +71,36 @@ class TopkSelect(Select):
 
     Args:
         in_channels (int, optional):
-            Size of each input sample. When :obj:`None` or :obj:`<= 1`, no learnable
-            projection is used and input is treated as scores. When :obj:`> 1`, a
+            Size of each input sample. When :obj:`None` or ``<= 1``, no learnable
+            projection is used and input is treated as scores. When ``> 1``, a
             learnable projection vector is used to compute scores from features.
             (default: :obj:`None`)
         ratio (float or int):
             The graph pooling ratio, which is used to compute
             :math:`k = \lceil \mathrm{ratio} \cdot N \rceil`, or the value
-            of :math:`k` itself, depending on whether the type of :obj:`ratio`
+            of :math:`k` itself, depending on whether the type of ``ratio``
             is :obj:`float` or :obj:`int`.
-            This value is ignored if :obj:`min_score` is not :obj:`None`.
-            (default: :obj:`0.5`)
+            This value is ignored if ``min_score`` is not :obj:`None`.
+            (default: ``0.5``)
         min_score (float, optional):
             Minimal node score :math:`\tilde{\alpha}`
             which is used to compute indices of pooled nodes
             :math:`\mathbf{i} = \mathbf{s}_i > \tilde{\alpha}`.
-            When this value is not :obj:`None`, the :obj:`ratio` argument is ignored.
+            When this value is not :obj:`None`, the ``ratio`` argument is ignored.
             (default: :obj:`None`)
         act (str or callable, optional):
             The non-linearity :math:`\sigma` to use when computing the score.
-            Use :obj:`"identity"`, :obj:`"linear"`, or :obj:`"none"` to avoid applying
+            Use ``"identity"``, ``"linear"``, or ``"none"`` to avoid applying
             any activation when providing pre-computed scores.
-            (default: :obj:`"tanh"`)
-        s_inv_op (~tgp.typing.SinvType, optional):
+            (default: ``"tanh"``)
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
 
     Examples:

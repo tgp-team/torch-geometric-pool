@@ -54,7 +54,7 @@ class GTVConv(MessagePassing):
             an additive bias. (default: :obj:`True`)
         delta_coeff (float):
             Step size for gradient descent of Graph Total Variation
-            (default: :obj:`1.0`)
+            (default: ``1.0``)
         eps (float):
             Small number used to numerically stabilize the computation of
             new adjacency weights. (default: :obj:`1e-3`)

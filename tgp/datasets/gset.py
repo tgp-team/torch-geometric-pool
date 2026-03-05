@@ -149,7 +149,7 @@ class GsetDataset(InMemoryDataset):
         return "{}.pt".format(self.file_name)
 
     def download(self):
-        """Download the selected Gset graph file into :obj:`raw_dir`."""
+        """Download the selected Gset graph file into ``raw_dir``."""
         download_url("{}{}".format(self.base_url, self.file_name), self.raw_dir)
 
     def process(self):

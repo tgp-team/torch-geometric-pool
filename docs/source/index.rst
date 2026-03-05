@@ -61,8 +61,8 @@ Features
         :shadow: sm
 
         Thanks to the modular :class:`~tgp.src.SRCPooling` framework, the components of
-        different pooling layers :tgp:`tgp` can be easily combined with each other,
-        replaced with existing modules or with completely new ones.
+        different pooling layers in :tgp:`tgp` can be easily combined,
+        replaced with existing modules, or swapped for entirely new ones.
 
     .. grid-item-card:: :octicon:`zap;1em;sd-text-primary` Precomputed & On-the-Fly Pooling.
         :link: api/data/index

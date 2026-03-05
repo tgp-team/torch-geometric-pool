@@ -14,7 +14,7 @@ class EigenPoolReduce(Reduce):
     r"""The :math:`\texttt{reduce}` operator for EigenPooling.
 
     It uses the pooling matrix :math:`\boldsymbol{\Theta}` computed by
-    :class:`~tgp.select.EigenPoolSelect` and stored in :obj:`so.theta`.
+    :class:`~tgp.select.EigenPoolSelect` and stored in ``so.theta``.
     For each graph:
 
     .. math::
@@ -23,17 +23,17 @@ class EigenPoolReduce(Reduce):
     then :math:`\mathbf{X}_{\text{pool,raw}}` is reshaped from mode-major layout
     :math:`[H \cdot K, F]` to :math:`[K, H \cdot F]`.
 
-    :obj:`return_batched` is only used when returning multi-graph results (stack
+    ``return_batched`` is only used when returning multi-graph results (stack
     vs concatenate). EigenPool uses 2D inputs with a batch vector; there is no
     separate dense path.
 
     Args:
         num_modes (int, optional):
             Number of eigenvector modes :math:`H`. Kept for API symmetry with the
-            EigenPool components. (default: :obj:`5`)
+            EigenPool components. (default: ``5``)
         reduce_op (~tgp.utils.typing.ReduceType, optional):
             Kept for API compatibility with :class:`~tgp.reduce.Reduce`.
-            (default: :obj:`"sum"`)
+            (default: ``"sum"``)
     """
 
     def __init__(
@@ -85,10 +85,10 @@ class EigenPoolReduce(Reduce):
                 Node feature matrix :math:`\mathbf{X}` of shape :math:`[N, F]`.
             so (~tgp.select.SelectOutput):
                 Output of the :math:`\texttt{select}` operator with dense
-                assignment matrix :obj:`so.s` and pooling matrix :obj:`so.theta`.
+                assignment matrix ``so.s`` and pooling matrix ``so.theta``.
             batch (~torch.Tensor, optional):
                 Batch vector for sparse multi-graph inputs. If :obj:`None`, this
-                method uses :obj:`so.batch` when available.
+                method uses ``so.batch`` when available.
                 (default: :obj:`None`)
             edge_index (~torch.Tensor, optional):
                 Unused by EigenPooling.

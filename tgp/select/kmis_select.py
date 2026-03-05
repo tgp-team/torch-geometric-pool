@@ -44,7 +44,7 @@ def maximal_independent_set(
     returned set.
 
     The algorithm greedily selects the nodes in their canonical order. If a
-    permutation :obj:`perm` is provided, the nodes are extracted following
+    permutation ``perm`` is provided, the nodes are extracted following
     that permutation instead.
     This method follows `Blelloch's Alogirithm
     <https://arxiv.org/abs/1202.3205>`_ for :math:`k = 1`, and its
@@ -129,7 +129,7 @@ def maximal_independent_set_cluster(
     Regular Data to Graphs" <https://arxiv.org/abs/2208.03523>`_.
 
     The algorithm greedily selects the nodes in their canonical order. If a
-    permutation :obj:`perm` is provided, the nodes are extracted following
+    permutation ``perm`` is provided, the nodes are extracted following
     that permutation instead.
     This method returns both the :math:`k`-MIS and the clustering, where the
     :math:`c`-th cluster refers to the :math:`c`-th element of the
@@ -176,34 +176,34 @@ class KMISSelect(Select):
     Regular Data to Graphs" <https://arxiv.org/abs/2208.03523>`_ (Bacciu et al., AAAI 2023).
 
     To compute the :math:`k`-MIS, the algorithm greedily selects the nodes
-    in their canonical order. If a permutation :obj:`perm` is provided, the nodes are extracted following
+    in their canonical order. If a permutation ``perm`` is provided, the nodes are extracted following
     that permutation instead.
 
     Args:
         in_channels (int, optional):
-            Size of each input sample. Ignored if :obj:`scorer` is not
-            :obj:`"linear"`. (default: :obj:`None`)
+            Size of each input sample. Ignored if ``scorer`` is not
+            ``"linear"``. (default: :obj:`None`)
         order_k (int):
-            The :math:`k`-th order for the independent set. (default: :obj:`1`)
+            The :math:`k`-th order for the independent set. (default: ``1``)
         scorer (str):
             A function that computes a score for each node. Nodes with higher score
             have a higher chance of being selected for pooling. It can be one of:
 
-            - :obj:`"linear"` (default): Uses a sigmoid-activated linear layer to
-              compute the scores. :obj:`in_channels`
+            - ``"linear"`` (default): Uses a sigmoid-activated linear layer to
+              compute the scores. ``in_channels``
               must be set when using this option.
-            - :obj:`"random"`: Assigns a random score in :math:`[0, 1]` to each
+            - ``"random"``: Assigns a random score in :math:`[0, 1]` to each
               node.
-            - :obj:`"constant"`: Assigns a constant score of :math:`1` to each node.
-            - :obj:`"canonical"`: Assigns the score :math:`-i` to the :math:`i`-th
+            - ``"constant"``: Assigns a constant score of :math:`1` to each node.
+            - ``"canonical"``: Assigns the score :math:`-i` to the :math:`i`-th
               node.
-            - :obj:`"degree"`: Uses the degree of each node as the score.
+            - ``"degree"``: Uses the degree of each node as the score.
         score_heuristic (str, optional):
             Heuristic to increase the total score of selected nodes. Given an initial
             score vector :math:`\mathbf{s} \in \mathbb{R}^n`, options include:
 
             - :obj:`None`: No heuristic applied.
-            - :obj:`"greedy"` (default): Computes the updated score
+            - ``"greedy"`` (default): Computes the updated score
               :math:`\mathbf{s}'` as
 
               .. math::
@@ -211,21 +211,21 @@ class KMISSelect(Select):
                   \mathbf{1}
 
               where :math:`\oslash` is element-wise division.
-            - :obj:`"w-greedy"`: Computes the updated score :math:`\mathbf{s}'` as
+            - ``"w-greedy"``: Computes the updated score :math:`\mathbf{s}'` as
 
               .. math::
                   \mathbf{s}' = \mathbf{s} \oslash (\mathbf{A} + \mathbf{I})^k
                   \mathbf{s}
         force_undirected (bool, optional):
             Whether to force the input graph to be undirected. (default: :obj:`False`)
-        s_inv_op (~tgp.typing.SinvType, optional):
+        s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 
@@ -324,7 +324,7 @@ class KMISSelect(Select):
         Args:
             edge_index (~torch_geometric.typing.Adj):
                 The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                It can either be a ``torch_sparse.SparseTensor`` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             edge_weight (~torch.Tensor, optional):

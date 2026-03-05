@@ -235,13 +235,13 @@ class SelectOutput:
     def out_mask(self) -> Optional[Tensor]:
         r"""Boolean validity mask on pooled supernodes with shape :math:`[B, K]`.
 
-        This is inferred from dense assignment matrix :obj:`s` and marks
+        This is inferred from dense assignment matrix ``s`` and marks
         supernodes that have at least one assigned node.
-        For :obj:`s.dim() == 3` (:math:`[B, N, K]`), there is one mask row per
+        For ``s.dim() == 3`` (:math:`[B, N, K]`), there is one mask row per
         graph.
-        For :obj:`s.dim() == 2` (:math:`[N, K]`) with :obj:`batch`, there is one
-        row per graph id in :obj:`batch`.
-        For :obj:`s.dim() == 2` without :obj:`batch`, the result has shape
+        For ``s.dim() == 2`` (:math:`[N, K]`) with ``batch``, there is one
+        row per graph id in ``batch``.
+        For ``s.dim() == 2`` without ``batch``, the result has shape
         :math:`[1, K]`.
 
         Returns :obj:`None` for sparse assignments.
@@ -254,41 +254,41 @@ class SelectOutput:
 
     @property
     def is_sparse(self) -> bool:
-        """Return :obj:`True` if :obj:`s` is a sparse tensor."""
+        """Return :obj:`True` if ``s`` is a sparse tensor."""
         return isinstance(self.s, Tensor) and self.s.is_sparse
 
     @property
     def is_dense(self) -> bool:
-        """Return :obj:`True` if :obj:`s` is a dense tensor."""
+        """Return :obj:`True` if ``s`` is a dense tensor."""
         return isinstance(self.s, Tensor) and not self.s.is_sparse
 
     @property
     def num_nodes(self) -> int:
-        """Return the number of input nodes represented by :obj:`s`."""
+        """Return the number of input nodes represented by ``s``."""
         return self.s.size(-2)
 
     @property
     def num_supernodes(self) -> int:
-        """Return the number of pooled nodes represented by :obj:`s`."""
+        """Return the number of pooled nodes represented by ``s``."""
         return self.s.size(-1)
 
     @property
     def node_index(self) -> Optional[Tensor]:
-        """Return sparse row indices (node ids) when :obj:`s` is sparse."""
+        """Return sparse row indices (node ids) when ``s`` is sparse."""
         return self.s.indices()[0] if self.is_sparse else None
 
     @property
     def cluster_index(self) -> Optional[Tensor]:
-        """Return sparse column indices (supernode ids) when :obj:`s` is sparse."""
+        """Return sparse column indices (supernode ids) when ``s`` is sparse."""
         return self.s.indices()[1] if self.is_sparse else None
 
     @property
     def weight(self) -> Optional[Tensor]:
-        """Return sparse assignment values when :obj:`s` is sparse."""
+        """Return sparse assignment values when ``s`` is sparse."""
         return self.s.values() if self.is_sparse else None
 
     def set_s_inv(self, method):
-        """Compute and store :obj:`s_inv` from :obj:`s` using the given strategy."""
+        """Compute and store ``s_inv`` from ``s`` using the given strategy."""
         if method == "transpose":
             if self.is_sparse:
                 self.s_inv = self.s.t()
@@ -323,7 +323,7 @@ class SelectOutput:
         return value
 
     def apply(self, func: Callable) -> "SelectOutput":
-        r"""Applies :obj:`func` to tensors in :obj:`s`, :obj:`s_inv`, and tensor-valued extra attributes."""
+        r"""Applies ``func`` to tensors in ``s``, ``s_inv``, and tensor-valued extra attributes."""
         self.s = func(self.s)
         if self.s_inv is not None:
             self.s_inv = func(self.s_inv)
@@ -338,8 +338,8 @@ class SelectOutput:
         return copy.deepcopy(self)
 
     def to(self, device: Union[int, str], non_blocking: bool = False) -> "SelectOutput":
-        r"""Performs tensor dtype and/or device conversion for both :obj:`s` and
-        :obj:`s_inv`.
+        r"""Performs tensor dtype and/or device conversion for both ``s`` and
+        ``s_inv``.
         """
         self.apply(lambda x: x.to(device=device, non_blocking=non_blocking))
         if self.batch is not None:
@@ -347,7 +347,7 @@ class SelectOutput:
         return self
 
     def cpu(self) -> "SelectOutput":
-        r"""Copies attributes to CPU memory for both :obj:`s` and :obj:`s_inv`."""
+        r"""Copies attributes to CPU memory for both ``s`` and ``s_inv``."""
         self.apply(lambda x: x.cpu())
         if self.batch is not None:
             self.batch = self.batch.cpu()
@@ -356,26 +356,26 @@ class SelectOutput:
     def cuda(
         self, device: Optional[Union[int, str]] = None, non_blocking: bool = False
     ) -> "SelectOutput":
-        r"""Copies attributes to CUDA memory for both :obj:`s` and :obj:`s_inv`."""
+        r"""Copies attributes to CUDA memory for both ``s`` and ``s_inv``."""
         self.apply(lambda x: x.cuda(device, non_blocking=non_blocking))
         if self.batch is not None:
             self.batch = self.batch.cuda(device, non_blocking=non_blocking)
         return self
 
     def detach_(self) -> "SelectOutput":
-        r"""Detaches attributes from the computation graph for both :obj:`s`
-        and :obj:`s_inv`.
+        r"""Detaches attributes from the computation graph for both ``s``
+        and ``s_inv``.
         """
         return self.apply(lambda x: x.detach_())
 
     def detach(self) -> "SelectOutput":
         r"""Detaches attributes from the computation graph by creating a new
-        tensor for both :obj:`s` and :obj:`s_inv`.
+        tensor for both ``s`` and ``s_inv``.
         """
         return self.apply(lambda x: x.detach())
 
     def requires_grad_(self, requires_grad: bool = True) -> "SelectOutput":
-        r"""Tracks gradient computation for both :obj:`s` and :obj:`s_inv`."""
+        r"""Tracks gradient computation for both ``s`` and ``s_inv``."""
         return self.apply(lambda x: x.requires_grad_(requires_grad=requires_grad))
 
     def assign_all_nodes(
@@ -395,14 +395,14 @@ class SelectOutput:
         Args:
             adj (~torch_geometric.typing.Adj, optional): Graph connectivity matrix.
                 Can be an edge_index tensor of shape :math:`(2, E)` or SparseTensor.
-                Required for :obj:`"closest_node"` strategy. (default: :obj:`None`)
+                Required for ``"closest_node"`` strategy. (default: :obj:`None`)
             weight (~torch.Tensor, optional): Node-level weights for the assignment.
                 Must have shape :math:`(N,)` where :math:`N` is the total number of nodes.
                 Note: This is different from edge weights. (default: :obj:`None`)
             max_iter (int, optional): Maximum number of message passing iterations
-                for the :obj:`"closest_node"` strategy. Higher values allow assignment
-                of more distant nodes through graph connectivity. Must be :obj:`> 0`
-                for :obj:`"closest_node"` strategy. (default: :obj:`5`)
+                for the ``"closest_node"`` strategy. Higher values allow assignment
+                of more distant nodes through graph connectivity. Must be ``> 0``
+                for ``"closest_node"`` strategy. (default: ``5``)
             batch (~torch.Tensor, optional): Batch assignment vector of shape :math:`(N,)`
                 indicating which graph each node belongs to. When provided, ensures
                 nodes are only assigned to supernodes within the same graph.
@@ -413,15 +413,15 @@ class SelectOutput:
 
         Returns:
             SelectOutput: A new SelectOutput with complete node-to-supernode assignments.
-            The returned object has :obj:`num_nodes` assignments (one per node) and
+            The returned object has ``num_nodes`` assignments (one per node) and
             :obj:`num_supernodes` supernodes (same as the original selection).
 
         Raises:
-            AssertionError: If :obj:`adj` is :obj:`None` for :obj:`"closest_node"` strategy.
-            AssertionError: If :obj:`max_iter <= 0` for :obj:`"closest_node"` strategy.
+            AssertionError: If ``adj`` is :obj:`None` for ``"closest_node"`` strategy.
+            AssertionError: If ``max_iter <= 0`` for ``"closest_node"`` strategy.
             ValueError: If :obj:`weight` size doesn't match the number of nodes.
-            ValueError: If :obj:`adj` has an invalid type.
-            ValueError: If :obj:`strategy` is not recognized.
+            ValueError: If ``adj`` has an invalid type.
+            ValueError: If ``strategy`` is not recognized.
 
         Example:
             >>> # Convert sparse top-k selection to full assignment

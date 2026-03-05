@@ -119,7 +119,7 @@ class SparseConnect(Connect):
     such as :class:`~tgp.select.GraclusSelect`, :class:`~tgp.select.NDPSelect`, and
     :class:`~tgp.select.KMISSelect`.
 
-    It also works of scoring-based methods such as
+    It also works for scoring-based methods such as
     :class:`~tgp.select.TopkSelect` that compute the pooled adjacency as
 
     .. math::
@@ -128,10 +128,10 @@ class SparseConnect(Connect):
     where :math:`\mathbf{i}` denotes the set of supernodes.
 
     Args:
-        reduce_op (~tgp.utils.typing.ReduceType, optional):
+        reduce_op (~tgp.utils.typing.ConnectionType, optional):
             The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
+            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., ``'sum'``, ``'mean'``,
+            ``'max'``) or any :class:`~tgp.utils.typing.ConnectionType`.
             (default: :obj:`sum`)
         remove_self_loops (bool, optional):
             Whether to remove self-loops from the graph after coarsening.
@@ -173,7 +173,7 @@ class SparseConnect(Connect):
         Args:
             edge_index (~torch_geometric.typing.Adj):
                 The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                It can either be a ``torch_sparse.SparseTensor`` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             so (~tgp.select.SelectOutput):
@@ -189,7 +189,7 @@ class SparseConnect(Connect):
         Returns:
             (~torch_geometric.typing.Adj, ~torch.Tensor or None):
             The pooled adjacency matrix and the edge weights.
-            If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
+            If the pooled adjacency is a ``torch_sparse.SparseTensor``,
             returns :obj:`None` as the edge weights.
         """
         if self.edge_weight_norm and batch_pooled is None:

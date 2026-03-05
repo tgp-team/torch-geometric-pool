@@ -49,31 +49,31 @@ class BaseLift(Lift):
     + :math:`\mathbf{X}_{\text{lift}} \in \mathbb{R}^{N \times F}` are the lifted node features,
     + :math:`\mathbf{S}_{\text{inv}} \in \mathbb{R}^{K \times N}` is the inverse node assignment operator,
     + :math:`\mathbf{X}_{\text{pool}} \in \mathbb{R}^{K \times F}` are the pooled features of the supernodes,
-    + :math:`f(\cdot)` is the lifting operation that specifies of :math:`\mathbf{S}_{\text{inv}}` is used to
-      computed the lifted features :math:`\mathbf{X}_{\text{lift}}`. In most cases,
+    + :math:`f(\cdot)` is the lifting operation that specifies how :math:`\mathbf{S}_{\text{inv}}` is used to
+      compute the lifted features :math:`\mathbf{X}_{\text{lift}}`. In most cases,
       :math:`f(\mathbf{S}_{\text{inv}}, \mathbf{X}_{\text{pool}}) = \mathbf{S}_{\text{inv}}^{\top} \mathbf{X}_{\text{pool}}`.
 
-    It works also for *dense* pooling operators. In that case,
+    It also works for *dense* pooling operators. In that case,
     :math:`\mathbf{X}_{\text{lift}} \in \mathbb{R}^{B \times N \times F}`,
     :math:`\mathbf{S}_{\text{inv}} \in \mathbb{R}^{B \times K \times N}`,
     :math:`\mathbf{X}_{\text{pool}} \in \mathbb{R}^{B \times K \times F}`.
 
     Args:
-        matrix_op (~tgp.typing.LiftType):
+        matrix_op (~tgp.utils.typing.LiftType):
             Defines how to compute the matrix :math:`\mathbf{S}_\text{inv}` to lift the pooled node features.
 
-            - :obj:`"precomputed"` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
-              already stored in the :obj:`"s_inv"` attribute of the :class:`~tgp.select.SelectOutput`.
-            - :obj:`"transpose"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"precomputed"`` (default): Use as :math:`\mathbf{S}_\text{inv}` what is
+              already stored in the ``"s_inv"`` attribute of the :class:`~tgp.select.SelectOutput`.
+            - ``"transpose"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Recomputes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
-        reduce_op (~tgp.typing.ReduceType):
+        reduce_op (~tgp.utils.typing.ReduceType):
             The aggregation function to be applied to the lifted node features.
             Can be any string of class :class:`~tgp.utils.typing.ReduceType` admitted by
             :obj:`~torch_geometric.utils.scatter`,
-            e.g., :obj:`'sum'`, :obj:`'mean'`, :obj:`'max'`)
-            (default: :obj:`"sum"`)
+            e.g., ``'sum'``, ``'mean'``, ``'max'``)
+            (default: ``"sum"``)
     """
 
     def __init__(
@@ -152,7 +152,7 @@ class BaseLift(Lift):
                 The output of the :math:`\texttt{select}` operator.
             batch (~torch.Tensor, optional):
                 The batch vector for the original nodes.
-                If not provided, :obj:`so.batch` is used when available.
+                If not provided, ``so.batch`` is used when available.
                 (default: :obj:`None`)
             batch_pooled (~torch.Tensor, optional):
                 The batch vector for the pooled nodes.
@@ -162,7 +162,7 @@ class BaseLift(Lift):
                 (default: :obj:`None`)
 
         Returns:
-            x_lift (~torch.Tensor):
+            ~torch.Tensor:
                 The lifted node features.
         """
         if batch is None and so.batch is not None:

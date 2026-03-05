@@ -22,17 +22,17 @@ class MaxCutScoreNet(torch.nn.Module):
     Args:
         in_channels (int): Size of each input feature.
         mp_units (list, optional): List of hidden units for message passing layers.
-            (default: :obj:`[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]`)
+            (default: ``[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]``)
         mp_act (str, optional): Activation function for message passing layers.
-            (default: :obj:`"tanh"`)
+            (default: ``"tanh"``)
         mlp_units (list, optional): List of hidden units for MLP layers.
-            (default: :obj:`[16, 16]`)
+            (default: ``[16, 16]``)
         mlp_act (str, optional): Activation function for MLP layers.
-            (default: :obj:`"relu"`)
+            (default: ``"relu"``)
         act (str, optional): Activation function for the final score.
-            (default: :obj:`"tanh"`)
+            (default: ``"tanh"``)
         delta (float, optional): Delta parameter for propagation matrix computation.
-            (default: :obj:`2.0`)
+            (default: ``2.0``)
     """
 
     def __init__(
@@ -156,34 +156,34 @@ class MaxCutSelect(TopkSelect):
     Args:
         in_channels (int): Size of each input feature.
         ratio (Union[int, float]): Graph pooling ratio for top-k selection.
-            (default: :obj:`0.5`)
+            (default: ``0.5``)
         assign_all_nodes (bool, optional): Whether to create assignment matrices that map
             all nodes to the closest supernode (True) or perform standard top-k selection (False).
             (default: :obj:`True`)
         max_iter (int, optional): Maximum distance for the closest node assignment.
-            (default: :obj:`5`)
+            (default: ``5``)
         mp_units (list, optional): List of hidden units for message passing layers.
-            (default: :obj:`[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]`)
+            (default: ``[32, 32, 32, 32, 16, 16, 16, 16, 8, 8, 8, 8]``)
         mp_act (str, optional): Activation function for message passing layers.
-            (default: :obj:`"tanh"`)
+            (default: ``"tanh"``)
         mlp_units (list, optional): List of hidden units for MLP layers.
-            (default: :obj:`[16, 16]`)
+            (default: ``[16, 16]``)
         mlp_act (str, optional): Activation function for MLP layers.
-            (default: :obj:`"relu"`)
+            (default: ``"relu"``)
         act (str, optional): Activation function for the final score.
-            (default: :obj:`"tanh"`)
+            (default: ``"tanh"``)
         delta (float, optional): Delta parameter for propagation matrix computation.
-            (default: :obj:`2.0`)
+            (default: ``2.0``)
         min_score (float, optional): Minimal node score threshold.
             Inherited from TopkSelect. (default: :obj:`None`)
         s_inv_op (~tgp.utils.typing.SinvType, optional):
             The operation used to compute :math:`\mathbf{S}_\text{inv}` from the select matrix
-            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the :obj:`"s_inv"` attribute of
+            :math:`\mathbf{S}`. :math:`\mathbf{S}_\text{inv}` is stored in the ``"s_inv"`` attribute of
             the :class:`~tgp.select.SelectOutput`. It can be one of:
 
-            - :obj:`"transpose"` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
+            - ``"transpose"`` (default): Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^\top`,
               the transpose of :math:`\mathbf{S}`.
-            - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
+            - ``"inverse"``: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
 

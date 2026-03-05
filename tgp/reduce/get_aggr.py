@@ -2,8 +2,8 @@
 
 Use :func:`get_aggr` to obtain aggregators by name for :class:`AggrReduce` and
 :class:`GlobalReduce`. For parametrized aggregators (e.g. LSTM, Set2Set), pass
-keyword arguments such as :obj:`in_channels`, :obj:`out_channels`,
-:obj:`processing_steps`.
+keyword arguments such as ``in_channels``, ``out_channels``,
+``processing_steps``.
 """
 
 import inspect
@@ -64,12 +64,12 @@ def resolve_reduce_op(
     reduce_op: Union[str, Any],
     **kwargs: Any,
 ) -> Any:
-    r"""Resolve :obj:`reduce_op` to a PyG Aggregation instance.
+    r"""Resolve ``reduce_op`` to a PyG Aggregation instance.
 
     Args:
         reduce_op: Either a string alias accepted by :func:`get_aggr` or an
             already-instantiated PyG Aggregation module.
-        **kwargs: Forwarded to :func:`get_aggr` when :obj:`reduce_op` is a
+        **kwargs: Forwarded to :func:`get_aggr` when ``reduce_op`` is a
             string.
 
     Returns:
@@ -95,14 +95,14 @@ def get_aggr(alias: str, **kwargs: Any) -> Any:
     via a string name.
 
     Args:
-        alias: Name of the aggregator (e.g. :obj:`"sum"`, :obj:`"mean"`,
-            :obj:`"lstm"`, :obj:`"set2set"`). Case-insensitive; dashes are
+        alias: Name of the aggregator (e.g. ``"sum"``, ``"mean"``,
+            ``"lstm"``, ``"set2set"``). Case-insensitive; dashes are
             normalized to underscores. The full list of supported aliases is
             documented in :mod:`tgp.reduce` (see the *Aggregator aliases*
             section).
         **kwargs: Passed to the aggregator constructor. Parametrized aggregators
-            typically need :obj:`in_channels`, :obj:`out_channels`, and/or
-            :obj:`processing_steps` (e.g. for Set2Set, LSTM). Any extra
+            typically need ``in_channels``, ``out_channels``, and/or
+            ``processing_steps`` (e.g. for Set2Set, LSTM). Any extra
             keyword arguments that are not accepted by the underlying PyG
             class are silently dropped.
 
@@ -110,8 +110,8 @@ def get_aggr(alias: str, **kwargs: Any) -> Any:
         An instance of the requested PyG Aggregation.
 
     Raises:
-        ImportError: If :obj:`torch_geometric.nn.aggr` is not available.
-        ValueError: If :obj:`alias` is not recognized.
+        ImportError: If ``torch_geometric.nn.aggr`` is not available.
+        ValueError: If ``alias`` is not recognized.
 
     Example:
         >>> from tgp.reduce import get_aggr, AggrReduce, GlobalReduce
