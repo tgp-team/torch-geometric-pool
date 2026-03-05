@@ -91,12 +91,13 @@ def get_mask_from_dense_s(
     The returned mask has shape :math:`[B, K]`, where each entry is :obj:`True`
     iff supernode :math:`k` has at least one assigned input node in graph :math:`b`.
 
-    This helper supports both dense assignment layouts:
-    - :math:`s \in \mathbb{R}^{B \times N \times K}` (batched dense path).
-    - :math:`s \in \mathbb{R}^{N \times K}` with optional :obj:`batch`:
-      - if :obj:`batch` is provided, :math:`N` may contain nodes from multiple graphs;
-      - if :obj:`batch` is :obj:`None`, it is treated as a single graph and the
-        output has shape :math:`[1, K]`.
+    Supported dense assignment layouts are
+    :math:`s \in \mathbb{R}^{B \times N \times K}` and
+    :math:`s \in \mathbb{R}^{N \times K}`.
+    When :obj:`s` is 2D and :obj:`batch` is provided, rows in :obj:`s` can
+    belong to multiple graphs according to :obj:`batch`.
+    When :obj:`s` is 2D and :obj:`batch` is :obj:`None`, :obj:`s` is treated as
+    a single graph and the output shape is :math:`[1, K]`.
 
     Args:
         s (~torch.Tensor): Dense assignment tensor of shape :math:`[N, K]` or
@@ -584,7 +585,11 @@ def negative_edge_sampling(
     method: str = "auto",
     force_undirected: bool = False,
 ) -> Tensor:
-    r"""Samples random negative edges of a graph given by :attr:`edge_index`.
+    r"""Sample random negative edges for a graph from :attr:`edge_index`.
+
+    This function supports both standard and bipartite graphs.
+    For bipartite inputs (:obj:`num_nodes=(num_src, num_dst)`),
+    :obj:`force_undirected` is ignored.
 
     Args:
         edge_index (~torch.Tensor): The edge indices of shape :math:`(2, E)`.
@@ -612,17 +617,21 @@ def negative_edge_sampling(
     Returns:
         ~torch.Tensor: Negative edge indices of shape :math:`(2, E_{neg})`.
 
-    Examples:
-        >>> # Standard usage
-        >>> edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
-        >>> negative_edge_sampling(edge_index)
-        tensor([[3, 0, 0, 3],
-                [2, 3, 2, 1]])
+    .. admonition:: Example
 
-        >>> # For bipartite graph
-        >>> negative_edge_sampling(edge_index, num_nodes=(3, 4))
-        tensor([[0, 2, 2, 1],
-                [2, 2, 1, 3]])
+        Standard graph:
+
+        .. code-block:: python
+
+            edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
+            neg_edge_index = negative_edge_sampling(edge_index)
+
+        Bipartite graph:
+
+        .. code-block:: python
+
+            edge_index = torch.as_tensor([[0, 0, 1, 1], [0, 1, 2, 3]])
+            neg_edge_index = negative_edge_sampling(edge_index, num_nodes=(2, 4))
     """
     assert method in ["sparse", "dense", "auto"]
 
@@ -708,8 +717,11 @@ def batched_negative_edge_sampling(
     method: str = "auto",
     force_undirected: bool = False,
 ) -> Tensor:
-    r"""Samples random negative edges of multiple graphs given by
-    :attr:`edge_index` and :attr:`batch`.
+    r"""Sample random negative edges independently for each graph in a batch.
+
+    This applies :func:`~tgp.utils.ops.negative_edge_sampling` graph-by-graph
+    using :attr:`batch`, then concatenates all sampled negative edges in the
+    original global node indexing space.
 
     Args:
         edge_index (~torch.Tensor): The edge indices of shape :math:`(2, E)`.
@@ -732,25 +744,32 @@ def batched_negative_edge_sampling(
         ~torch.Tensor: Concatenated negative edge indices of shape
         :math:`(2, E_{neg})` with edges from all graphs.
 
-    Examples:
-        >>> # Standard usage
-        >>> edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
-        >>> edge_index = torch.cat([edge_index, edge_index + 4], dim=1)
-        >>> batch = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
-        >>> batched_negative_edge_sampling(edge_index, batch)
-        tensor([[3, 1, 3, 2, 7, 7, 6, 5],
-                [2, 0, 1, 1, 5, 6, 4, 4]])
+    .. admonition:: Example
 
-        >>> # For bipartite graph
-        >>> edge_index1 = torch.as_tensor([[0, 0, 1, 1], [0, 1, 2, 3]])
-        >>> edge_index2 = edge_index1 + torch.tensor([[2], [4]])
-        >>> edge_index3 = edge_index2 + torch.tensor([[2], [4]])
-        >>> edge_index = torch.cat([edge_index1, edge_index2, edge_index3], dim=1)
-        >>> src_batch = torch.tensor([0, 0, 1, 1, 2, 2])
-        >>> dst_batch = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2])
-        >>> batched_negative_edge_sampling(edge_index, (src_batch, dst_batch))
-        tensor([[ 0,  0,  1,  1,  2,  2,  3,  3,  4,  4,  5,  5],
-                [ 2,  3,  0,  1,  6,  7,  4,  5, 10, 11,  8,  9]])
+        Homogeneous mini-batch:
+
+        .. code-block:: python
+
+            edge_index = torch.as_tensor([[0, 0, 1, 2], [0, 1, 2, 3]])
+            edge_index = torch.cat([edge_index, edge_index + 4], dim=1)
+            batch = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
+
+            neg_edge_index = batched_negative_edge_sampling(edge_index, batch)
+
+        Bipartite mini-batch:
+
+        .. code-block:: python
+
+            edge_index1 = torch.as_tensor([[0, 0, 1, 1], [0, 1, 2, 3]])
+            edge_index2 = edge_index1 + torch.tensor([[2], [4]])
+            edge_index3 = edge_index2 + torch.tensor([[2], [4]])
+            edge_index = torch.cat([edge_index1, edge_index2, edge_index3], dim=1)
+            src_batch = torch.tensor([0, 0, 1, 1, 2, 2])
+            dst_batch = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2])
+
+            neg_edge_index = batched_negative_edge_sampling(
+                edge_index, (src_batch, dst_batch)
+            )
     """
     if isinstance(batch, Tensor):
         src_batch, dst_batch = batch, batch

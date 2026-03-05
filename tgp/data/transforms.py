@@ -186,25 +186,22 @@ class PreCoarsening(BaseTransform):
     and attaches them to the input :class:`~torch_geometric.data.Data` object.
 
     Takes one or more pooling operators from :class:`~tgp.src.SRCPooling` to
-    build a multi-level pooling hierarchy. Each pooler must implement
-    :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening`.
-    The default implementation is greedy repeated
-    :meth:`~tgp.src.SRCPooling.precoarsening`.
+    build a multi-level pooling hierarchy.
+    Pre-coarsenable poolers share the rollout contract exposed by
+    :meth:`~tgp.poolers.SEPPooling.multi_level_precoarsening`; by default, this
+    rollout greedily repeats single-level
+    :meth:`~tgp.poolers.NMFPooling.precoarsening`.
 
-    Some poolers override :meth:`~tgp.src.Precoarsenable.precoarsening` to
-    enforce method-specific behavior at each level (e.g.,
-    :meth:`~tgp.poolers.nmf.NMFPooling.precoarsening` and
-    :meth:`~tgp.poolers.eigenpool.EigenPooling.precoarsening` keep a fixed
-    assignment width), while others override
-    :meth:`~tgp.src.Precoarsenable.multi_level_precoarsening` to implement a
-    custom hierarchy rollout (e.g.,
-    :meth:`~tgp.poolers.sep.SEPPooling.multi_level_precoarsening`).
-    Poolers must be non-trainable, i.e., they should not have learnable
-    parameters.
+    Some poolers customize single-level behavior (for example,
+    :meth:`~tgp.poolers.NMFPooling.precoarsening` and
+    :meth:`~tgp.poolers.EigenPooling.precoarsening` keep a fixed assignment
+    width), while others customize the full rollout (for example,
+    :meth:`~tgp.poolers.SEPPooling.multi_level_precoarsening`).
+    Poolers must be non-trainable, i.e., they should not have learnable parameters.
     The graph is recursively coarsened for as many levels as given in :obj:`poolers`.
-    At each level, a coarsened adjacency matrix and, optionally, a pooled batch
-    is computed. The result is stored as a list of intermediate pooled subgraphs
-    in :class:`~torch_geometric.data.Data`, which downstream GNN models can consume.
+    At each level, a coarsened adjacency matrix and, optionally, a pooled batch is
+    computed. The result is stored as a list of intermediate pooled subgraphs in
+    :class:`~torch_geometric.data.Data`, which downstream GNN models can consume.
 
     Args:
         poolers (PoolersArg):
@@ -406,16 +403,25 @@ class PreCoarsening(BaseTransform):
 
         Execution is run-based: adjacent identical pooler configs are collapsed
         and each run is executed once via
-        :meth:`tgp.src.Precoarsenable.multi_level_precoarsening`.
+        :meth:`~tgp.poolers.SEPPooling.multi_level_precoarsening`.
         Returned levels are still appended one-by-one, preserving the original
-        external contract (`len(pooled_data) == number of requested levels`).
+        external contract (``len(pooled_data) == number of requested levels``).
 
-        Example:
-            With ``poolers=["ndp", "ndp", "sep", "sep", "graclus"]``,
-            internal execution collapses to runs
-            ``[(ndp, 2), (sep, 2), (graclus, 1)]``.
-            The output still contains five levels in order:
-            ``data.pooled_data = [lvl1, lvl2, lvl3, lvl4, lvl5]``.
+        .. admonition:: Example
+
+            .. code-block:: python
+
+                from tgp.data.transforms import PreCoarsening
+
+                transform = PreCoarsening(
+                    poolers=["ndp", "ndp", "sep", "sep", "graclus"]
+                )
+                data = transform(data)
+
+                # Internal execution uses collapsed runs:
+                # [(ndp, 2), (sep, 2), (graclus, 1)]
+                # but the output still contains five levels:
+                # data.pooled_data = [lvl1, lvl2, lvl3, lvl4, lvl5]
         """
         data_obj = data if self.input_key is None else getattr(data, self.input_key)
         pooled_levels = []

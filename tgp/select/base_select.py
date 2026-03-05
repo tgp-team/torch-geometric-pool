@@ -233,14 +233,16 @@ class SelectOutput:
 
     @property
     def out_mask(self) -> Optional[Tensor]:
-        """Boolean validity mask on pooled supernodes with shape :math:`[B, K]`.
+        r"""Boolean validity mask on pooled supernodes with shape :math:`[B, K]`.
 
-        This is inferred from the dense assignment matrix :obj:`s` and marks
-        which supernodes are actually used (have at least one assigned node):
-        - :obj:`s.dim() == 3` (:math:`[B, N, K]`): one mask row per graph.
-        - :obj:`s.dim() == 2` (:math:`[N, K]`):
-          - with :obj:`batch`: one mask row per graph in :obj:`batch`;
-          - without :obj:`batch`: single-graph mask of shape :math:`[1, K]`.
+        This is inferred from dense assignment matrix :obj:`s` and marks
+        supernodes that have at least one assigned node.
+        For :obj:`s.dim() == 3` (:math:`[B, N, K]`), there is one mask row per
+        graph.
+        For :obj:`s.dim() == 2` (:math:`[N, K]`) with :obj:`batch`, there is one
+        row per graph id in :obj:`batch`.
+        For :obj:`s.dim() == 2` without :obj:`batch`, the result has shape
+        :math:`[1, K]`.
 
         Returns :obj:`None` for sparse assignments.
         """
