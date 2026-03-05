@@ -223,19 +223,10 @@ def test_precoarsening_normalize_poolers_arg_variants():
     assert PreCoarsening._normalize_poolers_arg(tuple_cfg) == [tuple_cfg]
 
 
-def test_precoarsening_freeze_config_value_branches():
-    list_frozen = PreCoarsening._freeze_config_value([1, {"a": 2}])
-    assert isinstance(list_frozen, tuple)
-
-    set_frozen = PreCoarsening._freeze_config_value({3, 1})
-    assert isinstance(set_frozen, tuple)
-    assert sorted(set_frozen) == [1, 3]
-
-    class _Unhashable:
-        __hash__ = None
-
-    unhashable_frozen = PreCoarsening._freeze_config_value(_Unhashable())
-    assert isinstance(unhashable_frozen, str)
+def test_precoarsening_normalize_kwargs_for_key_is_stable():
+    kwargs = {"b": 2, "a": [1, {"x": 3}]}
+    normalized = PreCoarsening._normalize_kwargs_for_key(kwargs)
+    assert normalized == (("a", [1, {"x": 3}]), ("b", 2))
 
 
 def test_precoarsening_resolve_level_config_dict_and_errors():

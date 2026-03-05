@@ -21,7 +21,9 @@ PoolerLevelConfig = Union[
 ]
 # First argument to PreCoarsening: a single pooler/config or a sequence of them.
 PoolersArg = Union[PoolerLevelConfig, Sequence[PoolerLevelConfig]]
-ResolvedLevelEntry = tuple[SRCPooling, tuple[Any, ...]]
+CollapseKey = tuple[Any, ...]
+NormalizedLevelConfig = tuple[Union[SRCPooling, str], Dict[str, Any]]
+ResolvedLevelEntry = tuple[SRCPooling, CollapseKey]
 CollapsedLevelRun = tuple[SRCPooling, int]
 
 
@@ -179,7 +181,6 @@ class SortNodes(BaseTransform):
         return data
 
 
-# TODO: can some of the internal logic be simplified (hashing, collapsing, etc..)?
 class PreCoarsening(BaseTransform):
     r"""A transform that precomputes a hierarchy of pooled (coarsened) graphs
     and attaches them to the input :class:`~torch_geometric.data.Data` object.
@@ -244,16 +245,16 @@ class PreCoarsening(BaseTransform):
             )
 
         # Resolve each level config into an instantiated pooler plus a
-        # deterministic "collapse key" used to merge adjacent equal levels.
-        self._resolved_level_entries = tuple(
+        # deterministic collapse key used to merge adjacent equal levels.
+        resolved_level_entries = tuple(
             self._resolve_level_config_with_key(level_config)
             for level_config in levels_list
         )
-        self.poolers = tuple(pooler for pooler, _ in self._resolved_level_entries)
+        self.poolers = tuple(pooler for pooler, _ in resolved_level_entries)
         if not self.poolers:
             raise ValueError("At least one pooling level is required.")
         self._collapsed_level_runs = tuple(
-            self._collapse_consecutive_runs(self._resolved_level_entries)
+            self._collapse_consecutive_runs(resolved_level_entries)
         )
 
     @staticmethod
@@ -289,29 +290,47 @@ class PreCoarsening(BaseTransform):
         return get_pooler(pooler_name, **(kwargs or {}))
 
     @staticmethod
-    def _freeze_config_value(value: Any) -> Any:
-        """Convert nested config values into hashable, deterministic keys."""
-        if isinstance(value, Mapping):
-            return tuple(
-                sorted(
-                    (str(k), PreCoarsening._freeze_config_value(v))
-                    for k, v in value.items()
-                )
+    def _normalize_kwargs_for_key(
+        kwargs: Mapping[str, Any],
+    ) -> tuple[tuple[str, Any], ...]:
+        """Return kwargs in a stable order so equal configs collapse reliably."""
+        return tuple(sorted((str(key), value) for key, value in kwargs.items()))
+
+    @staticmethod
+    def _normalize_level_config(
+        level_config: PoolerLevelConfig,
+    ) -> NormalizedLevelConfig:
+        """Normalize one per-level config into `(pooler_or_name, kwargs)`."""
+        if isinstance(level_config, dict):
+            config_dict = dict(level_config)
+            level_config = (
+                config_dict.pop("pooler", config_dict.pop("name", None)),
+                config_dict,
             )
-        if isinstance(value, (list, tuple)):
-            return tuple(PreCoarsening._freeze_config_value(v) for v in value)
-        if isinstance(value, set):
-            return tuple(
-                sorted(
-                    (PreCoarsening._freeze_config_value(v) for v in value),
-                    key=repr,
-                )
+
+        if isinstance(level_config, str):
+            return level_config.lower(), {}
+        if isinstance(level_config, SRCPooling):
+            return level_config, {}
+        if not isinstance(level_config, tuple):
+            raise TypeError(
+                "Pooler config must be an SRCPooling, alias string, "
+                "('name', kwargs) tuple, or {'pooler'/'name', ...} dict."
             )
-        try:
-            hash(value)
-            return value
-        except TypeError:
-            return repr(value)
+
+        if len(level_config) != 2:
+            raise ValueError(
+                "Tuple pooler configs must be '(pooler_or_name, kwargs_dict)'."
+            )
+
+        pooler_or_name = level_config[0]
+        if pooler_or_name is None:
+            raise ValueError("Pooler config must include a pooler name or instance.")
+
+        pooler_kwargs = dict(level_config[1] or {})
+        if isinstance(pooler_or_name, SRCPooling):
+            return pooler_or_name, pooler_kwargs
+        return str(pooler_or_name).lower(), pooler_kwargs
 
     def _resolve_level_config_with_key(
         self, level_config: PoolerLevelConfig
@@ -330,54 +349,22 @@ class PreCoarsening(BaseTransform):
               ``("config", "sep", (("s_inv_op", "inverse"),))``
             - ``NDPPooling()`` -> ``("instance", id(pooler_instance))``
         """
-        if isinstance(level_config, dict):
-            config_dict = dict(level_config)
-            level_config = (
-                config_dict.pop("pooler", config_dict.pop("name", None)),
-                config_dict,
-            )
-
-        if isinstance(level_config, tuple):
-            # Common config mistake: malformed tuples from CLI/YAML parsing.
-            if len(level_config) != 2:
+        pooler_or_name, pooler_kwargs = self._normalize_level_config(level_config)
+        if isinstance(pooler_or_name, SRCPooling):
+            if pooler_kwargs:
                 raise ValueError(
-                    "Tuple pooler configs must be '(pooler_or_name, kwargs_dict)'."
+                    "Cannot provide kwargs together with an instantiated pooler."
                 )
-            pooler_or_name = level_config[0]
-            if pooler_or_name is None:
-                raise ValueError(
-                    "Pooler config must include a pooler name or instance."
-                )
-            pooler_kwargs = dict(level_config[1] or {})
-            if isinstance(pooler_or_name, SRCPooling):
-                if pooler_kwargs:
-                    raise ValueError(
-                        "Cannot provide kwargs together with an instantiated pooler."
-                    )
-                pooler = pooler_or_name
-                collapse_key = ("instance", id(pooler))
-            else:
-                pooler_name = str(pooler_or_name).lower()
-                pooler = self._build_pooler(pooler_name, pooler_kwargs)
-                collapse_key = (
-                    "config",
-                    pooler_name,
-                    self._freeze_config_value(pooler_kwargs),
-                )
-        elif isinstance(level_config, str):
-            pooler_name = level_config.lower()
-            pooler = self._build_pooler(pooler_name)
-            collapse_key = ("config", pooler_name, ())
+            pooler = pooler_or_name
+            collapse_key: CollapseKey = ("instance", id(pooler))
         else:
-            # Keep error explicit instead of relying on obscure attribute errors
-            # later in the coarsening pipeline.
-            if not isinstance(level_config, SRCPooling):
-                raise TypeError(
-                    "Pooler config must be an SRCPooling, alias string, "
-                    "('name', kwargs) tuple, or {'pooler'/'name', ...} dict."
-                )
-            pooler = level_config
-            collapse_key = ("instance", id(pooler))
+            pooler_name = pooler_or_name
+            pooler = self._build_pooler(pooler_name, pooler_kwargs)
+            collapse_key = (
+                "config",
+                pooler_name,
+                self._normalize_kwargs_for_key(pooler_kwargs),
+            )
 
         if pooler.is_trainable:
             raise ValueError("The pooler must not be trainable.")
