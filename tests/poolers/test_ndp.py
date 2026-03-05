@@ -61,5 +61,26 @@ def test_random_cut():
     assert out.num_supernodes == 1
 
 
+def test_forward_directed_graph_triggers_to_undirected(monkeypatch):
+    import tgp.select.ndp_select as ndp_module
+
+    calls = {"n": 0}
+    original_to_undirected = ndp_module.to_undirected
+
+    def _tracking_to_undirected(*args, **kwargs):
+        calls["n"] += 1
+        return original_to_undirected(*args, **kwargs)
+
+    monkeypatch.setattr(ndp_module, "to_undirected", _tracking_to_undirected)
+
+    # Directed chain 0->1->2 (no reverse edges).
+    edge_index = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
+    selector = NDPSelect(s_inv_op="transpose")
+    out = selector(edge_index=edge_index, edge_weight=None, batch=None, num_nodes=3)
+
+    assert calls["n"] >= 1
+    assert out.s.size(0) == 3
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -141,6 +141,65 @@ def test_wrong_pooler_name():
         get_pooler("non_existent_pooler")
 
 
+def test_wrong_pooler_name_with_unbatched_suffix():
+    with pytest.raises(ValueError):
+        get_pooler("non_existent_pooler_u")
+
+
+def test_get_pooler_rechecks_missing_required_after_constructor_typeerror(monkeypatch):
+    import tgp.poolers as poolers_mod
+
+    class _DummySignature:
+        args = []
+        has_kwargs = False
+
+    class _DummyPooler:
+        @staticmethod
+        def get_signature():
+            return _DummySignature
+
+        def __init__(self):
+            raise TypeError("constructor failed")
+
+    monkeypatch.setitem(poolers_mod.pooler_map, "dummy_recheck", _DummyPooler)
+    call_count = {"n": 0}
+
+    def _missing_required(_pooler_cls, _provided_kwargs):
+        call_count["n"] += 1
+        return [] if call_count["n"] == 1 else ["required_arg"]
+
+    monkeypatch.setattr(poolers_mod, "_missing_required_init_kwargs", _missing_required)
+
+    with pytest.raises(
+        TypeError, match="Missing required argument\\(s\\).*required_arg"
+    ):
+        poolers_mod.get_pooler("dummy_recheck")
+
+    assert call_count["n"] >= 2
+
+
+def test_get_pooler_reraises_constructor_typeerror_when_no_missing_args(monkeypatch):
+    import tgp.poolers as poolers_mod
+
+    class _DummySignature:
+        args = []
+        has_kwargs = False
+
+    class _DummyPooler:
+        @staticmethod
+        def get_signature():
+            return _DummySignature
+
+        def __init__(self):
+            raise TypeError("constructor failed without missing args")
+
+    monkeypatch.setitem(poolers_mod.pooler_map, "dummy_reraise", _DummyPooler)
+    monkeypatch.setattr(poolers_mod, "_missing_required_init_kwargs", lambda *_: [])
+
+    with pytest.raises(TypeError, match="constructor failed without missing args"):
+        poolers_mod.get_pooler("dummy_reraise")
+
+
 @pytest.mark.parametrize("pooler_name", dense_poolers)
 def test_dense_pooler_repr_reports_modes(pooler_name):
     params = {

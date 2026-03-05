@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from tgp.reduce import GlobalReduce
+from tgp.reduce.global_reduce import _validate_dense_mask
 
 
 @pytest.mark.parametrize("reduce_op", ["sum", "mean", "max", "min"])
@@ -242,3 +243,9 @@ def test_readout_pyg_aggr_dense_with_mask():
     # Graph 0: mean of nodes 0,1 -> [2, 3]; Graph 1: mean of nodes 1,2 -> [1, -0.5]
     expected = torch.tensor([[2.0, 3.0], [1.0, -0.5]])
     assert torch.allclose(out, expected)
+
+
+def test_validate_dense_mask_accepts_none():
+    x = torch.randn(2, 3, 4)
+    # Private helper no-op path: should just return when mask is None.
+    assert _validate_dense_mask(None, x) is None

@@ -44,6 +44,26 @@ def test_mincut_batched_forward(pooler_test_graph_dense_batch):
     assert "ortho_loss" in out.loss
 
 
+def test_mincut_batched_sparse_output(pooler_test_graph_dense_batch):
+    """Test MinCutPooling batched mode with sparse_output=True."""
+    x, adj = pooler_test_graph_dense_batch
+    n_features = x.shape[-1]
+
+    pooler = MinCutPooling(
+        in_channels=n_features, k=3, batched=True, sparse_output=True
+    )
+    out = pooler(x=x, adj=adj)
+
+    assert out.x.dim() == 2
+    assert out.edge_index.dim() == 2
+    assert out.edge_index.shape[0] == 2
+    assert out.edge_weight is not None
+    assert out.batch is not None
+    assert out.loss is not None
+    assert "cut_loss" in out.loss
+    assert "ortho_loss" in out.loss
+
+
 def test_mincut_unbatched_single_graph():
     """Test MinCutPooling in unbatched mode with a single graph."""
     n_nodes, n_features = 10, 16
@@ -200,3 +220,18 @@ def test_mincut_batched_vs_unbatched_loss_equality(pooler_test_graph_dense_batch
         assert torch.allclose(out.loss[key], loss_sparse[key], rtol=1e-5, atol=1e-5)
     for key in loss_sparse:
         assert key in out.loss
+
+
+def test_mincut_extra_repr_args():
+    pooler = MinCutPooling(
+        in_channels=8,
+        k=4,
+        batched=False,
+        cut_loss_coeff=0.25,
+        ortho_loss_coeff=2.0,
+    )
+    extra = pooler.extra_repr_args()
+
+    assert extra["batched"] is False
+    assert extra["cut_loss_coeff"] == 0.25
+    assert extra["ortho_loss_coeff"] == 2.0

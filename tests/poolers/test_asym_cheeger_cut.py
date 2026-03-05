@@ -41,6 +41,29 @@ def test_acc_batched_forward(pooler_test_graph_dense_batch):
     assert "balance_loss" in out.loss
 
 
+def test_acc_batched_sparse_output(pooler_test_graph_dense_batch):
+    """Test AsymCheegerCutPooling batched path with sparse output enabled."""
+    x, adj = pooler_test_graph_dense_batch
+    n_features = x.shape[-1]
+
+    pooler = AsymCheegerCutPooling(
+        in_channels=n_features, k=3, batched=True, sparse_output=True
+    )
+    out = pooler(x=x, adj=adj)
+
+    assert out.x.dim() == 2
+    assert out.x.shape[1] == n_features
+    assert out.edge_index.dim() == 2
+    assert out.edge_index.shape[0] == 2
+    assert out.edge_weight is not None
+    assert out.edge_weight.dim() == 1
+    assert out.batch is not None
+    assert out.batch.shape[0] == out.x.shape[0]
+    assert out.loss is not None
+    assert "total_variation_loss" in out.loss
+    assert "balance_loss" in out.loss
+
+
 def test_acc_unbatched_single_graph():
     """Test AsymCheegerCutPooling in unbatched mode with a single graph."""
     n_nodes, n_features = 10, 16

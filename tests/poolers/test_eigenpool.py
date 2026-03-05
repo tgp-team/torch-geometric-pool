@@ -44,6 +44,16 @@ class TestEigenPoolingBasic:
         assert pooler.normalized is True
         assert pooler.cached is True
 
+    def test_eigenpool_warns_for_unsupported_batched_mode(self):
+        with pytest.warns(
+            UserWarning, match="does not support dense padded batched inputs"
+        ):
+            EigenPooling(k=3, num_modes=2, batched=True)
+
+    def test_eigenpool_warns_for_ignored_lift_argument(self):
+        with pytest.warns(UserWarning, match="ignores the 'lift' argument"):
+            EigenPooling(k=3, num_modes=2, lift="inverse")
+
 
 class TestEigenPoolingUnbatched:
     """Tests for EigenPooling with unbatched (sparse) inputs."""
@@ -114,6 +124,42 @@ class TestEigenPoolingUnbatched:
         # Test lifting (must pass edge_index)
         x_lifted = pooler(x=out.x, so=out.so, lifting=True, edge_index=edge_index)
         assert x_lifted.shape == (N, F)
+
+    def test_eigenpool_lifting_3d_input_with_explicit_batch_pooled(
+        self, pooler_test_graph_sparse
+    ):
+        x, edge_index, _, batch = pooler_test_graph_sparse
+        pooler = EigenPooling(k=3, num_modes=2, batched=False)
+        out = pooler(x=x, adj=edge_index)
+
+        x_pool_batched = out.x.unsqueeze(0)  # [B=1, K, HF]
+        batch_pooled = torch.zeros(out.x.size(0), dtype=torch.long, device=x.device)
+        x_lifted = pooler(
+            x=x_pool_batched,
+            so=out.so,
+            batch=batch,
+            batch_pooled=batch_pooled,
+            lifting=True,
+        )
+
+        assert x_lifted.shape == x.shape
+
+    def test_eigenpool_lifting_3d_input_auto_builds_batch_pooled(
+        self, pooler_test_graph_sparse
+    ):
+        x, edge_index, _, batch = pooler_test_graph_sparse
+        pooler = EigenPooling(k=3, num_modes=2, batched=False)
+        out = pooler(x=x, adj=edge_index)
+
+        x_pool_batched = out.x.unsqueeze(0)  # [B=1, K, HF]
+        x_lifted = pooler(
+            x=x_pool_batched,
+            so=out.so,
+            batch=batch,
+            lifting=True,
+        )
+
+        assert x_lifted.shape == x.shape
 
     def test_eigenpool_unbatched_full_cycle(self, pooler_test_graph_sparse):
         """Test full pool -> GNN -> lift cycle."""
@@ -191,6 +237,27 @@ class TestEigenPoolingPrecoarsening:
 
         assert precoarsened.so.s.shape == (4, k)
         assert precoarsened.batch.shape == (k,)
+
+    def test_forward_skips_select_when_so_is_precomputed(
+        self, pooler_test_graph_sparse, monkeypatch
+    ):
+        x, edge_index, edge_weight, batch = pooler_test_graph_sparse
+        pooler = EigenPooling(k=3, num_modes=2, batched=False)
+        so = pooler.select(edge_index=edge_index, edge_weight=edge_weight, batch=batch)
+
+        def _fail_if_called(*args, **kwargs):
+            raise AssertionError("select should not be called when so is provided")
+
+        monkeypatch.setattr(pooler, "select", _fail_if_called)
+        out = pooler(
+            x=x,
+            adj=edge_index,
+            edge_weight=edge_weight,
+            so=so,
+            batch=batch,
+        )
+
+        assert out.so is so
 
 
 class TestEigenPoolingEdgeCases:

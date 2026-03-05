@@ -82,6 +82,21 @@ class TestEigenPoolLiftForward:
         with pytest.raises(AttributeError):
             lifter(x_pool=x_pool, so=so_no_theta, batch=batch)
 
+    def test_eigenpool_lift_supports_sparse_theta(self, pooler_test_graph_sparse):
+        x, edge_index, _, batch = pooler_test_graph_sparse
+        so = eigenpool_select(edge_index=edge_index, k=3, num_modes=2)
+        reducer = EigenPoolReduce(num_modes=2)
+        x_pool, _ = reducer(x=x, so=so, batch=batch)
+
+        so_sparse_theta = SelectOutput(
+            s=so.s, batch=so.batch, theta=so.theta.to_sparse()
+        )
+        x_lifted = EigenPoolLift(num_modes=2)(
+            x_pool=x_pool, so=so_sparse_theta, batch=batch
+        )
+
+        assert x_lifted.shape == x.shape
+
 
 class TestEigenPoolLiftReduceCycle:
     """Tests for reduce -> lift cycle."""
@@ -207,6 +222,52 @@ class TestEigenPoolLiftChainGraph:
         x_lifted = lifter(x_pool=x_pool, so=so, batch=None)
 
         assert x_lifted.shape == (N, F)
+
+    def test_lift_multi_graph_with_batched_pooled_features(
+        self, pooler_test_graph_sparse_batch
+    ):
+        data_batch = pooler_test_graph_sparse_batch
+        so = eigenpool_select(
+            edge_index=data_batch.edge_index, batch=data_batch.batch, k=2, num_modes=2
+        )
+        reducer = EigenPoolReduce(num_modes=2)
+        x_pool, _ = reducer(
+            x=data_batch.x,
+            so=so,
+            batch=data_batch.batch,
+            return_batched=True,
+        )  # [B, K, HF]
+
+        x_lifted = EigenPoolLift(num_modes=2)(
+            x_pool=x_pool,
+            so=so,
+            batch=data_batch.batch,
+        )
+
+        assert x_lifted.shape == data_batch.x.shape
+
+    def test_lift_multi_graph_with_explicit_batch_pooled(
+        self, pooler_test_graph_sparse_batch
+    ):
+        data_batch = pooler_test_graph_sparse_batch
+        so = eigenpool_select(
+            edge_index=data_batch.edge_index, batch=data_batch.batch, k=2, num_modes=2
+        )
+        reducer = EigenPoolReduce(num_modes=2)
+        x_pool, batch_pooled = reducer(
+            x=data_batch.x,
+            so=so,
+            batch=data_batch.batch,
+        )  # [B*K, HF]
+
+        x_lifted = EigenPoolLift(num_modes=2)(
+            x_pool=x_pool,
+            so=so,
+            batch=data_batch.batch,
+            batch_pooled=batch_pooled,
+        )
+
+        assert x_lifted.shape == data_batch.x.shape
 
 
 class TestEigenPoolLiftHelpers:

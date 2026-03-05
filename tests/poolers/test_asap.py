@@ -133,5 +133,46 @@ def test_both_add_and_remove_self_loops_raises_error():
         )
 
 
+def test_asap_init_gnn_signature_fallback(monkeypatch):
+    calls = {"n": 0}
+
+    class DummyGNN(torch.nn.Module):
+        def __init__(self, in_channels, out_channels):
+            super().__init__()
+            self.in_channels = in_channels
+            self.out_channels = out_channels
+
+        def reset_parameters(self):
+            pass
+
+        def forward(self, x, edge_index, edge_weight=None):
+            del edge_index, edge_weight
+            return x
+
+    import tgp.poolers.asap as asap_module
+
+    original_signature = asap_module.inspect.signature
+
+    def _raise_signature(obj):
+        if obj is DummyGNN:
+            calls["n"] += 1
+            raise TypeError("signature unavailable")
+        return original_signature(obj)
+
+    monkeypatch.setattr(asap_module.inspect, "signature", _raise_signature)
+
+    pooler = ASAPooling(
+        in_channels=3,
+        ratio=0.5,
+        GNN=DummyGNN,
+        ignored_kwarg="ignored",
+    )
+
+    assert calls["n"] == 1
+    assert isinstance(pooler.gnn_intra_cluster, DummyGNN)
+    assert pooler.gnn_intra_cluster.in_channels == 3
+    assert pooler.gnn_intra_cluster.out_channels == 3
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -1,8 +1,11 @@
 """Tests for JustBalancePooling pooler."""
 
+import importlib
+
 import pytest
 import torch
 
+from tgp.data import NormalizeAdj
 from tgp.poolers import JustBalancePooling, get_pooler
 
 
@@ -36,6 +39,27 @@ def test_justbalance_batched_forward(pooler_test_graph_dense_batch):
     assert out.edge_index.shape == (batch_size, k, k)
     assert out.loss is not None
     assert "balance_loss" in out.loss
+
+
+def test_justbalance_batched_sparse_output(pooler_test_graph_dense_batch):
+    """Test batched path with sparse_output=True finalization."""
+    x, adj = pooler_test_graph_dense_batch
+    n_features = x.shape[-1]
+
+    pooler = JustBalancePooling(
+        in_channels=n_features,
+        k=3,
+        batched=True,
+        sparse_output=True,
+    )
+    out = pooler(x=x, adj=adj)
+
+    assert out.x.dim() == 2
+    assert out.edge_index.dim() == 2
+    assert out.edge_index.shape[0] == 2
+    assert out.batch is not None
+    assert out.edge_weight is not None
+    assert out.loss is not None and "balance_loss" in out.loss
 
 
 def test_justbalance_unbatched_single_graph():
@@ -175,6 +199,56 @@ def test_justbalance_batched_vs_unbatched_loss_equality(pooler_test_graph_dense_
         assert torch.allclose(out.loss[key], loss_sparse[key], rtol=1e-5, atol=1e-5)
     for key in loss_sparse:
         assert key in out.loss
+
+
+def test_justbalance_compute_loss_raises_on_nan(monkeypatch):
+    """compute_loss should raise when the underlying loss returns NaN."""
+    jb_mod = importlib.import_module("tgp.poolers.just_balance")
+
+    def _nan_loss(*args, **kwargs):
+        return torch.tensor(float("nan"))
+
+    monkeypatch.setattr(jb_mod, "just_balance_loss", _nan_loss)
+    pooler = JustBalancePooling(in_channels=4, k=2, batched=True)
+
+    with pytest.raises(ValueError, match="Loss is NaN"):
+        pooler.compute_loss(torch.rand(1, 3, 2))
+
+
+def test_justbalance_compute_sparse_loss_raises_on_nan(monkeypatch):
+    """compute_sparse_loss should raise when the underlying loss returns NaN."""
+    jb_mod = importlib.import_module("tgp.poolers.just_balance")
+
+    def _nan_sparse_loss(*args, **kwargs):
+        return torch.tensor(float("nan"))
+
+    monkeypatch.setattr(jb_mod, "unbatched_just_balance_loss", _nan_sparse_loss)
+    pooler = JustBalancePooling(in_channels=4, k=2, batched=False)
+
+    with pytest.raises(ValueError, match="Loss is NaN"):
+        pooler.compute_sparse_loss(torch.rand(5, 2), batch=None)
+
+
+def test_justbalance_data_transforms():
+    transform = JustBalancePooling.data_transforms()
+
+    assert isinstance(transform, NormalizeAdj)
+    assert transform.delta == 0.85
+
+
+def test_justbalance_extra_repr_args():
+    pooler = JustBalancePooling(
+        in_channels=8,
+        k=3,
+        batched=False,
+        loss_coeff=0.75,
+        normalize_loss=False,
+    )
+    extra = pooler.extra_repr_args()
+
+    assert extra["batched"] is False
+    assert extra["loss_coeff"] == 0.75
+    assert extra["normalize_loss"] is False
 
 
 if __name__ == "__main__":

@@ -146,6 +146,46 @@ class TestEigenPoolConnectWithSparseInput:
         # Results should be different (unless trivial case)
         assert adj_no_norm.shape == adj_norm.shape
 
+    def test_eigenpool_select_raises_on_empty_graph(self):
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        with pytest.raises(ValueError, match="empty graph"):
+            eigenpool_select(edge_index=edge_index, k=2, num_nodes=0)
+
+    def test_eigenpool_select_batched_edgeless_with_empty_graph_slot(self):
+        # Graph ids 0 and 2 exist; graph id 1 is empty.
+        batch = torch.tensor([0, 0, 2], dtype=torch.long)
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+
+        so = eigenpool_select(
+            edge_index=edge_index,
+            k=2,
+            num_modes=2,
+            batch=batch,
+            num_nodes=batch.numel(),
+        )
+
+        assert so.s.shape == (batch.numel(), 2)
+        assert isinstance(so.theta, list)
+        assert len(so.theta) == 3
+        assert so.theta[1].shape == (0, 4)  # empty graph slot keeps K*H columns
+
+    def test_eigenpool_select_batched_with_edge_weight(
+        self, pooler_test_graph_sparse_batch
+    ):
+        data_batch = pooler_test_graph_sparse_batch
+
+        so = eigenpool_select(
+            edge_index=data_batch.edge_index,
+            edge_weight=data_batch.edge_attr,
+            batch=data_batch.batch,
+            k=2,
+            num_modes=2,
+        )
+
+        assert so.s.shape[0] == data_batch.num_nodes
+        assert so.s.shape[1] == 2
+        assert isinstance(so.theta, list)
+
 
 class TestEigenPoolConnectWithDenseInput:
     """Tests for EigenPoolConnect with dense adjacency input."""
@@ -267,6 +307,23 @@ class TestEigenPoolConnectOmega:
         with pytest.raises(ValueError, match="SelectOutput.s must have shape"):
             connector(edge_index=edge_index, so=so)
 
+    def test_unbatched_accepts_singleton_batched_assignment(
+        self, pooler_test_graph_sparse
+    ):
+        """Unbatched sparse inputs accept [1, N, K] assignments and squeeze batch dim."""
+        x, edge_index, _, _ = pooler_test_graph_sparse
+        N = x.size(0)
+        k = 3
+
+        s = make_dense_assignment(N, k)
+        so = SelectOutput(s=s.unsqueeze(0))  # [1, N, K]
+
+        connector = EigenPoolConnect(sparse_output=False, remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(edge_index=edge_index, so=so)
+
+        assert adj_pool.shape == (1, k, k)
+        assert edge_weight_pool is None
+
     def test_unbatched_rejects_wrong_dim_assignment(self, pooler_test_graph_sparse):
         """Unbatched sparse inputs should reject assignments with wrong rank."""
         x, edge_index, _, _ = pooler_test_graph_sparse
@@ -279,6 +336,25 @@ class TestEigenPoolConnectOmega:
         connector = EigenPoolConnect()
         with pytest.raises(ValueError, match="SelectOutput.s must have shape"):
             connector(edge_index=edge_index, so=so)
+
+    def test_unbatched_handles_empty_batch_and_empty_assignment(self):
+        """Cover empty-batch fallback in sparse path (graph slot with zero nodes)."""
+        k = 2
+        so = SelectOutput(s=torch.empty((0, k), dtype=torch.float32))
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        batch = torch.empty((0,), dtype=torch.long)
+
+        connector = EigenPoolConnect(sparse_output=False, remove_self_loops=False)
+        adj_pool, edge_weight_pool = connector(
+            edge_index=edge_index,
+            so=so,
+            edge_weight=None,
+            batch=batch,
+        )
+
+        assert adj_pool.shape == (1, k, k)
+        assert torch.allclose(adj_pool, torch.zeros_like(adj_pool))
+        assert edge_weight_pool is None
 
 
 class TestEigenPoolConnectACoar:

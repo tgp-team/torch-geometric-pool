@@ -14,6 +14,11 @@ from tgp.select import SelectOutput
 class TestDenseConnect:
     """Test the DenseConnect class for batched dense pooling."""
 
+    def test_dense_connect_sparse_output_type_validation(self):
+        """DenseConnect should require sparse_output to be a bool."""
+        with pytest.raises(TypeError, match="sparse_output must be a bool"):
+            DenseConnect(sparse_output=1)
+
     def test_dense_connect_repr(self):
         """Test DenseConnect __repr__ method."""
         connector = DenseConnect(
@@ -201,6 +206,30 @@ class TestDenseConnect:
         adj_mismatch = torch.randn(3, 4, 4)
         with pytest.raises(ValueError, match="batch sizes do not match"):
             DenseConnect._prepare_batched_dense_inputs(s_mismatch, adj_mismatch)
+
+    def test_dense_connect_public_dense_connect_method(self):
+        """Test the public DenseConnect.dense_connect convenience wrapper."""
+        connector = DenseConnect()
+        s = torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [1.0, 0.0],
+            ]
+        )
+        adj = torch.tensor(
+            [
+                [0.0, 1.0, 2.0],
+                [1.0, 0.0, 3.0],
+                [2.0, 3.0, 0.0],
+            ]
+        )
+
+        out = connector.dense_connect(adj=adj, s=s)
+        expected = DenseConnect._dense_connect(s.unsqueeze(0), adj.unsqueeze(0))
+
+        torch.testing.assert_close(out, expected)
+        assert out.shape == (1, 2, 2)
 
     def test_dense_connect_prepare_dense_inputs_invalid_dims(self):
         """Test DenseConnect._prepare_batched_dense_inputs with invalid dimensions."""

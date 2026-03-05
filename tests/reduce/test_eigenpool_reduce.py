@@ -87,6 +87,38 @@ class TestEigenPoolReduceForward:
             # Feature dim should be multiple of F
             assert x_pool.shape[1] % F == 0
 
+    def test_eigenpool_reduce_supports_sparse_theta(self, pooler_test_graph_sparse):
+        x, edge_index, _, batch = pooler_test_graph_sparse
+        so = eigenpool_select(edge_index=edge_index, k=3, num_modes=2)
+        so_sparse_theta = SelectOutput(
+            s=so.s, batch=so.batch, theta=so.theta.to_sparse()
+        )
+
+        x_pool, batch_pool = EigenPoolReduce(num_modes=2)(
+            x=x,
+            so=so_sparse_theta,
+            batch=batch,
+        )
+
+        assert x_pool.shape[0] == so.s.size(-1)
+        assert batch_pool is not None
+
+    def test_eigenpool_reduce_single_graph_return_batched(
+        self, pooler_test_graph_sparse
+    ):
+        x, edge_index, _, batch = pooler_test_graph_sparse
+        so = eigenpool_select(edge_index=edge_index, k=3, num_modes=2)
+
+        x_pool, _ = EigenPoolReduce(num_modes=2)(
+            x=x,
+            so=so,
+            batch=batch,
+            return_batched=True,
+        )
+
+        assert x_pool.dim() == 3
+        assert x_pool.shape[0] == 1
+
 
 class TestEigenPoolReduceBatch:
     """Tests for EigenPoolReduce reduce_batch method."""
@@ -126,6 +158,48 @@ class TestEigenPoolReduceBatch:
         batch_pool = EigenPoolReduce.reduce_batch(so, batch)
 
         assert batch_pool.shape == (0,)
+
+    def test_eigenpool_reduce_multi_graph_return_batched(
+        self, pooler_test_graph_sparse_batch
+    ):
+        data_batch = pooler_test_graph_sparse_batch
+        so = eigenpool_select(
+            edge_index=data_batch.edge_index, batch=data_batch.batch, k=2, num_modes=2
+        )
+
+        x_pool, batch_pool = EigenPoolReduce(num_modes=2)(
+            x=data_batch.x,
+            so=so,
+            batch=data_batch.batch,
+            return_batched=True,
+        )
+
+        num_graphs = int(data_batch.batch.max().item()) + 1
+        assert x_pool.dim() == 3
+        assert x_pool.shape[0] == num_graphs
+        assert x_pool.shape[1] == so.s.size(-1)
+        assert batch_pool.shape[0] == num_graphs * so.s.size(-1)
+
+    def test_eigenpool_reduce_multi_graph_return_flat(
+        self, pooler_test_graph_sparse_batch
+    ):
+        data_batch = pooler_test_graph_sparse_batch
+        so = eigenpool_select(
+            edge_index=data_batch.edge_index, batch=data_batch.batch, k=2, num_modes=2
+        )
+
+        x_pool, batch_pool = EigenPoolReduce(num_modes=2)(
+            x=data_batch.x,
+            so=so,
+            batch=data_batch.batch,
+            return_batched=False,
+        )
+
+        num_graphs = int(data_batch.batch.max().item()) + 1
+        num_clusters = so.s.size(-1)
+        assert x_pool.dim() == 2
+        assert x_pool.shape[0] == num_graphs * num_clusters
+        assert batch_pool.shape[0] == num_graphs * num_clusters
 
 
 class TestEigenPoolReduceReshape:

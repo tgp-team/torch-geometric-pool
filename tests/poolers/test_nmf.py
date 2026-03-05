@@ -23,6 +23,13 @@ def test_nmf_select_sparse_single_graph(pooler_test_graph_sparse):
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)
 
 
+def test_nmf_pooling_warns_for_unsupported_batched_mode():
+    with pytest.warns(
+        UserWarning, match="does not support dense padded batched inputs"
+    ):
+        NMFPooling(k=3, batched=True)
+
+
 def test_nmf_select_sparse_single_graph_fixed_k():
     x, edge_index, edge_weight, _ = make_chain_graph_sparse(N=4, F_dim=3, seed=42)
     k = 8
@@ -113,6 +120,44 @@ def test_nmf_select_k_larger_than_nodes_sparse():
     assert out.s.size(1) <= x.size(0)
 
 
+def test_nmf_select_factorize_single_adjacency_empty():
+    selector = NMFSelect(k=3)
+    adj = torch.zeros((0, 0))
+
+    s = selector._factorize_single_adjacency(adj)
+
+    assert s.shape == (0, 0)
+
+
+def test_nmf_select_factorize_single_adjacency_actual_k_one():
+    selector = NMFSelect(k=1)
+    adj = torch.tensor([[0.0, 1.0], [1.0, 0.0]])
+
+    s = selector._factorize_single_adjacency(adj)
+
+    assert s.shape == (2, 1)
+    assert torch.allclose(s, torch.ones_like(s))
+
+
+def test_nmf_select_sparse_batched_with_empty_edge_index_and_empty_graph_slot():
+    # Graph ids 0 and 2 are present, graph id 1 has zero nodes.
+    batch = torch.tensor([0, 0, 2], dtype=torch.long)
+    edge_index = torch.empty((2, 0), dtype=torch.long)
+    selector = NMFSelect(k=2)
+
+    out = selector(edge_index=edge_index, batch=batch, num_nodes=batch.numel())
+
+    assert out.s.shape == (batch.numel(), 2)
+    row_sums = out.s.sum(dim=-1)
+    assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5)
+
+
+def test_nmf_select_repr():
+    selector = NMFSelect(k=4, s_inv_op="inverse")
+
+    assert repr(selector) == "NMFSelect(k=4, s_inv_op=inverse)"
+
+
 def test_nmf_unbatched_forward_dense_output(pooler_test_graph_sparse):
     x, edge_index, edge_weight, batch = pooler_test_graph_sparse
     pooler = NMFPooling(k=3, batched=False, sparse_output=False)
@@ -139,6 +184,57 @@ def test_nmf_unbatched_forward_sparse_output(pooler_test_graph_sparse):
     assert out.edge_weight is not None
     assert out.batch is not None
     assert out.batch.size(0) == out.so.num_supernodes
+
+
+def test_nmf_lifting_operation(pooler_test_graph_sparse):
+    x, edge_index, edge_weight, batch = pooler_test_graph_sparse
+    pooler = NMFPooling(k=3, batched=False, sparse_output=False)
+    out = pooler(x=x, adj=edge_index, edge_weight=edge_weight, batch=batch)
+
+    x_lifted = pooler(
+        x=out.x,
+        so=out.so,
+        batch=batch,
+        batch_pooled=out.batch,
+        lifting=True,
+    )
+
+    assert x_lifted.shape == x.shape
+
+
+def test_nmf_forward_skips_select_when_so_is_provided(
+    pooler_test_graph_sparse, monkeypatch
+):
+    x, edge_index, edge_weight, batch = pooler_test_graph_sparse
+    pooler = NMFPooling(k=3, batched=False, sparse_output=False)
+    so = pooler.select(
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        batch=batch,
+        num_nodes=x.size(0),
+    )
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("select should not be called when so is provided")
+
+    monkeypatch.setattr(pooler, "select", _fail_if_called)
+    out = pooler(
+        x=x,
+        adj=edge_index,
+        edge_weight=edge_weight,
+        so=so,
+        batch=batch,
+    )
+
+    assert out.so is so
+
+
+def test_nmf_extra_repr_args():
+    pooler = NMFPooling(k=4, batched=False, cached=True)
+    extra = pooler.extra_repr_args()
+
+    assert extra["batched"] is False
+    assert extra["cached"] is True
 
 
 def test_nmf_precoarsening(pooler_test_graph_sparse_batch):
