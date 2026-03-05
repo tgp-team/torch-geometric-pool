@@ -68,16 +68,20 @@ class GraphClassificationBench(InMemoryDataset):
 
     @property
     def raw_file_names(self):
+        """Return the raw benchmark archive filename for the selected split."""
         return "{}.npz".format(self.file_name)
 
     @property
     def processed_file_names(self):
+        """Return the processed filename for the selected split."""
         return "{}.pt".format(self.file_name + "_" + self.split)
 
     def download(self):
+        """Download the benchmark archive into :obj:`raw_dir`."""
         download_url("{}{}.npz".format(self.base_url, self.file_name), self.raw_dir)
 
     def process(self):
+        """Convert the raw archive to a list of PyG :class:`Data` objects."""
         npz = np.load(path.join(self.raw_dir, self.raw_file_names), allow_pickle=True)
         raw_data = (
             npz["{}_{}".format(self.split, key)] for key in ["feat", "adj", "class"]

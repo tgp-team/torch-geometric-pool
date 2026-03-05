@@ -105,6 +105,5 @@ the corresponding PyG aggregation classes:
 {% endfor %}
 
 {% for func in tgp.reduce.reduce_functions %}
-.. autodata:: {{ func }}
-   :annotation:
+.. autofunction:: {{ func }}
 {% endfor %}

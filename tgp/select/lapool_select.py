@@ -77,7 +77,6 @@ def _dense_cosine_similarity(
 
 
 class LaPoolSelect(Select):
-    is_dense: bool = True
     r"""The select operator for the LaPool operator (:class:`~tgp.pooler.LaPoolPooling`)
     as proposed in the paper `Towards Interpretable Sparse Graph Representation Learning
     with Laplacian Pooling <https://arxiv.org/abs/1905.11577>`_. (Emmanuel Noutahi et al., 2019).
@@ -120,6 +119,8 @@ class LaPoolSelect(Select):
             - :obj:`"inverse"`: Computes :math:`\mathbf{S}_\text{inv}` as :math:`\mathbf{S}^+`,
               the Moore-Penrose pseudoinverse of :math:`\mathbf{S}`.
     """
+
+    is_dense: bool = True
 
     def __init__(
         self,

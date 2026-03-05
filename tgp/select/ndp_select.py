@@ -156,6 +156,8 @@ class NDPSelect(Select):
         r"""Computes the normalized size of a cut.
 
         Args:
+            total_volume (float): Total graph volume used to normalize
+                the cut value.
             L (~scipy.sparse.csr.csr_matrix):
                 The (unweighted) Laplacian.
             z (~numpy.ndarray):
@@ -170,6 +172,7 @@ class NDPSelect(Select):
 
     @staticmethod
     def sign_partition(vec_or_size: Union[Tensor, int]) -> Tuple[Tensor, Tensor]:
+        """Split indices into positive and negative partitions."""
         if isinstance(vec_or_size, int):
             n = vec_or_size  # it is always >= 2
             vec = torch.empty(n, dtype=torch.long)

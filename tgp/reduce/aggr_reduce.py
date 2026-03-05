@@ -70,6 +70,24 @@ class AggrReduce(Reduce):
         size: Optional[int] = None,
         **kwargs,
     ) -> Tuple[Tensor, Optional[Tensor]]:
+        r"""Aggregate node features according to the supernode assignments.
+
+        Args:
+            x (~torch.Tensor): Node features of shape :math:`[N, F]` or
+                :math:`[B, N, F]`.
+            so (~tgp.select.SelectOutput, optional): Select output containing
+                assignment information. If :obj:`None`, performs graph-level
+                readout using :obj:`batch`.
+            batch (~torch.Tensor, optional): Batch vector assigning each node
+                to a graph.
+            size (int, optional): Expected number of pooled nodes (readout
+                groups). If :obj:`None`, inferred from :obj:`so` or
+                :obj:`batch`.
+
+        Returns:
+            tuple: A pair :obj:`(x_pool, batch_pool)` with pooled features and
+            pooled batch indices.
+        """
         # Path 1: readout mode (`so=None`) aggregates directly to one output per graph.
         if so is None:
             return self._readout_without_select_output(x, batch=batch, size=size)

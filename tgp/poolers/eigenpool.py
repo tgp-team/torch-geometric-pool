@@ -259,6 +259,7 @@ class EigenPooling(BasePrecoarseningMixin, DenseSRCPooling):
         num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
+        """Precompute pooling outputs with a fixed assignment width :obj:`k`."""
         # In pre-coarsening, fix the assignment width to k across samples so
         # batched collation can concatenate dense SelectOutput.s safely.
         return super().precoarsening(

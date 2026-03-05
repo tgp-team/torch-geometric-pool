@@ -226,6 +226,7 @@ class NMFPooling(BasePrecoarseningMixin, DenseSRCPooling):
         num_nodes: Optional[int] = None,
         **kwargs,
     ) -> PoolingOutput:
+        """Precompute pooling outputs while forcing a fixed cluster count :obj:`k`."""
         # Keep assignment width fixed to k across samples during dataset pre-transform.
         return super().precoarsening(
             edge_index=edge_index,

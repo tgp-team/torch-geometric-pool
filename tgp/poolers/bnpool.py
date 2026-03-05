@@ -256,7 +256,16 @@ class BNPool(DenseSRCPooling):
                 :math:`\mathbf{A} \in \mathbb{R}^{B \times N \times N}`, or an
                 already dense adjacency tensor with the same shape.
                 (default: :obj:`None`)
+            edge_weight (~torch.Tensor, optional): Edge weights associated with
+                :obj:`adj` when sparse connectivity is provided.
+                (default: :obj:`None`)
             so (~tgp.select.SelectOutput, optional): The output of the :math:`\texttt{select}` operator.
+                (default: :obj:`None`)
+            batch (~torch.Tensor, optional): Batch assignment vector for input
+                nodes. Required in sparse mode and optional in dense mode.
+                (default: :obj:`None`)
+            batch_pooled (~torch.Tensor, optional): Optional precomputed batch
+                assignment for pooled nodes, used when :obj:`lifting=True`.
                 (default: :obj:`None`)
             lifting (bool, optional): If set to :obj:`True`, the :math:`\texttt{lift}` operation is performed.
                 (default: :obj:`False`)
@@ -440,6 +449,7 @@ class BNPool(DenseSRCPooling):
     def compute_sparse_loss(
         self, adj: Adj, batch: Optional[Tensor], so: SelectOutput
     ) -> dict:
+        """Compute BNPool auxiliary losses in unbatched sparse mode."""
         node_assignment, q_z = so.s, so.q_z
 
         if batch is not None:
@@ -494,9 +504,11 @@ class BNPool(DenseSRCPooling):
         }
 
     def get_rec_adj(self, S):
+        """Return the reconstructed dense adjacency logits from assignments."""
         return S @ self.K @ S.transpose(-1, -2)
 
     def get_sparse_rec_loss(self, node_assignment, adj, batch, batch_size):
+        """Compute sparse reconstruction loss using sampled positive/negative edges."""
         edge_index, _ = connectivity_to_edge_index(adj)
 
         dev = edge_index.device
@@ -537,6 +549,7 @@ class BNPool(DenseSRCPooling):
         )
 
     def get_prob_link_logit(self, node_assignment, edges_list):
+        """Score candidate edges from assignment probabilities and matrix :math:`K`."""
         left = node_assignment[edges_list[0]]
         right = node_assignment[edges_list[1]]
         aux = left @ self.K

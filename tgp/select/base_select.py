@@ -254,33 +254,41 @@ class SelectOutput:
 
     @property
     def is_sparse(self) -> bool:
+        """Return :obj:`True` if :obj:`s` is a sparse tensor."""
         return isinstance(self.s, Tensor) and self.s.is_sparse
 
     @property
     def is_dense(self) -> bool:
+        """Return :obj:`True` if :obj:`s` is a dense tensor."""
         return isinstance(self.s, Tensor) and not self.s.is_sparse
 
     @property
     def num_nodes(self) -> int:
+        """Return the number of input nodes represented by :obj:`s`."""
         return self.s.size(-2)
 
     @property
     def num_supernodes(self) -> int:
+        """Return the number of pooled nodes represented by :obj:`s`."""
         return self.s.size(-1)
 
     @property
     def node_index(self) -> Optional[Tensor]:
+        """Return sparse row indices (node ids) when :obj:`s` is sparse."""
         return self.s.indices()[0] if self.is_sparse else None
 
     @property
     def cluster_index(self) -> Optional[Tensor]:
+        """Return sparse column indices (supernode ids) when :obj:`s` is sparse."""
         return self.s.indices()[1] if self.is_sparse else None
 
     @property
     def weight(self) -> Optional[Tensor]:
+        """Return sparse assignment values when :obj:`s` is sparse."""
         return self.s.values() if self.is_sparse else None
 
     def set_s_inv(self, method):
+        """Compute and store :obj:`s_inv` from :obj:`s` using the given strategy."""
         if method == "transpose":
             if self.is_sparse:
                 self.s_inv = self.s.t()
