@@ -112,9 +112,8 @@ Thanks to all contributors 🤝
 
 ## Citing
 
-If you use Torch Geometric Pool for your research, please consider citing the library and the paper:
+If you use Torch Geometric Pool for your research, please consider citing the paper:
 
-**Paper:**
 ```bibtex
 @misc{bianchi2025torchgeometricpoolpytorch,
       title={Torch Geometric Pool: the Pytorch library for pooling in Graph Neural Networks}, 
