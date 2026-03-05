@@ -56,7 +56,7 @@ class PoolingOutput:
             f"loss={list(self.loss.keys()) if self.loss is not None else None})"
         )
 
-    def __iter__(self) -> Iterator:  # TODO: check this method
+    def __iter__(self) -> Iterator:
         return iter(
             (
                 self.x,

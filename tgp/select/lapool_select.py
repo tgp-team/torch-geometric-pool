@@ -23,8 +23,9 @@ from tgp.utils import (
 from tgp.utils.typing import SinvType
 
 
-# TODO: should this be a static method?
-def dense_cosine_similarity(x, leader_mask, batch):
+def _dense_cosine_similarity(
+    x: Tensor, leader_mask: Tensor, batch: Optional[Tensor]
+) -> Tensor:
     r"""Computes a dense block-diagonal cosine similarity matrix.
 
     This method calculates the cosine similarity between each node and the identified leaders.
@@ -245,7 +246,7 @@ class LaPoolSelect(Select):
             num_nodes
         )
 
-        cosine_similarity_dense = dense_cosine_similarity(
+        cosine_similarity_dense = _dense_cosine_similarity(
             x_flat, leader_flat, batch_flat
         )
 
@@ -385,7 +386,7 @@ class LaPoolSelect(Select):
         if not leader_mask.any():
             leader_mask = torch.ones(num_nodes, dtype=torch.bool, device=x.device)
 
-        cosine_similarity_dense = dense_cosine_similarity(x, leader_mask, batch)
+        cosine_similarity_dense = _dense_cosine_similarity(x, leader_mask, batch)
 
         beta = 1.0
         if self.shortest_path_reg:

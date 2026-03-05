@@ -82,7 +82,6 @@ def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
     return edge_index, edge_weight
 
 
-# TODO: mask out entries with value < eps? maybe useful in bnpool and in general to filter out weak assignments
 def get_mask_from_dense_s(
     s: Tensor,
     batch: Optional[Tensor] = None,

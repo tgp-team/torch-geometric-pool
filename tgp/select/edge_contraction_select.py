@@ -51,8 +51,9 @@ def maximal_matching(
     match = torch.zeros(m, dtype=torch.bool, device=device)
     mask = torch.ones(m, dtype=torch.bool, device=device)
 
-    # TODO: Use scatter's `out` and `include_self` arguments,
-    #       when available, instead of adding self-loops
+    # Add one sentinel value per node so every destination index is represented
+    # in the `min` reduction. This keeps behavior stable across the broad
+    # supported torch/pyg versions without relying on newer scatter APIs.
     max_rank = torch.full((n,), fill_value=n * n, dtype=torch.long, device=device)
     max_idx = torch.arange(n, dtype=torch.long, device=device)
 
