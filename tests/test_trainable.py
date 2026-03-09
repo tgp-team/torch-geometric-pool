@@ -20,7 +20,7 @@ def test_poolers_trainable():
         pooler = get_pooler(POOLER, **PARAMS)
 
         # Non-trainable poolers
-        if POOLER in ["ndp", "nmf", "graclus", "kmis", "lap", "nopool"]:
+        if POOLER in ["ndp", "nmf", "graclus", "kmis", "lap", "nopool", "eigen", "sep"]:
             assert not pooler.is_trainable, f"Pooler {POOLER} should not be trainable"
         else:
             assert pooler.is_trainable, f"Pooler {POOLER} should be trainable"

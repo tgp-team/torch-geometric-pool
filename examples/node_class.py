@@ -7,7 +7,6 @@ from torch_geometric.datasets import Planetoid
 from torch_geometric.nn import DenseGCNConv, GCNConv
 
 from tgp.poolers import get_pooler, pooler_map
-from tgp.utils import connectivity_to_torch_coo
 
 seed_everything(8)
 
@@ -15,8 +14,7 @@ dataset = Planetoid(root="data/Planetoid", name="Cora")
 data = dataset[0]
 
 for POOLER, value in pooler_map.items():  # Use all poolers
-    # for POOLER in ['mincut']:                 # Test a specific pooler
-
+    # for POOLER in ["bnpool"]:  # Test a specific pooler
     print(f"Using pooler: {POOLER}")
 
     if POOLER == "pan":
@@ -24,6 +22,7 @@ for POOLER, value in pooler_map.items():  # Use all poolers
     else:
         PARAMS = {
             "cached": True,
+            "cache_preprocessing": True,
             "lift": "precomputed",
             "s_inv_op": "transpose",
             "lift_red_op": "mean",
@@ -31,10 +30,14 @@ for POOLER, value in pooler_map.items():  # Use all poolers
             "k": data.num_nodes // 20,
             "order_k": 2,
             "ratio": 0.25,
+            "num_modes": 5,
             "remove_self_loops": True,
             "scorer": "degree",
             "reduce": "sum",
             "edge_weight_norm": False,
+            "degree_norm": True,
+            "sparse_output": True,
+            "batched": True,
         }
 
         #### Model definition
@@ -50,53 +53,86 @@ for POOLER, value in pooler_map.items():  # Use all poolers
 
                 self.conv_enc = GCNConv(dataset.num_features, hidden_channels)
 
-                pooler_kwargs.update({"in_channels": hidden_channels})
+                pooler_kwargs["in_channels"] = hidden_channels
                 self.pooler = get_pooler(pooler_type, **pooler_kwargs)
                 print(self.pooler)
                 self.pooler.reset_parameters()
 
-                if self.pooler.is_dense:
-                    self.conv_pool = DenseGCNConv(hidden_channels, hidden_channels // 2)
+                # EigenPooling expands features to [K, H*d].
+                pool_modes = getattr(self.pooler, "num_modes", 1)
+                pool_hidden_in = hidden_channels * pool_modes
+                pool_hidden_out = (hidden_channels // 2) * pool_modes
+
+                self.use_dense_pool_adj = (
+                    self.pooler.is_dense and not self.pooler.sparse_output
+                )
+                if self.use_dense_pool_adj:
+                    self.conv_pool = DenseGCNConv(pool_hidden_in, pool_hidden_out)
+                else:
+                    self.conv_pool = GCNConv(pool_hidden_in, pool_hidden_out)
+
+                self.pooler_batched = getattr(self.pooler, "batched", False)
+                self.use_dense_input_adj = self.pooler_batched and getattr(
+                    self.pooler, "cache_preprocessing", False
+                )
+                if self.use_dense_input_adj:
                     self.conv_dec = DenseGCNConv(
                         hidden_channels // 2, dataset.num_classes
                     )
                 else:
-                    self.conv_pool = GCNConv(hidden_channels, hidden_channels // 2)
                     self.conv_dec = GCNConv(hidden_channels // 2, dataset.num_classes)
 
                 self.dropout = dropout
 
             def forward(self, x, edge_index, edge_weight, batch):
-                num_nodes = x.size(0)
-                edge_index = connectivity_to_torch_coo(
-                    edge_index, edge_weight, num_nodes
-                )
-
                 # Encoder
-                x = self.conv_enc(x, edge_index)
+                x = self.conv_enc(x, edge_index, edge_weight)
                 x = F.relu(x)
                 x = F.dropout(x, p=self.dropout, training=self.training)
 
                 # Pooling
-                x, edge_index, mask = self.pooler.preprocessing(
-                    edge_index=edge_index, x=x, batch=batch, use_cache=True
+                out = self.pooler(
+                    x=x,
+                    adj=edge_index,
+                    edge_weight=edge_weight,
+                    batch=batch,
                 )
-                out = self.pooler(x=x, adj=edge_index, batch=batch, mask=mask)
                 x_pool, adj_pool = (
                     out.x,
                     out.edge_index,
                 )
+                mask_pool = getattr(out, "mask", None)
 
                 # Bottleneck
-                x_pool = self.conv_pool(x_pool, adj_pool)
+                if self.use_dense_pool_adj:
+                    x_pool = self.conv_pool(x_pool, adj_pool, mask=mask_pool)
+                else:
+                    x_pool = self.conv_pool(x_pool, adj_pool, out.edge_weight)
                 x_pool = F.relu(x_pool)
                 x_pool = F.dropout(x_pool, p=self.dropout, training=self.training)
 
                 # Decoder
-                x_lift = self.pooler(x=x_pool, so=out.so, lifting=True)
-                x = self.conv_dec(x_lift, edge_index)
+                x_lift = self.pooler(
+                    x=x_pool,
+                    so=out.so,
+                    lifting=True,
+                    batch=batch,
+                    batch_pooled=out.batch,
+                )
+                if self.use_dense_input_adj:
+                    adj_dense = self.pooler.preprocessing_cache
+                    if adj_dense is None:
+                        raise RuntimeError(
+                            "Dense decoder requires cache_preprocessing=True "
+                            "to reuse the dense adjacency."
+                        )
+                    x = self.conv_dec(x_lift, adj_dense)
+                else:
+                    if x_lift.dim() == 3:
+                        x_lift = x_lift[0]
+                    x = self.conv_dec(x_lift, edge_index, edge_weight)
 
-                if self.pooler.is_dense:
+                if self.pooler_batched and x.dim() == 3:
                     x = x[0]
                 if out.loss is not None:
                     return F.log_softmax(x, dim=-1), sum(out.get_loss_value())

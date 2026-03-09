@@ -292,10 +292,12 @@ class CSBMDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self) -> Sequence[str]:
+        """Return raw filenames expected by :class:`~torch_geometric.data.Dataset`."""
         return []
 
     @property
     def processed_file_names(self) -> Sequence[str]:
+        """Return the processed filename derived from dataset generation parameters."""
         p = self.params
         suffix = (
             f"graphs{p.num_graphs}_ncls{p.num_nodes_per_class}_d{p.dbar:.2f}"
@@ -315,10 +317,12 @@ class CSBMDataset(InMemoryDataset):
                 path.unlink()
 
     def download(self):
+        """No-op: this dataset is generated procedurally and needs no download."""
         # Dataset is generated locally, no download required.
         return
 
     def process(self):
+        """Generate and persist the synthetic CSBM graphs to disk."""
         p = self.params
         rng = np.random.default_rng(p.seed)
         pin, pout = _sbm_edge_probabilities(p.num_nodes_per_class, p.dbar, p.lam)

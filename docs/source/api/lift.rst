@@ -8,9 +8,13 @@ Lift
     :nosignatures:
 
         BaseLift
+        EigenPoolLift
         Lift
 
 .. autoclass:: BaseLift
+    :members:
+
+.. autoclass:: EigenPoolLift
     :members:
 
 .. autoclass:: Lift

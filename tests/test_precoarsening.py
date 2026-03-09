@@ -1,6 +1,6 @@
 import pytest
 import torch
-from torch_geometric.data import Batch, Data
+from torch_geometric.data import Data
 from torch_geometric.utils import to_dense_adj
 
 from tgp.data.loaders import PoolCollater, PoolDataLoader, PooledBatch
@@ -18,65 +18,47 @@ from tgp.poolers import (
     TopkPooling,  # Should NOT be precoarsenable
     get_pooler,
 )
+from tgp.src import Precoarsenable, SRCPooling
 
 # PANPooling requires torch_sparse, import conditionally
 try:
     from tgp.poolers import PANPooling
 except (ImportError, AssertionError):
     PANPooling = None
-from tgp.src import Precoarsenable, SRCPooling
 
 
-@pytest.fixture(scope="module")
-def sparse_batch_graph():
-    edge_index_1 = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long)
-    edge_weight_1 = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=torch.float)
-    x_1 = torch.randn((4, 3), dtype=torch.float)
-
-    edge_index_2 = torch.tensor(
-        [[1, 2, 3, 4, 2, 0], [0, 1, 2, 2, 3, 3]], dtype=torch.long
-    )
-    edge_weight_2 = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float)
-    x_2 = torch.randn((5, 3), dtype=torch.float)
-
-    edge_index_3 = torch.tensor([[0, 1, 3, 3, 2], [1, 0, 1, 2, 3]], dtype=torch.long)
-    edge_weight_3 = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5], dtype=torch.float)
-    x_3 = torch.randn((4, 3), dtype=torch.float)
-
-    data_batch = Batch.from_data_list(
-        [
-            Data(edge_index=edge_index_1, edge_attr=edge_weight_1, x=x_1),
-            Data(edge_index=edge_index_2, edge_attr=edge_weight_2, x=x_2),
-            Data(edge_index=edge_index_3, edge_attr=edge_weight_3, x=x_3),
-        ]
-    )
-    return data_batch
+precoarsening_poolers = [
+    ("ndp", {}),
+    ("kmis", {"scorer": "degree"}),
+    ("graclus", {}),
+    ("sep", {}),
+    ("eigen", {"k": 4, "num_modes": 2}),
+    ("nmf", {"k": 4}),
+]
 
 
-poolers = ["ndp", "kmis", "graclus"]
+@pytest.mark.parametrize(("pooler_name", "pooler_kwargs"), precoarsening_poolers)
+def test_nmf_precoarsening(pooler_test_graph_sparse_batch, pooler_name, pooler_kwargs):
+    pooler = get_pooler(pooler_name, **pooler_kwargs)
 
-
-@pytest.mark.parametrize("pooler_name", poolers)
-def test_nmf_precoarsening(sparse_batch_graph, pooler_name):
-    PARAMS = {
-        "scorer": "degree",
-    }
-    pooler = get_pooler(pooler_name, **PARAMS)
-
-    data_batch = sparse_batch_graph
-    assert data_batch.num_graphs == 3
-    assert data_batch.num_nodes == 13
+    data_batch = pooler_test_graph_sparse_batch
+    num_nodes = data_batch.num_nodes
 
     pooling_out = pooler.precoarsening(
         x=data_batch.x,
         edge_index=data_batch.edge_index,
         edge_weight=data_batch.edge_attr,
         batch=data_batch.batch,
-        num_nodes=data_batch.num_nodes,
+        num_nodes=num_nodes,
     )
 
-    assert pooling_out.so.s.size(0) == 13
+    assert pooling_out.so.s.size(0) == num_nodes
     assert pooling_out.batch is not None
+
+
+def test_get_pooler_missing_required_args_error():
+    with pytest.raises(TypeError, match=r"Missing required argument\(s\).+eigen.+k"):
+        get_pooler("eigen")
 
 
 def test_normalizeadj_on_simple_data():
@@ -113,7 +95,7 @@ def test_precoarsening_attaches_single_level():
     data.num_nodes = 4
 
     dummy = NDPPooling()
-    transform = PreCoarsening(pooler=dummy, recursive_depth=1)
+    transform = PreCoarsening(dummy)
     data_t = transform(data)
 
     # After one level of pre‐coarsening, attribute "pooled_data" should exist
@@ -133,7 +115,7 @@ def test_precoarsening_multiple_levels_returns_list():
     data.num_nodes = 3
 
     pooler = NDPPooling()
-    transform = PreCoarsening(pooler=pooler, recursive_depth=2)
+    transform = PreCoarsening([pooler, pooler])
     data_t = transform(data)
 
     # Now pooled_data should be a list of two Data objects
@@ -142,6 +124,137 @@ def test_precoarsening_multiple_levels_returns_list():
     for pd in data_t.pooled_data:
         assert isinstance(pd, Data)
         assert pd.num_nodes >= 0
+
+
+def test_precoarsening_with_mixed_level_poolers():
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3], [1, 0, 2, 1, 3, 2]], dtype=torch.long
+    )
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
+    x = torch.randn((4, 3))
+    batch = torch.zeros(4, dtype=torch.long)
+    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
+    data.num_nodes = 4
+
+    transform = PreCoarsening(
+        poolers=["ndp", ("kmis", {"scorer": "degree", "order_k": 2})]
+    )
+    data_t = transform(data)
+
+    assert len(transform.poolers) == 2
+    assert isinstance(transform.poolers[0], NDPPooling)
+    assert isinstance(transform.poolers[1], KMISPooling)
+    assert isinstance(data_t.pooled_data, list)
+    assert len(data_t.pooled_data) == 2
+
+
+def test_precoarsening_collapsed_cached_pooler_recomputes_levels():
+    edge_index = torch.tensor(
+        [[0, 1, 1, 2, 2, 3, 3, 4, 4, 5], [1, 0, 2, 1, 3, 2, 4, 3, 5, 4]],
+        dtype=torch.long,
+    )
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float)
+    x = torch.randn((6, 3))
+    batch = torch.zeros(6, dtype=torch.long)
+    data = Data(x=x, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
+    data.num_nodes = 6
+
+    # Repeated identical configs collapse into one multi-level run on one pooler
+    # instance. With cached=True this must still recompute each level.
+    transform = PreCoarsening(
+        poolers=[("ndp", {"cached": True}), ("ndp", {"cached": True})]
+    )
+    data_t = transform(data)
+
+    assert len(data_t.pooled_data) == 2
+    level_0 = data_t.pooled_data[0]
+    level_1 = data_t.pooled_data[1]
+    assert level_1.so.num_nodes == level_0.so.num_supernodes
+
+
+def test_precoarsening_eigen_fixed_k_collates_across_graph_sizes():
+    # One graph with 4 nodes (< k) and one with 6 nodes (> k)
+    edge_small = torch.tensor([[0, 1, 2], [1, 2, 3]], dtype=torch.long)
+    edge_small = torch.cat([edge_small, edge_small.flip(0)], dim=1)
+    d_small = Data(
+        x=torch.randn((4, 3)),
+        edge_index=edge_small,
+        edge_weight=torch.ones(edge_small.size(1)),
+        batch=torch.zeros(4, dtype=torch.long),
+    )
+    d_small.num_nodes = 4
+
+    edge_large = torch.tensor([[0, 1, 2, 3, 4], [1, 2, 3, 4, 5]], dtype=torch.long)
+    edge_large = torch.cat([edge_large, edge_large.flip(0)], dim=1)
+    d_large = Data(
+        x=torch.randn((6, 3)),
+        edge_index=edge_large,
+        edge_weight=torch.ones(edge_large.size(1)),
+        batch=torch.zeros(6, dtype=torch.long),
+    )
+    d_large.num_nodes = 6
+
+    k = 5
+    transform = PreCoarsening(poolers=[("eigen", {"k": k, "num_modes": 2})])
+    d_small_t = transform(d_small)
+    d_large_t = transform(d_large)
+
+    assert d_small_t.pooled_data[0].so.s.size(1) == k
+    assert d_large_t.pooled_data[0].so.s.size(1) == k
+
+    loader = PoolDataLoader([d_small_t, d_large_t], batch_size=2, shuffle=False)
+    batch = next(iter(loader))
+    assert batch.pooled_data[0].so.s.size(1) == k
+
+
+def test_precoarsening_nmf_fixed_k_collates_across_graph_sizes():
+    # One graph with 5 nodes (< k) and one with 10 nodes (> k)
+    edge_small = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]], dtype=torch.long)
+    edge_small = torch.cat([edge_small, edge_small.flip(0)], dim=1)
+    d_small = Data(
+        x=torch.randn((5, 3)),
+        edge_index=edge_small,
+        edge_weight=torch.ones(edge_small.size(1)),
+        batch=torch.zeros(5, dtype=torch.long),
+    )
+    d_small.num_nodes = 5
+
+    edge_large = torch.tensor(
+        [[0, 1, 2, 3, 4, 5, 6, 7, 8], [1, 2, 3, 4, 5, 6, 7, 8, 9]],
+        dtype=torch.long,
+    )
+    edge_large = torch.cat([edge_large, edge_large.flip(0)], dim=1)
+    d_large = Data(
+        x=torch.randn((10, 3)),
+        edge_index=edge_large,
+        edge_weight=torch.ones(edge_large.size(1)),
+        batch=torch.zeros(10, dtype=torch.long),
+    )
+    d_large.num_nodes = 10
+
+    k = 8
+    transform = PreCoarsening(poolers=[("nmf", {"k": k})])
+    d_small_t = transform(d_small)
+    d_large_t = transform(d_large)
+
+    assert d_small_t.pooled_data[0].so.s.size(1) == k
+    assert d_large_t.pooled_data[0].so.s.size(1) == k
+
+    loader = PoolDataLoader([d_small_t, d_large_t], batch_size=2, shuffle=False)
+    batch = next(iter(loader))
+    assert batch.pooled_data[0].so.s.size(1) == k
+
+
+def test_precoarsening_poolers_accepts_single_or_sequence():
+    # Single pooler (one level)
+    t1 = PreCoarsening(NDPPooling())
+    assert len(t1.poolers) == 1
+    assert isinstance(t1.poolers[0], NDPPooling)
+    # Sequence of level configs
+    t2 = PreCoarsening(["ndp", ("kmis", {"scorer": "degree"})])
+    assert len(t2.poolers) == 2
+    assert isinstance(t2.poolers[0], NDPPooling)
+    assert isinstance(t2.poolers[1], KMISPooling)
 
 
 def test_pooledbatch_from_data_list_and_get_example():

@@ -96,9 +96,11 @@ class PyGSPDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
+        """Return the filename used for the processed PyGSP graph dataset."""
         return ["data.pt"]
 
     def process(self):
+        """Convert the selected PyGSP graph into a PyG :class:`~torch_geometric.data.Data` object."""
         edge_index, edge_weights = from_scipy_sparse_matrix(self.G.W)
 
         # Set coords if the graph does not have them

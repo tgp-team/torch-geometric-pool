@@ -158,6 +158,7 @@ dmypy.json
 cython_debug/
 
 # IDE settings
+AGENTS.md
 .idea/
 .cursor/
 .vscode/

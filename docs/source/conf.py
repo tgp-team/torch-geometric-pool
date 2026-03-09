@@ -1,8 +1,21 @@
 import datetime
 import doctest
 import os
+import sys
+from pathlib import Path
 
 from docutils import nodes
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+existing_pythonpath = os.environ.get("PYTHONPATH")
+if existing_pythonpath:
+    os.environ["PYTHONPATH"] = f"{REPO_ROOT}{os.pathsep}{existing_pythonpath}"
+else:
+    os.environ["PYTHONPATH"] = str(REPO_ROOT)
 
 import tgp
 from tgp.utils import cheatsheet
@@ -91,6 +104,29 @@ intersphinx_mapping = {
     'scipy': ('https://docs.scipy.org/doc/scipy/', None)
 }
 
+# Ignore pseudo-type targets and external aliases that are rendered as text in
+# docstrings but are not resolvable as Python objects in nitpicky mode.
+nitpick_ignore = [
+    ('py:class', 'optional'),
+    ('py:class', 'callable'),
+    ('py:class', 'any'),
+    ('py:class', 'Adj'),
+    ('py:class', 'Tensor'),
+    ('py:class', 'SparseTensor'),
+    ('py:class', 'torch.FloatTensor'),
+    ('py:class', 'torch_geometric.typing.Adj'),
+    ('py:class', 'torch_geometric.data.BaseData'),
+    ('py:class', 'torch_geometric.data.data.BaseData'),
+    ('py:class', 'torch_geometric.data.datapipes.DatasetAdapter'),
+    ('py:class', 'torch_geometric.loader.dataloader.Collater'),
+    ('py:class', 'torch_sparse.SparseTensor'),
+    ('py:class', 'torch_sparse.tensor.SparseTensor'),
+    ('py:class', 'torch.distributions.Distribution'),
+    ('py:class', 'scipy.sparse.csr.csr_matrix'),
+    ('py:class', 'tgp.utils.signature.Signature'),
+    ('py:class', 'PoolersArg'),
+]
+
 # -- Hoverxref options -------------------------------------------------------
 #
 
@@ -118,7 +154,7 @@ html_static_path = ["_static"]
 
 html_title = "Torch Geometric Pool"
 html_theme = "shibuya"
-html_baseurl = ""
+html_baseurl = "https://torch-geometric-pool.readthedocs.io/en/latest/"
 sitemap_url_scheme = "{link}"
 language = "en"
 

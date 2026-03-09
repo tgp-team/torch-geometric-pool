@@ -1,72 +1,95 @@
-from typing import Optional
+from typing import Optional, Union
 
 from torch import Tensor
-from torch_geometric.utils import scatter
 
-from tgp.utils.typing import ReduceType
+from tgp.utils.ops import apply_dense_node_mask
 
-
-def global_reduce(
-    x: Tensor,
-    reduce_op: ReduceType = "sum",
-    batch: Optional[Tensor] = None,
-    size: Optional[int] = None,
-    node_dim: int = -2,
-) -> Tensor:
-    r"""Global pooling operation for sparse methods.
-
-    Args:
-        x (~torch.Tensor):
-            The input tensor of shape :math:`[N, F]`,
-            where :math:`N` is the number of nodes in the batch and
-            :math:`F` is the number of node features.
-        reduce_op (~tgp.utils.typing.ReduceType, optional):
-            The aggregation method to use.
-            (default: :obj:`"sum"`)
-        batch (~torch.Tensor, optional):
-            The batch vector
-            :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which indicates
-            to which graph in the batch each node belongs. (default: :obj:`None`)
-        size (int, optional):
-            The number of nodes in the graph.
-            (default: :obj:`None`)
-        node_dim (int, optional): The node dimension.
-            (default: :obj:`-2`)
-
-    Returns:
-        ~torch.Tensor: The tensor of pooled node features.
-    """
-    if batch is None:
-        return x.sum(dim=node_dim, keepdim=True)
-    return scatter(x, batch, dim=node_dim, dim_size=size, reduce=reduce_op)
+from .aggr_reduce import AggrReduce
+from .get_aggr import resolve_reduce_op
 
 
-def dense_global_reduce(
-    x: Tensor, reduce_op: ReduceType = "sum", node_dim: int = -2
-) -> Tensor:
-    r"""Global pooling operation for dense methods.
+def _validate_dense_mask(mask: Optional[Tensor], x: Tensor) -> None:
+    """Validate dense readout mask shape against ``x``."""
+    if mask is None:
+        return
+    if mask.dim() != 2 or tuple(mask.shape) != tuple(x.shape[:2]):
+        raise ValueError(
+            "mask must have shape [B, N] matching x.shape[:2] for dense readout."
+        )
+
+
+class GlobalReduce(AggrReduce):
+    r"""Graph-level readout as a module wrapping :class:`AggrReduce`.
+
+    This module aggregates node features to one vector per graph, supporting both
+    sparse inputs ``[N, F]`` with an optional ``batch`` vector and dense inputs
+    ``[B, N, F]`` with an optional boolean ``mask`` of shape ``[B, N]``.
 
     Args:
-        x (~torch.Tensor): The input tensor of shape :math:`[B, N, F]`,
-            where :math:`B` is the batch size, :math:`N` is the number
-            of nodes in the batch and :math:`F` is the number of node features.
-        reduce_op (ReduceType, optional): The aggregation method to use.
-            (default: :obj:`"sum"`)
-        node_dim (int, optional): The node dimension.
-            (default: :obj:`-2`)
-
-    Returns:
-        ~torch.Tensor: The tensor of pooled node features.
+        reduce_op: Aggregation to use: a string alias (e.g. ``\"sum\"``, ``\"mean\"``,
+            ``\"max\"``, ``\"min\"``, ``\"lstm\"``, ``\"set2set\"``) or a PyG
+            :class:`torch_geometric.nn.aggr.Aggregation` instance. Strings are
+            resolved via :func:`~tgp.reduce.get_aggr`.
+        **aggr_kwargs: Passed to :func:`~tgp.reduce.get_aggr` when ``reduce_op``
+            is a string (e.g. ``in_channels``, ``out_channels``, ``processing_steps``).
     """
-    if reduce_op == "sum":
-        return x.sum(dim=node_dim)
-    elif reduce_op == "mean":
-        return x.mean(dim=node_dim)
-    elif reduce_op == "max":
-        return x.max(dim=node_dim).values
-    elif reduce_op == "min":
-        return x.min(dim=node_dim).values
-    elif reduce_op == "any":
-        return x.any(dim=node_dim)
-    else:
-        raise ValueError(f"Unsupported aggregation method: {reduce_op}")
+
+    def __init__(self, reduce_op: Union[str, object] = "sum", **aggr_kwargs):
+        aggr = resolve_reduce_op(reduce_op, **aggr_kwargs)
+        super().__init__(aggr)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch: Optional[Tensor] = None,
+        size: Optional[int] = None,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        r"""Aggregate node features to one vector per graph.
+
+        Infers sparse vs dense from ``x.ndim``: 2D ``[N, F]`` is sparse (use
+        ``batch`` for grouping); 3D ``[B, N, F]`` is dense (reduce over the
+        node dimension). Nodes must be on the second-to-last dimension.
+
+        Args:
+            x: Node features. Shape ``[N, F]`` (sparse) or ``[B, N, F]`` (dense).
+            batch: Batch vector for sparse ``x``, shape ``[N]``. Ignored for dense.
+            size: Number of graphs for sparse readout when ``batch`` is provided.
+                Passing ``size`` with sparse ``x`` and ``batch=None`` raises
+                :class:`ValueError`.
+            mask: Input-node validity mask for batched (dense) ``x`` only, shape
+                ``[B, N]``. Passing ``mask`` with sparse ``x`` or with a
+                mismatched shape raises :class:`ValueError`.
+
+        Returns:
+            Tensor of shape ``[B, F]`` (or ``[1, F]`` for single graph sparse).
+        """
+        if x.dim() not in (2, 3):
+            raise ValueError(
+                f"readout expects x to be 2D [N, F] or 3D [B, N, F], got ndim={x.dim()}"
+            )
+
+        # Path 1: dense masked readout [B, N, F] + [B, N].
+        if x.dim() == 3 and mask is not None:
+            _validate_dense_mask(mask, x)
+            x_valid, batch_valid = apply_dense_node_mask(x, mask)
+            B = mask.size(0)
+            x_pool, _ = super().forward(x_valid, so=None, batch=batch_valid, size=B)
+            return x_pool
+
+        # Path 2: dense unmasked readout [B, N, F].
+        if x.dim() == 3:
+            x_pool, _ = super().forward(x, so=None, batch=None, size=x.size(0))
+            return x_pool
+
+        # Path 3: sparse-style readout [N, F] (+ optional batch vector).
+        if mask is not None:
+            raise ValueError("mask is only supported for dense x with shape [B, N, F].")
+
+        if batch is None and size is not None:
+            raise ValueError(
+                "size is only supported for sparse readout when batch is provided."
+            )
+
+        x_pool, _ = super().forward(x, so=None, batch=batch, size=size)
+        return x_pool

@@ -1,13 +1,19 @@
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
 
 from tgp.imports import is_sparsetensor
-from tgp.utils.ops import connectivity_to_edge_index, get_assignments, pseudo_inverse
+from tgp.utils.ops import (
+    connectivity_to_edge_index,
+    get_assignments,
+    get_mask_from_dense_s,
+    pseudo_inverse,
+)
 
 
 def cluster_to_s(
@@ -87,6 +93,7 @@ class SelectOutput:
 
     s: Tensor
     s_inv: Tensor = None
+    batch: Optional[Tensor] = None
 
     def __init__(
         self,
@@ -98,6 +105,8 @@ class SelectOutput:
         num_supernodes: int = None,
         weight: Optional[Tensor] = None,
         s_inv_op: Optional[str] = "transpose",
+        batch: Optional[Tensor] = None,
+        in_mask: Optional[Tensor] = None,
         **extra_args,
     ):
         super().__init__()
@@ -168,10 +177,35 @@ class SelectOutput:
         if s_inv is None:
             self.set_s_inv(s_inv_op)
 
+        self.batch = batch
+        self.in_mask = self._validate_in_mask(in_mask)
+
         self._extra_args = set()
+        if self.in_mask is not None:
+            self._extra_args.add("in_mask")
         for k, v in extra_args.items():
             setattr(self, k, v)
             self._extra_args.add(k)
+
+    def _validate_in_mask(self, in_mask: Optional[Tensor]) -> Optional[Tensor]:
+        if in_mask is None:
+            return None
+        if in_mask.dim() != 2:
+            raise ValueError(
+                "SelectOutput.in_mask must be 2D with shape [B, N] (batched representations only)."
+            )
+        if not self.is_dense or self.s.dim() != 3:
+            raise ValueError(
+                "SelectOutput.in_mask is only supported for batched dense assignments "
+                "with shape [B, N, K]."
+            )
+        expected_shape = self.s.shape[:2]
+        if in_mask.shape != expected_shape:
+            raise ValueError(
+                f"SelectOutput.in_mask must have shape {tuple(expected_shape)}, "
+                f"got {tuple(in_mask.shape)}."
+            )
+        return in_mask.to(torch.bool)
 
     @property
     def is_expressive(self) -> bool:
@@ -185,9 +219,10 @@ class SelectOutput:
         if isinstance(row_sum, Tensor) and row_sum.is_sparse:
             row_sum = row_sum.to_dense()
 
-        if "mask" in self._extra_args:
-            mask = getattr(self, "mask")
-            row_sum = row_sum[mask]
+        if self.in_mask is not None:
+            row_sum = row_sum[self.in_mask]
+        if row_sum.numel() == 0:
+            return False
         constant = row_sum[0]
 
         return torch.allclose(
@@ -197,30 +232,63 @@ class SelectOutput:
         )
 
     @property
+    def out_mask(self) -> Optional[Tensor]:
+        r"""Boolean validity mask on pooled supernodes with shape :math:`[B, K]`.
+
+        This is inferred from dense assignment matrix ``s`` and marks
+        supernodes that have at least one assigned node.
+        For ``s.dim() == 3`` (:math:`[B, N, K]`), there is one mask row per
+        graph.
+        For ``s.dim() == 2`` (:math:`[N, K]`) with ``batch``, there is one
+        row per graph id in ``batch``.
+        For ``s.dim() == 2`` without ``batch``, the result has shape
+        :math:`[1, K]`.
+
+        Returns :obj:`None` for sparse assignments.
+        """
+        if not isinstance(self.s, Tensor) or self.s.is_sparse:
+            return None
+        if self.s.dim() in (2, 3):
+            return get_mask_from_dense_s(self.s, self.batch)
+        return None
+
+    @property
     def is_sparse(self) -> bool:
+        """Return :obj:`True` if ``s`` is a sparse tensor."""
         return isinstance(self.s, Tensor) and self.s.is_sparse
 
     @property
+    def is_dense(self) -> bool:
+        """Return :obj:`True` if ``s`` is a dense tensor."""
+        return isinstance(self.s, Tensor) and not self.s.is_sparse
+
+    @property
     def num_nodes(self) -> int:
+        """Return the number of input nodes represented by ``s``."""
         return self.s.size(-2)
 
     @property
     def num_supernodes(self) -> int:
+        """Return the number of pooled nodes represented by ``s``."""
         return self.s.size(-1)
 
     @property
     def node_index(self) -> Optional[Tensor]:
+        """Return sparse row indices (node ids) when ``s`` is sparse."""
         return self.s.indices()[0] if self.is_sparse else None
 
     @property
     def cluster_index(self) -> Optional[Tensor]:
+        """Return sparse column indices (supernode ids) when ``s`` is sparse."""
         return self.s.indices()[1] if self.is_sparse else None
 
     @property
     def weight(self) -> Optional[Tensor]:
+        """Return sparse assignment values when ``s`` is sparse."""
         return self.s.values() if self.is_sparse else None
 
     def set_s_inv(self, method):
+        """Compute and store ``s_inv`` from ``s`` using the given strategy."""
         if method == "transpose":
             if self.is_sparse:
                 self.s_inv = self.s.t()
@@ -242,11 +310,27 @@ class SelectOutput:
         out += ")"
         return out
 
+    @staticmethod
+    def _apply_to_value(value: Any, func: Callable) -> Any:
+        if isinstance(value, Tensor):
+            return func(value)
+        if isinstance(value, list):
+            return [SelectOutput._apply_to_value(v, func) for v in value]
+        if isinstance(value, tuple):
+            return tuple(SelectOutput._apply_to_value(v, func) for v in value)
+        if isinstance(value, Mapping):
+            return {k: SelectOutput._apply_to_value(v, func) for k, v in value.items()}
+        return value
+
     def apply(self, func: Callable) -> "SelectOutput":
-        r"""Applies the function :obj:`func` to both :obj:`s` and :obj:`s_inv`."""
+        r"""Applies ``func`` to tensors in ``s``, ``s_inv``, and tensor-valued extra attributes."""
         self.s = func(self.s)
         if self.s_inv is not None:
             self.s_inv = func(self.s_inv)
+        for attr_name in self._extra_args:
+            if hasattr(self, attr_name):
+                value = getattr(self, attr_name)
+                setattr(self, attr_name, self._apply_to_value(value, func))
         return self
 
     def clone(self) -> "SelectOutput":
@@ -254,35 +338,44 @@ class SelectOutput:
         return copy.deepcopy(self)
 
     def to(self, device: Union[int, str], non_blocking: bool = False) -> "SelectOutput":
-        r"""Performs tensor dtype and/or device conversion for both :obj:`s` and
-        :obj:`s_inv`.
+        r"""Performs tensor dtype and/or device conversion for both ``s`` and
+        ``s_inv``.
         """
-        return self.apply(lambda x: x.to(device=device, non_blocking=non_blocking))
+        self.apply(lambda x: x.to(device=device, non_blocking=non_blocking))
+        if self.batch is not None:
+            self.batch = self.batch.to(device=device, non_blocking=non_blocking)
+        return self
 
     def cpu(self) -> "SelectOutput":
-        r"""Copies attributes to CPU memory for both :obj:`s` and :obj:`s_inv`."""
-        return self.apply(lambda x: x.cpu())
+        r"""Copies attributes to CPU memory for both ``s`` and ``s_inv``."""
+        self.apply(lambda x: x.cpu())
+        if self.batch is not None:
+            self.batch = self.batch.cpu()
+        return self
 
     def cuda(
         self, device: Optional[Union[int, str]] = None, non_blocking: bool = False
     ) -> "SelectOutput":
-        r"""Copies attributes to CUDA memory for both :obj:`s` and :obj:`s_inv`."""
-        return self.apply(lambda x: x.cuda(device, non_blocking=non_blocking))
+        r"""Copies attributes to CUDA memory for both ``s`` and ``s_inv``."""
+        self.apply(lambda x: x.cuda(device, non_blocking=non_blocking))
+        if self.batch is not None:
+            self.batch = self.batch.cuda(device, non_blocking=non_blocking)
+        return self
 
     def detach_(self) -> "SelectOutput":
-        r"""Detaches attributes from the computation graph for both :obj:`s`
-        and :obj:`s_inv`.
+        r"""Detaches attributes from the computation graph for both ``s``
+        and ``s_inv``.
         """
         return self.apply(lambda x: x.detach_())
 
     def detach(self) -> "SelectOutput":
         r"""Detaches attributes from the computation graph by creating a new
-        tensor for both :obj:`s` and :obj:`s_inv`.
+        tensor for both ``s`` and ``s_inv``.
         """
         return self.apply(lambda x: x.detach())
 
     def requires_grad_(self, requires_grad: bool = True) -> "SelectOutput":
-        r"""Tracks gradient computation for both :obj:`s` and :obj:`s_inv`."""
+        r"""Tracks gradient computation for both ``s`` and ``s_inv``."""
         return self.apply(lambda x: x.requires_grad_(requires_grad=requires_grad))
 
     def assign_all_nodes(
@@ -302,14 +395,14 @@ class SelectOutput:
         Args:
             adj (~torch_geometric.typing.Adj, optional): Graph connectivity matrix.
                 Can be an edge_index tensor of shape :math:`(2, E)` or SparseTensor.
-                Required for :obj:`"closest_node"` strategy. (default: :obj:`None`)
+                Required for ``"closest_node"`` strategy. (default: :obj:`None`)
             weight (~torch.Tensor, optional): Node-level weights for the assignment.
                 Must have shape :math:`(N,)` where :math:`N` is the total number of nodes.
                 Note: This is different from edge weights. (default: :obj:`None`)
             max_iter (int, optional): Maximum number of message passing iterations
-                for the :obj:`"closest_node"` strategy. Higher values allow assignment
-                of more distant nodes through graph connectivity. Must be :obj:`> 0`
-                for :obj:`"closest_node"` strategy. (default: :obj:`5`)
+                for the ``"closest_node"`` strategy. Higher values allow assignment
+                of more distant nodes through graph connectivity. Must be ``> 0``
+                for ``"closest_node"`` strategy. (default: ``5``)
             batch (~torch.Tensor, optional): Batch assignment vector of shape :math:`(N,)`
                 indicating which graph each node belongs to. When provided, ensures
                 nodes are only assigned to supernodes within the same graph.
@@ -320,15 +413,15 @@ class SelectOutput:
 
         Returns:
             SelectOutput: A new SelectOutput with complete node-to-supernode assignments.
-            The returned object has :obj:`num_nodes` assignments (one per node) and
+            The returned object has ``num_nodes`` assignments (one per node) and
             :obj:`num_supernodes` supernodes (same as the original selection).
 
         Raises:
-            AssertionError: If :obj:`adj` is :obj:`None` for :obj:`"closest_node"` strategy.
-            AssertionError: If :obj:`max_iter <= 0` for :obj:`"closest_node"` strategy.
+            AssertionError: If ``adj`` is :obj:`None` for ``"closest_node"`` strategy.
+            AssertionError: If ``max_iter <= 0`` for ``"closest_node"`` strategy.
             ValueError: If :obj:`weight` size doesn't match the number of nodes.
-            ValueError: If :obj:`adj` has an invalid type.
-            ValueError: If :obj:`strategy` is not recognized.
+            ValueError: If ``adj`` has an invalid type.
+            ValueError: If ``strategy`` is not recognized.
 
         Example:
             >>> # Convert sparse top-k selection to full assignment

@@ -15,28 +15,28 @@ Every pooling operator in <img src="../_static/img/tgp-logo.svg" width="40px" al
 
 
 ## Select
-The $\texttt{SEL}$ function is responsible to decide how many supernodes the pooled graph will have and which nodes of the original graph will end up in which supernode. 
+The $\texttt{SEL}$ function is responsible for deciding how many supernodes the pooled graph will have and which nodes of the original graph will end up in which supernode. 
 In other words, $\texttt{SEL}$ determines which nodes are selected and how they are grouped together. 
-Note that $\texttt{SEL}$ can also selects only a subset of the whole nodes and discard the others. The $\texttt{SEL}$ function function is arguably the most important part of a pooling method. In fact, the specific implementation of the $\texttt{SEL}$ function is what mostly sets the different pooling methods apart.
+Note that $\texttt{SEL}$ can also select only a subset of all nodes and discard the others. The $\texttt{SEL}$ function is arguably the most important part of a pooling method. In fact, the specific implementation of $\texttt{SEL}$ is what mostly sets different pooling methods apart.
 
 For example, a cluster-based pooler groups the $N$ nodes into $K$ clusters, which become the supernodes of the pooled graph. 
-In this case, we can think at the $\texttt{SEL}$ operation as a soft-clustering assignment matrix $\mathbf{S}$ that maps each node into its own cluster with a given value of membership.
+In this case, we can view the $\texttt{SEL}$ operation as a soft-clustering assignment matrix $\mathbf{S}$ that maps each node to its cluster with a given membership value.
 
 <img src="../_static/img/sel-cluster.png" style="width: 35%; display: block; margin: auto;">
 
-It turns out that the output of *any* $\texttt{SEL}$ operation can be expressed with a similar matrix. 
-For example, we can think at the output of a 1-over-$K$ pooling method that selects a subset of the nodes of the original graph as a matrix $\mathbf{S}$ with 1 in correspondence of the selected nodes, and 0 for nodes that are dropped.
+It turns out that the output of *any* $\texttt{SEL}$ operation can be expressed with a similar matrix.
+For example, we can think of the output of a 1-over-$K$ pooling method that selects a subset of the nodes of the original graph as a matrix $\mathbf{S}$ with 1 in correspondence of selected nodes, and 0 for nodes that are dropped.
 
 <img src="../_static/img/sel-1overk.png" style="width: 25%; display: block; margin: auto;">
 
-Similary, for a scoring-based method such as Top-$K$, the select matrix will contain non-zero entries for the nodes that are kept and 0 for those that are dropped. In addition, the non-zero entries will have a value equal to the top-$K$ scores associated to the nodes that are selected.
+Similarly, for a scoring-based method such as Top-$K$, the select matrix will contain non-zero entries for the nodes that are kept and 0 for those that are dropped. In addition, the non-zero entries will have a value equal to the top-$K$ scores associated with selected nodes.
 
 <img src="../_static/img/sel-scoring.png" style="width: 30%; display: block; margin: auto;">
 
 In <img src="../_static/img/tgp-logo.svg" width="40px" align="center" style="display: inline-block; height: 1.3em; width: unset; vertical-align: text-top;"/> tgp, the $\mathbf{S}$ matrix is contained within the object [`SelectOutput`](https://torch-geometric-pool.readthedocs.io/en/latest/api/select.html#tgp.select.SelectOutput), along with other useful information to perform pooling.
 
 ## Reduce
-The $\texttt{RED}$ operations is the one responsible for computing the node features of the pooled graph. Each pooling method can implement the $\texttt{RED}$ function differently, but in general the result depends on: the topology, the node (and edge) features of the original graph, and on the output of the $\texttt{SEL}$ function. 
+The $\texttt{RED}$ operation is responsible for computing the node features of the pooled graph. Each pooling method can implement the $\texttt{RED}$ function differently, but in general the result depends on the topology, the node (and edge) features of the original graph, and the output of the $\texttt{SEL}$ function. 
 
 Let's make a practical example and let’s say that $\texttt{RED}$ computes the features $\mathbf{X}' \in \mathbb{R}^{K, \cdot}$  by taking the sum, the max, or the average of the features $\mathbf{X} \in \mathbb{R}^{N, \cdot}$ that are assigned by $\texttt{SEL}$ to the same supernode.
 In matrix form, we can express this $\texttt{RED}$ operation simply as:
@@ -45,9 +45,9 @@ $$\mathbf{X}' = \mathbf{S}^\top \mathbf{X}.$$
 
 ## Connect
 The $\texttt{CON}$ function is similar in spirit to $\texttt{RED}$, except that it deals with the edges and the edge features of the pooled graph. 
-In particular, $\texttt{CON}$ decides how the nodes of pooled graph are going to be connected and what will end up in the edge features of the pooled graph. As for  $\texttt{RED}$, the output of $\texttt{CON}$ depends on the original graph and, clearly, also on $\mathbf{S}$, the output of the $\texttt{SEL}$.
+In particular, $\texttt{CON}$ decides how the nodes of the pooled graph are connected and what ends up in the edge features of the pooled graph. As for $\texttt{RED}$, the output of $\texttt{CON}$ depends on the original graph and, clearly, also on $\mathbf{S}$, the output of $\texttt{SEL}$.
 
-For example, let's say that the $\texttt{CON}$ operation creates an edge $e_{ij}$ between the supernodes $i$ and $j$ by combining summing of all the edges whose endpoints are nodes assigned to $i$ and $j$, respectively.
+For example, let's say that the $\texttt{CON}$ operation creates an edge $e_{ij}$ between supernodes $i$ and $j$ by summing all edges whose endpoints are assigned to $i$ and $j$, respectively.
 When the aggregation operation is the sum, like in this example, we can express the $\texttt{CON}$ operation in matrix notation:
 
 $$\mathbf{A}' = \mathbf{S}^\top \mathbf{A}\mathbf{S},$$
@@ -55,8 +55,8 @@ $$\mathbf{A}' = \mathbf{S}^\top \mathbf{A}\mathbf{S},$$
 where $\mathbf{A}' \in \mathbb{R}^{K \times K}$ is the adjacency matrix of the pooled graph.
 
 ## Lift
-The purpose of the $\texttt{LIFT}$ is to map the pooled node features $\mathbf{X}' \in \mathbb{R}^{K, \cdot}$ back to the original space. In other words, the lifted features $\mathbf{\tilde X} \in \mathbb{R}^{N, \cdot}$ and the original features $\mathbf{X} \in \mathbb{R}^{N, \cdot}$ will have the same node dimension $N$.
-We can think at $\texttt{LIFT}$ as the operation that "undoes" the $\texttt{RED}$ operation:
+The purpose of $\texttt{LIFT}$ is to map the pooled node features $\mathbf{X}' \in \mathbb{R}^{K, \cdot}$ back to the original space. In other words, the lifted features $\mathbf{\tilde X} \in \mathbb{R}^{N, \cdot}$ and the original features $\mathbf{X} \in \mathbb{R}^{N, \cdot}$ have the same node dimension $N$.
+We can think of $\texttt{LIFT}$ as the operation that "undoes" $\texttt{RED}$:
 
 $$\mathbf{X} \xrightarrow{\texttt{RED}} \mathbf{X}' \xrightarrow{\texttt{LIFT}} \mathbf{\tilde X}.$$
 

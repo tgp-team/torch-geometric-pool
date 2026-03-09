@@ -31,20 +31,25 @@ class MultipartiteGraphDataset(InMemoryDataset):
 
     @property
     def num_classes(self):
+        """Return the number of unique target classes in the dataset."""
         return len(torch.unique(self.data.y))
 
     @property
     def raw_file_names(self):
+        """Return the expected raw pickle filename."""
         return ["Multipartite.pkl"]
 
     @property
     def processed_file_names(self):
+        """Return the filename used for the processed dataset."""
         return "data.pt"
 
     def download(self):
+        """Download the multipartite dataset archive into ``raw_dir``."""
         download_url(self.url, self.raw_dir)
 
     def process(self):
+        """Load the raw tensor list, apply transforms, and persist processed data."""
         path = os.path.join(self.raw_dir, self.raw_file_names[0])
         data_list = torch.load(path)
         if self.pre_filter is not None:

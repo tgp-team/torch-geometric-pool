@@ -22,7 +22,7 @@ class NoPool(BasePrecoarseningMixin, SRCPooling):
     ):
         super().__init__(
             selector=IdentitySelect(),
-            reducer=BaseReduce(reduce_op="sum"),
+            reducer=BaseReduce(),
             lifter=BaseLift(matrix_op="precomputed", reduce_op="sum"),
             connector=SparseConnect(reduce_op="sum", remove_self_loops=False),
         )

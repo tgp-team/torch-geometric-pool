@@ -35,16 +35,20 @@ class EXPWL1Dataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
+        """Return the raw pickle filename expected in ``raw_dir``."""
         return ["EXPWL1.pkl"]
 
     @property
     def processed_file_names(self):
+        """Return the filename used for the processed dataset tensor."""
         return "data.pt"
 
     def download(self):
+        """Download the EXPWL1 pickle file into ``raw_dir``."""
         download_url(self.url, self.raw_dir)
 
     def process(self):
+        """Load raw examples, apply optional transforms, and save processed data."""
         # Read data into huge `Data` list.
         with open(os.path.join(self.root, "raw/EXPWL1.pkl"), "rb") as f:
             data_list = pickle.load(f)

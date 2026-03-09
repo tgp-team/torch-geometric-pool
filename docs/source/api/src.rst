@@ -5,7 +5,7 @@ SRCPooling
 ==========
 
 The most general interface is :class:`~tgp.src.SRCPooling`, which is the
-parent class for every dataset in :mod:`tgp`.
+parent class for every pooling operator in :mod:`tgp`.
 
 .. autosummary::
     :nosignatures:

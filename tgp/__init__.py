@@ -16,6 +16,8 @@ _submodules = [
     "lift",
     "connect",
     "datasets",
+    "data",
+    "mp",
     "transforms",
     "utils",
 ]
@@ -23,7 +25,10 @@ _submodules = [
 
 def __getattr__(name):
     if name in _submodules:
-        module = importlib.import_module(f".{name}", __name__)
+        if name == "transforms":
+            module = importlib.import_module(".data.transforms", __name__)
+        else:
+            module = importlib.import_module(f".{name}", __name__)
         setattr(sys.modules[__name__], name, module)
         return module
     raise AttributeError(f"module {__name__} has no attribute {name}")

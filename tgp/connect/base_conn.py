@@ -4,17 +4,15 @@ import torch
 from torch import Tensor
 from torch_geometric.typing import Adj, OptTensor
 from torch_geometric.utils import coalesce, subgraph
-from torch_geometric.utils import remove_self_loops as rsl
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from torch_scatter import scatter
 
-from tgp import eps
 from tgp.imports import is_sparsetensor
 from tgp.select import SelectOutput
 from tgp.utils import (
     connectivity_to_edge_index,
     connectivity_to_sparsetensor,
     connectivity_to_torch_coo,
+    postprocess_adj_pool_sparse,
 )
 from tgp.utils.typing import ConnectionType
 
@@ -92,47 +90,15 @@ def sparse_connect(
     else:
         raise RuntimeError
 
-    if remove_self_loops:
-        edge_index, edge_weight = rsl(edge_index, edge_weight)
-
-    # filter out edges with tiny weights
-    if edge_weight is not None:
-        edge_weight = edge_weight.view(-1)
-        mask = edge_weight.abs() > eps
-        if not torch.all(mask):
-            edge_index = edge_index[:, mask]
-            edge_weight = edge_weight[mask]
-
-    if degree_norm:
-        if edge_weight is None:
-            edge_weight = torch.ones(edge_index.size(1), device=edge_index.device)
-
-        # Compute degree normalization D^{-1/2} A D^{-1/2}
-        deg = scatter(
-            edge_weight, edge_index[0], dim=0, dim_size=num_supernodes, reduce="sum"
-        )
-        deg = deg.clamp(min=eps)  # Avoid tiny degrees that explode gradients
-        deg_inv_sqrt = deg.pow(-0.5)
-
-        # Apply symmetric normalization to edge weights
-        edge_weight = (
-            edge_weight * deg_inv_sqrt[edge_index[0]] * deg_inv_sqrt[edge_index[1]]
-        )
-
-    if edge_weight_norm and edge_weight is not None:
-        # Per-graph normalization using batch_pooled
-        edge_batch = batch_pooled[edge_index[0]]
-
-        # Find maximum absolute edge weight per graph
-        max_per_graph = scatter(edge_weight.abs(), edge_batch, dim=0, reduce="max")
-
-        # Avoid division by zero
-        max_per_graph = torch.where(
-            max_per_graph == 0, torch.ones_like(max_per_graph), max_per_graph
-        )
-
-        # Normalize edge weights by their respective graph's maximum
-        edge_weight = edge_weight / max_per_graph[edge_batch]
+    edge_index, edge_weight = postprocess_adj_pool_sparse(
+        edge_index,
+        edge_weight,
+        num_nodes=num_supernodes,
+        remove_self_loops=remove_self_loops,
+        degree_norm=degree_norm,
+        edge_weight_norm=edge_weight_norm,
+        batch_pooled=batch_pooled,
+    )
 
     if to_sparsetensor:
         edge_index = connectivity_to_sparsetensor(
@@ -153,7 +119,7 @@ class SparseConnect(Connect):
     such as :class:`~tgp.select.GraclusSelect`, :class:`~tgp.select.NDPSelect`, and
     :class:`~tgp.select.KMISSelect`.
 
-    It also works of scoring-based methods such as
+    It also works for scoring-based methods such as
     :class:`~tgp.select.TopkSelect` that compute the pooled adjacency as
 
     .. math::
@@ -162,10 +128,10 @@ class SparseConnect(Connect):
     where :math:`\mathbf{i}` denotes the set of supernodes.
 
     Args:
-        reduce_op (~tgp.utils.typing.ReduceType, optional):
+        reduce_op (~tgp.utils.typing.ConnectionType, optional):
             The aggregation function to be applied to nodes in the same cluster. Can be
-            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., :obj:`'sum'`, :obj:`'mean'`,
-            :obj:`'max'`) or any :class:`~tgp.utils.typing.ReduceType`.
+            any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., ``'sum'``, ``'mean'``,
+            ``'max'``) or any :class:`~tgp.utils.typing.ConnectionType`.
             (default: :obj:`sum`)
         remove_self_loops (bool, optional):
             Whether to remove self-loops from the graph after coarsening.
@@ -207,7 +173,7 @@ class SparseConnect(Connect):
         Args:
             edge_index (~torch_geometric.typing.Adj):
                 The connectivity matrix.
-                It can either be a :obj:`~torch_sparse.SparseTensor` of (sparse) shape :math:`[N, N]`,
+                It can either be a ``torch_sparse.SparseTensor`` of (sparse) shape :math:`[N, N]`,
                 where :math:`N` is the number of nodes in the batch or a :obj:`~torch.Tensor` of shape
                 :math:`[2, E]`, where :math:`E` is the number of edges in the batch.
             so (~tgp.select.SelectOutput):
@@ -223,7 +189,7 @@ class SparseConnect(Connect):
         Returns:
             (~torch_geometric.typing.Adj, ~torch.Tensor or None):
             The pooled adjacency matrix and the edge weights.
-            If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
+            If the pooled adjacency is a ``torch_sparse.SparseTensor``,
             returns :obj:`None` as the edge weights.
         """
         if self.edge_weight_norm and batch_pooled is None:

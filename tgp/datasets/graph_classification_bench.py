@@ -11,8 +11,8 @@ class GraphClassificationBench(InMemoryDataset):
     (Bianchi et al., Neurocomputing 2022).
 
     Args:
-        root (string): Root directory where the dataset should be saved.
-        split (string): If `"train"`, loads the training dataset.
+        root (str): Root directory where the dataset should be saved.
+        split (str): If `"train"`, loads the training dataset.
             If `"val"`, loads the validation dataset.
             If `"test"`, loads the test dataset. Defaults to `"train"`.
         easy (bool, optional): If `True`, use the easy version of the dataset.
@@ -68,16 +68,20 @@ class GraphClassificationBench(InMemoryDataset):
 
     @property
     def raw_file_names(self):
+        """Return the raw benchmark archive filename for the selected split."""
         return "{}.npz".format(self.file_name)
 
     @property
     def processed_file_names(self):
+        """Return the processed filename for the selected split."""
         return "{}.pt".format(self.file_name + "_" + self.split)
 
     def download(self):
+        """Download the benchmark archive into ``raw_dir``."""
         download_url("{}{}.npz".format(self.base_url, self.file_name), self.raw_dir)
 
     def process(self):
+        """Convert the raw archive to a list of PyG :class:`~torch_geometric.data.Data` objects."""
         npz = np.load(path.join(self.raw_dir, self.raw_file_names), allow_pickle=True)
         raw_data = (
             npz["{}_{}".format(self.split, key)] for key in ["feat", "adj", "class"]

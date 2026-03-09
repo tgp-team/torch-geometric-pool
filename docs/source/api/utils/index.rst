@@ -5,5 +5,6 @@ Utils
     :maxdepth: 2
     :caption: Utils
 
+    ops
     losses
     typing

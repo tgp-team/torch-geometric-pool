@@ -27,17 +27,17 @@ class PooledBatch(Batch):
         follow_batch: Optional[List[str]] = None,
         exclude_keys: Optional[List[str]] = None,
     ) -> "PooledBatch":
-        r"""Constructs a :class:`~tgp.data.PooledBatch` from a list of graph
+        r"""Constructs a :class:`~tgp.data.loaders.PooledBatch` from a list of graph
         :class:`~torch_geometric.data.Data` objects.
 
         This method collates node and edge attributes, as well as any
         sub-:class:`~torch_geometric.data.Data` object storing pooled data, from each
-        graph in :obj:`data_list` into a single :class:`~tgp.data.PooledBatch`. It
+        graph in ``data_list`` into a single :class:`~tgp.data.loaders.PooledBatch`. It
         handles attribute increments and batch assignments, and stores metadata
         required to separate individual graphs later.
 
         Args:
-            data_list (List[~torch_geometric.data.data.BaseData]):
+            data_list (list):
                 A list of :class:`~torch_geometric.data.Data` or
                 :class:`~torch_geometric.data.HeteroData` objects to batch.
             follow_batch (Optional[List[str]]): Keys for which to create additional
@@ -45,8 +45,8 @@ class PooledBatch(Batch):
             exclude_keys (Optional[List[str]]): Attributes to exclude from collation.
 
         Returns:
-            :class:`PooledBatch`: A batched object containing all graphs from
-                :obj:`data_list`, with :obj:`_slice_dict` and :obj:`_inc_dict`
+            :class:`~tgp.data.loaders.PooledBatch`: A batched object containing all graphs from
+                ``data_list``, with ``_slice_dict`` and ``_inc_dict``
                 attributes set for reconstruction.
         """
         batch, slice_dict, inc_dict = collate(
@@ -67,17 +67,17 @@ class PooledBatch(Batch):
     def get_example(self, idx: int) -> BaseData:
         r"""Retrieves an individual graph data object from the batch.
 
-        This method separates the batched data at the specified index :obj:`idx`, using
-        the stored :obj:`_slice_dict` and :obj:`_inc_dict` to reconstruct the original
-        :class:`~torch_geometric.data.data.BaseData` object.
+        This method separates the batched data at the specified index ``idx``, using
+        the stored ``_slice_dict`` and ``_inc_dict`` to reconstruct the original
+        :class:`~torch_geometric.data.BaseData` object.
 
         Args:
             idx (int): Index of the graph to extract from the batch.
 
         Returns:
-            ~torch_geometric.data.data.BaseData: The reconstructed
+            ~torch_geometric.data.BaseData: The reconstructed
                 :class:`~torch_geometric.data.Data` or
-                :class:`~torch_geometric.data.HeteroData` object at position :obj:`idx`.
+                :class:`~torch_geometric.data.HeteroData` object at position ``idx``.
 
         Raises:
             RuntimeError: If the batch was not created via :func:`from_data_list`,
@@ -104,12 +104,12 @@ class PooledBatch(Batch):
 class PoolCollater(Collater):
     r"""A custom collate function for pooling dataloaders.
 
-    This class extends :class:`~torch_geometric.loader.dataloader.Collater` to produce
-    a :class:`~tgp.data.PooledBatch` when collating a list of
+    This class extends the PyG collater to produce
+    :class:`~tgp.data.loaders.PooledBatch` objects when collating a list of
     :class:`~torch_geometric.data.Data` or
     :class:`~torch_geometric.data.HeteroData` objects. It invokes
-    :meth:`~tgp.data.PooledBatch.from_data_list` to perform the batching with optional
-    :obj:`follow_batch` and :obj:`exclude_keys` arguments.
+    :meth:`~tgp.data.loaders.PooledBatch.from_data_list` to perform the batching with optional
+    ``follow_batch`` and ``exclude_keys`` arguments.
     """
 
     def __call__(self, batch: List[Any]) -> Any:
@@ -124,15 +124,16 @@ class PoolCollater(Collater):
 
 
 class PoolDataLoader(torch.utils.data.DataLoader):
-    r"""A DataLoader for pooled graph datasets, returning :class:`PooledBatch` objects.
+    r"""A DataLoader for pooled graph datasets, returning
+    :class:`~tgp.data.loaders.PooledBatch` objects.
 
     This class extends :class:`~torch.utils.data.DataLoader` to integrate with
     :class:`PoolCollater`, automatically batching pooled graph data. It accepts
-    :obj:`follow_batch` and :obj:`exclude_keys` parameters to propagate to the collate
+    ``follow_batch`` and ``exclude_keys`` parameters to propagate to the collate
     function.
 
     Args:
-        dataset (Union[~torch.utils.data.Dataset, Sequence[~torch_geometric.data.BaseData], ~torch_geometric.data.datapipes.DatasetAdapter]):
+        dataset (object):
             The source dataset from which to load graph data.
         batch_size (int): Number of graphs per batch. (default: ``1``)
         shuffle (bool): Whether to shuffle the data each epoch. (default: :obj:`False`)

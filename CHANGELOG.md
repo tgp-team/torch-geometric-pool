@@ -1,4 +1,251 @@
-# Torch Geometric Pool — Changelog (Internal Sparse Format Migration Edition)
+## v1.0
+This release summarizes the recent architectural refactor and behavioral updates.
+It focuses on public‑facing API/behavior, intended usage, and design trade‑offs.
+
+### Highlights
+- **Unified dense pooling & connectivity**  
+  Dense poolers share a common `DenseSRCPooling` base, accept raw sparse inputs, and
+  use a single `sparse_output` flag to choose between block‑diagonal sparse and
+  batched dense pooled adjacencies. `DenseConnect` now handles both batched dense
+  inputs and unbatched sparse inputs in one place.
+- **Standalone readout**  
+  Graph‑level readout is handled by `GlobalReduce` / `AggrReduce`, decoupled from
+  individual poolers and with strict shape/mask validation.
+- **Expanded pooler family**  
+  New or extended methods include:
+  - `EigenPooling` (with `EigenPoolSelect`, `EigenPoolReduce`, `EigenPoolConnect`,
+    `EigenPoolLift`);
+  - `SEPPooling` / `SEPSelect` (structural‑entropy–guided, non‑trainable pooling);
+  - `NMFPooling(batched=False)` and generalized `NMFSelect` for dense + sparse inputs;
+  - `_u` suffix convention for unbatched dense variants (e.g. `bnpool_u`,
+    `diff_u`, `dmon_u`, `acc_u`, `hosc_u`, `jb_u`).
+- **Multi‑level precoarsening**  
+  `PreCoarsening` supports:
+  - a single pooler/config or a sequence of per‑level configs (pooler instance,
+    alias string, `(name, kwargs)` tuples, or dicts);
+  - repeated levels like `["sep", "sep", "sep"]` or `["ndp", "ndp", "ndp"]`;
+  - multi‑level SEP hierarchies via `SEPSelect.multi_level_select`;
+  - efficient “collapsed runs” internally while still exposing one `pooled_data`
+    entry per requested level.
+- **Stability & diagnostics**  
+  - Spectral / BCE / balance losses handle empty‑graph and corner cases without NaNs;
+  - `get_random_map_mask` behaves correctly when some graphs have zero kept nodes;
+  - balance / orthogonality losses respect masks in batched settings;
+  - dense poolers’ `extra_repr` consistently reports `batched` and `sparse_output`;
+  - `tgp.utils.ops` functions are documented and exported.
+---
+### Dense pooling, masks and readout
+#### Modes and `sparse_output`
+Dense poolers implement **two internal processing modes**:
+1. **Batched mode (`batched=True`)**
+   - Converts sparse inputs to dense padded tensors:
+     - `X`: `[B, Nmax, F]`
+     - `A`: `[B, Nmax, Nmax]`
+     - `S`: `[B, Nmax, K]`
+   - **Pros**: vectorized operations, typically faster.
+   - **Cons**: higher memory due to padding and densifying adjacency.
+2. **Unbatched mode (`batched=False`)**
+   - Avoids padding and operates on unbatched dense assignments:
+     - `X`: `[N, F]`
+     - `A`: sparse connectivity
+     - `S`: `[N, K]`
+   - **Pros**: memory‑efficient (no padding, no materializing non‑edges).
+   - **Cons**: slower (per‑graph loops / less vectorization).
+`sparse_output` controls the **format** of the pooled adjacency:
+- `sparse_output=True`: block‑diagonal sparse output
+  (`edge_index`, `edge_weight`, `batch`);
+- `sparse_output=False`: batched dense adjacency of shape `[B, K, K]`.
+This flag determines the appropriate downstream MP / global pooling layers.
+#### Masks and supernode validity
+- External `mask` arguments are honored **only** when inputs are already
+  dense/padded; for sparse inputs, masks are created during preprocessing.
+- **`SelectOutput.in_mask`**
+  - optional stored attribute (`None` by default);
+  - batched‑only with shape `[B, N]`;
+  - mask on **original nodes**; used by `is_expressive`.
+- **`SelectOutput.out_mask`**
+  - derived property (not stored);
+  - for `s` with shape `[B, N, K]`, output shape is `[B, K]`;
+  - for `s` with shape `[N, K]`, output is `[B, K]` when `batch` is present,
+    else `[1, K]`;
+  - returns `None` for sparse assignments.
+- **`PoolingOutput.mask`**
+  - property that returns `so.out_mask` when `so` is set, else `None`;
+  - there is no stored `mask` field;
+  - downstream dense MP / global pool layers use it to ignore padded supernodes.
+#### Readout (`GlobalReduce` / `AggrReduce`)
+- **`GlobalReduce`**
+  - import from `tgp.reduce`:
+    `from tgp.reduce import GlobalReduce`;
+  - infers sparse vs dense from `x`:
+    - 2D `[N, F]` → sparse readout (use `batch` for grouping),
+    - 3D `[B, N, F]` → dense readout;
+  - node dimension is fixed (second‑to‑last): no `node_dim` argument.
+- Reduce ops:
+  - PyG‑style aggregators (string alias or
+    `torch_geometric.nn.aggr.Aggregation` instance);
+  - `"any"` is not supported; use `"sum"`, `"mean"`, `"max"`, `"min"`,
+    `"lstm"`, `"set2set"`, etc., via `GlobalReduce(reduce_op, **kwargs)` or
+    `get_aggr(reduce_op, **kwargs)` with `AggrReduce`.
+- Mask validation:
+  - for sparse (2D) `x`, passing `mask` raises `ValueError`;
+  - for dense (3D) `x`, `mask` must be `[B, N]` or a `ValueError` is raised.
+- Size semantics for sparse readout:
+  - `size` is only valid when `batch` is provided;
+  - with `batch=None`, omit `size`; `GlobalReduce` returns `[1, F]`.
+Poolers no longer expose a `readout` method; always call `GlobalReduce`
+(or `AggrReduce` directly) on the pooled node features.
+---
+### Reduce and utility changes
+- **`BaseReduce`**
+  - always computes :math:`S^T X`:
+    - sparse assignments use scatter (optionally weighted by
+      `so.s.values()` / `so.weight`);
+    - dense assignments use matrix multiplication;
+  - no longer accepts `reduce_op`; for mean / max / min etc. use `AggrReduce`
+    with a PyG aggregator.
+  - for dense `[N, K]` + `batch` (multi‑graph batches) it still unbatches per
+    graph for memory efficiency when using `batched=False`.
+- **`AggrReduce`**
+  - wraps a PyG `Aggregation`;
+  - supports `so=None` for graph‑level readout (one pooled node per graph);
+  - dense `SelectOutput` assignments are intentionally unsupported; use
+    `BaseReduce` for dense/soft reductions.
+- **`get_aggr(alias, **kwargs)` in `tgp.reduce`**
+  - resolves string aliases like `"sum"`, `"mean"`, `"lstm"`, `"set2set"` to
+    concrete PyG aggregation classes;
+  - merges defaults with user kwargs, filtering kwargs to what the PyG class
+    actually accepts.
+- **`tgp.utils.ops` post‑processing and helpers**
+  - `postprocess_adj_pool_dense(...)` and `postprocess_adj_pool_sparse(...)`
+    centralize:
+    - self‑loop removal,
+    - symmetric degree normalization,
+    - optional edge‑weight normalization;
+  - `dense_to_block_diag` converts dense `[B, K, K]` pooled adjacencies into
+    block‑diagonal `edge_index` + `edge_weight`;
+  - `is_dense_adj` detects dense adjacency tensors.
+---
+### API & behavior changes
+- **`sparse_output` replaces legacy flags**  
+  Flags such as `block_diags_output` and `unbatched_output` are removed in favor
+  of `sparse_output` throughout the codebase.
+- **`DenseConnect` behavior**  
+  - batched dense path: accepts dense adjacencies `[B, N, N]` and dense
+    assignments `[B, N, K]`, returns `[B, K, K]`;
+  - unbatched sparse path: accepts sparse connectivity plus dense assignments
+    `[N, K]`, returns dense `[B, K, K]` or block‑diagonal sparse connectivity
+    depending on `sparse_output`.
+- **`DenseSelect` → `MLPSelect`**  
+  The dense selector has been renamed and moved from `dense_select.py` to
+  `mlp_select.py`.
+- **`MLPSelect` / `DPSelect`**  
+  - accept `batched_representation` to choose between batched `[B, N, K]`
+    and unbatched `[N, K]` assignments;
+  - add `batch` to `SelectOutput` when operating unbatched.
+- **Removed legacy classes/files**
+  - `SparseBNPool` has been removed; use `BNPool(batched=False)` or
+    `get_pooler("bnpool_u")`;
+  - `dense_conn_spt.py` has been removed; dense connectivity logic lives in
+    `dense_conn.py`.
+- **`get_pooler` `_u` suffix**  
+  Dense poolers implementing unbatched dense modes can be instantiated as
+  `"<name>_u"` (e.g. `bnpool_u`, `diff_u`, `dmon_u`, `acc_u`, `hosc_u`, `jb_u`,
+  `lap_u`, `mincut_u`). Unsupported `_u` names raise an error.
+---
+### Pooler coverage (batched / unbatched)
+All dense poolers described below share the same output‑format semantics:
+when they support both dense and block‑diagonal sparse outputs, the choice
+is controlled by `sparse_output` as described above.
+- **BNPool**
+  - unified dense/sparse behavior; batched/unbatched branches share a consistent
+    interface;
+  - unbatched mode uses sparse losses and supports `num_neg_samples` to cap
+    negative sampling.
+- **LaPooling**
+  - default: `batched=True`;
+  - unbatched mode is kept for memory efficiency and computes per‑graph
+    similarities to limit memory.
+- **MinCutPooling**
+  - unbatched mode (`batched=False` / `get_pooler("mincut_u")`) uses sparse
+    connectivity and sparse MinCUT / orthogonality losses.
+- **DiffPool**
+  - unbatched mode (`batched=False` / `get_pooler("diff_u")`) uses sparse
+    connectivity and sparse link‑prediction / entropy losses.
+- **JustBalancePooling (JBPool)**
+  - unbatched mode (`batched=False` / `get_pooler("jb_u")`) uses sparse
+    connectivity and balance loss.
+- **DMoNPooling**
+  - unbatched mode (`batched=False` / `get_pooler("dmon_u")`) uses sparse
+    connectivity and sparse spectral / cluster / orthogonality losses.
+- **HOSCPooling**
+  - unbatched mode (`batched=False` / `get_pooler("hosc_u")`) uses sparse
+    connectivity and HOSC/orthogonality losses.
+- **AsymCheegerCutPooling (ACC)**
+  - unbatched mode (`batched=False` / `get_pooler("acc_u")`) uses sparse
+    connectivity and sparse total‑variation / balance losses.
+- **NMFPooling / `NMFSelect`**
+  - `NMFPooling` supports both batched and unbatched modes, operating on sparse
+    connectivity without padding in the unbatched case;
+  - `NMFSelect` accepts both dense and sparse connectivity inputs, supports
+    single‑graph and multi‑graph sparse batches, and falls back to trivial
+    assignments for tiny graphs / `k > N`.
+- **EigenPooling / `EigenPoolSelect`**
+  - `EigenPooling` provides spectral‑clustering‑based pooling with
+    eigenvector‑based reduce and lift (`EigenPoolReduce`, `EigenPoolLift`);
+  - `EigenPoolSelect` runs spectral clustering per graph and computes an
+    eigenvector pooling matrix `theta`, supporting both single‑graph and
+    batched sparse inputs.
+- **SEPPooling / `SEPSelect`**
+  - SEP is non‑trainable and topology‑driven, building a coding tree and
+    exposing depth‑1 partitions in the standard forward pass;
+  - `SEPSelect.multi_level_select` returns multi‑level assignments used by
+    `SEPPooling.multi_level_precoarsening` and `PreCoarsening` with repeated
+    `"sep"` levels.
+---
+### Bug fixes
+- **Spectral loss** (batched and unbatched) no longer returns NaN for graphs
+  with zero edges; empty graphs now contribute zero loss and the result remains
+  finite.
+- **Weighted BCE reconstruction loss** now counts edges using a boolean mask to
+  avoid mismatches when adjacency is non‑binary or has clamped edges.
+- **Batched random assignment** in `get_random_map_mask` now handles graphs with
+  zero kept nodes by falling back to global assignments.
+- **AsymNorm and HOSC orthogonality losses** now handle single‑node /
+  single‑cluster edge cases without NaNs or index errors, returning finite,
+  well‑defined values.
+- **JustBalance (JB) loss** in batched mode now correctly applies per‑graph
+  normalization when a node mask is provided (e.g. variable‑sized graphs with
+  zero padding).
+- **AsymNorm (ACC) loss** in batched mode now computes correctly per graph when a
+  node mask is provided: the batched path builds a flat assignment and batch
+  vector from the mask and delegates to the unbatched implementation.
+---
+### Migration notes
+- **Readout**  
+  Replace `global_reduce(x, ...)`, `dense_global_reduce(x, ...)` and
+  pooler‑specific `readout(x, ...)` helpers with `GlobalReduce` modules (e.g.
+  `self.readout = GlobalReduce("sum")` in `__init__` and
+  `x = self.readout(x, batch=..., mask=...)` in `forward`). Replace
+  `pooler.global_pool(x, ...)` with calls to a `GlobalReduce` instance.
+  Remove `node_dim` from pooler constructors and from KMIS if you used it.
+- **Output format flags**  
+  If you previously relied on `block_diags_output` or `unbatched_output`,
+  update to `sparse_output`.
+- **Unbatched dense modes**  
+  Use `_u` pooler names (e.g. `bnpool_u`, `lap_u`, `diff_u`, `dmon_u`, `acc_u`,
+  `hosc_u`, `jb_u`, `mincut_u`) to select unbatched dense modes.
+- **Dense preprocessing**  
+  Dense poolers should no longer require explicit calls to `preprocessing(...)`
+  in user code; they perform it internally when `batched=True`.
+- **PreCoarsening configuration**  
+  `PreCoarsening` now takes a single `poolers` argument (one pooler/config or a
+  sequence for multilevel). The recursive depth argument is no longer supported:
+  the number of levels is given by `len(poolers)`, e.g. use
+  `poolers=["ndp", "ndp", "ndp"]` for three NDPPooling levels.
+---
+
+## v0.4 - Internal Sparse Format Migration
 
 ### Overview
 

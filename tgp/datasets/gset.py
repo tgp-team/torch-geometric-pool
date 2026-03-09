@@ -140,16 +140,20 @@ class GsetDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
+        """Return the selected Gset instance filename."""
         return self.file_name
 
     @property
     def processed_file_names(self):
+        """Return the processed tensor filename for the selected Gset graph."""
         return "{}.pt".format(self.file_name)
 
     def download(self):
+        """Download the selected Gset graph file into ``raw_dir``."""
         download_url("{}{}".format(self.base_url, self.file_name), self.raw_dir)
 
     def process(self):
+        """Parse the raw Gset graph and save it as a PyG dataset."""
         with open(path.join(self.raw_dir, self.raw_file_names), "rb") as f:
             data = f.read().decode("utf-8")
             graph = self.parse_graph(data)

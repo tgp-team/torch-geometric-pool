@@ -35,7 +35,7 @@ class KronConnect(Connect):
     Args:
         sparse_threshold (float, optional):
             Deletes edges whose weight is inferior to the given value.
-            (default: :obj:`1e-2`)
+            (default: ``1e-2``)
     """
 
     def __init__(self, sparse_threshold: float = 1e-2):
@@ -64,7 +64,7 @@ class KronConnect(Connect):
 
         Returns:
             (~torch_geometric.typing.Adj, ~torch.Tensor or None): The pooled adjacency matrix and the
-            edge weights. If the pooled adjacency is a :obj:`~torch_sparse.SparseTensor`,
+            edge weights. If the pooled adjacency is a ``torch_sparse.SparseTensor``,
             returns :obj:`None` as the edge weights.
         """
         # Remember the original input type to preserve output format
