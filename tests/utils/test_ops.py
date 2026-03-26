@@ -17,6 +17,7 @@ from tgp.utils.ops import (
     add_remaining_self_loops,
     apply_dense_node_mask,
     batched_negative_edge_sampling,
+    connectivity_to_edge_index,
     connectivity_to_sparsetensor,
     connectivity_to_torch_coo,
     create_one_hot_tensor,
@@ -288,6 +289,78 @@ def test_connectivity_to_torch_coo_defensive_else_branch(monkeypatch):
         ValueError, match="Edge index must be a Tensor or SparseTensor."
     ):
         ops.connectivity_to_torch_coo(Dummy(), num_nodes=2)
+
+
+def test_connectivity_to_edge_index_rejects_dense_adjacency():
+    adj = torch.eye(4, dtype=torch.float32)
+    with pytest.raises(ValueError, match="Dense adjacency matrices are not supported"):
+        _ = connectivity_to_edge_index(adj)
+
+    adj_batched = adj.unsqueeze(0)
+    with pytest.raises(ValueError, match="Dense adjacency matrices are not supported"):
+        _ = connectivity_to_edge_index(adj_batched)
+
+
+def test_connectivity_to_torch_coo_rejects_dense_adjacency():
+    adj = torch.eye(4, dtype=torch.float32)
+    with pytest.raises(ValueError, match="Dense adjacency matrices are not supported"):
+        _ = connectivity_to_torch_coo(adj, num_nodes=4)
+
+    adj_batched = adj.unsqueeze(0)
+    with pytest.raises(ValueError, match="Dense adjacency matrices are not supported"):
+        _ = connectivity_to_torch_coo(adj_batched, num_nodes=4)
+
+
+def test_connectivity_to_sparsetensor_rejects_dense_adjacency_even_without_torch_sparse():
+    adj = torch.eye(4, dtype=torch.float32)
+    with (
+        patch("tgp.utils.ops.HAS_TORCH_SPARSE", False),
+        pytest.raises(ValueError, match="Dense adjacency matrices are not supported"),
+    ):
+        _ = connectivity_to_sparsetensor(adj, num_nodes=4)
+
+
+def test_connectivity_to_edge_index_rejects_non_two_dimensional_dense_tensor():
+    """Dense edge_index must be rank-2 [2, E]; a 1D tensor is rejected before dtype checks."""
+    bad = torch.tensor([0, 1, 2], dtype=torch.long)
+    with pytest.raises(ValueError, match="got a Tensor with 1 dimensions"):
+        connectivity_to_edge_index(bad)
+
+
+def test_connectivity_to_edge_index_rejects_non_long_edge_index_dtype():
+    """Edge indices must be torch.long; float tensors are rejected even when shape is [2, E]."""
+    bad = torch.tensor([[0, 1], [1, 0]], dtype=torch.float32)
+    with pytest.raises(ValueError, match=r"dtype=torch\.float32"):
+        connectivity_to_edge_index(bad)
+
+
+def test_connectivity_to_torch_coo_rejects_non_two_dimensional_dense_tensor():
+    bad = torch.tensor([0, 1, 2], dtype=torch.long)
+    with pytest.raises(ValueError, match="got a Tensor with 1 dimensions"):
+        connectivity_to_torch_coo(bad, num_nodes=3)
+
+
+def test_connectivity_to_torch_coo_rejects_non_long_edge_index_dtype():
+    bad = torch.tensor([[0, 1], [1, 0]], dtype=torch.float32)
+    with pytest.raises(ValueError, match=r"dtype=torch\.float32"):
+        connectivity_to_torch_coo(bad, num_nodes=2)
+
+
+def test_connectivity_to_sparsetensor_rejects_non_two_dimensional_dense_tensor():
+    """Validation runs before torch_sparse import; wrong rank raises without torch_sparse."""
+    bad = torch.tensor([0, 1, 2], dtype=torch.long)
+    with (
+        patch("tgp.utils.ops.HAS_TORCH_SPARSE", False),
+        pytest.raises(ValueError, match="got a Tensor with 1 dimensions"),
+    ):
+        connectivity_to_sparsetensor(bad, num_nodes=3)
+
+
+def test_connectivity_to_sparsetensor_rejects_non_long_edge_index_dtype():
+    with patch("tgp.utils.ops.HAS_TORCH_SPARSE", False):
+        bad = torch.tensor([[0, 1], [1, 0]], dtype=torch.float32)
+        with pytest.raises(ValueError, match=r"dtype=torch\.float32"):
+            connectivity_to_sparsetensor(bad, num_nodes=2)
 
 
 def test_create_one_hot_tensor_scalar_and_explicit_dtype():

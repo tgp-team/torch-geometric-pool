@@ -37,6 +37,13 @@ def test_module_reload_resets_flags(monkeypatch):
     assert callable(imp.check_torch_sparse_available)
 
 
+def test_lazy_import_transforms_aliases_tgp_data_transforms():
+    """`tgp.transforms` is not a top-level package; lazy import maps it to `tgp.data.transforms`."""
+    import tgp.data.transforms as data_transforms
+
+    assert tgp.transforms is data_transforms
+
+
 def test_import_select():
     # Ensure the module has not already been imported
     if "tgp" in sys.modules:

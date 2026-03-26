@@ -18,4 +18,8 @@ jobs:
       - name: Check code formatting
         run: ruff format --check .
       - name: Run tests with coverage
-        run: pytest
+        run: pytest --cov-report=xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

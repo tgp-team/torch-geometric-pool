@@ -455,6 +455,25 @@ def connectivity_to_edge_index(
             values = edge_index.values().clone()
             return indices, values
         else:
+            # Reject dense adjacency matrices (N, N) or (B, N, N).
+            if edge_index.dim() == 3 or (
+                edge_index.dim() == 2 and edge_index.size(0) != 2
+            ):
+                raise ValueError(
+                    "Dense adjacency matrices are not supported by connectivity_to_edge_index(). "
+                    "Expected a sparse connectivity representation (edge_index with shape [2, E], "
+                    "a torch COO sparse tensor, or a torch_sparse.SparseTensor)."
+                )
+            if edge_index.dim() != 2:
+                raise ValueError(
+                    "connectivity_to_edge_index() expected edge_index with shape [2, E] "
+                    f"when given a dense Tensor, got a Tensor with {edge_index.dim()} dimensions."
+                )
+            if edge_index.dtype not in (torch.int64, torch.long):
+                raise ValueError(
+                    "connectivity_to_edge_index() expected edge_index indices to be an integer tensor "
+                    f"(dtype torch.long), got dtype={edge_index.dtype}."
+                )
             # Handle regular tensor [2, E]
             edge_weight = check_and_filter_edge_weights(edge_weight)
             return edge_index, edge_weight
@@ -496,6 +515,24 @@ def connectivity_to_torch_coo(
         raise ValueError(
             f"Edge index must be of type Tensor or SparseTensor, got {type(edge_index)}"
         )
+    if isinstance(edge_index, Tensor) and not edge_index.is_sparse:
+        # Reject dense adjacency matrices (N, N) or (B, N, N).
+        if edge_index.dim() == 3 or (edge_index.dim() == 2 and edge_index.size(0) != 2):
+            raise ValueError(
+                "Dense adjacency matrices are not supported by connectivity_to_torch_coo(). "
+                "Expected edge_index with shape [2, E], a torch COO sparse tensor, "
+                "or a torch_sparse.SparseTensor."
+            )
+        if edge_index.dim() != 2:
+            raise ValueError(
+                "connectivity_to_torch_coo() expected edge_index with shape [2, E] "
+                f"when given a dense Tensor, got a Tensor with {edge_index.dim()} dimensions."
+            )
+        if edge_index.dtype not in (torch.int64, torch.long):
+            raise ValueError(
+                "connectivity_to_torch_coo() expected edge_index indices to be an integer tensor "
+                f"(dtype torch.long), got dtype={edge_index.dtype}."
+            )
 
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
     edge_weight = check_and_filter_edge_weights(edge_weight)
@@ -550,6 +587,24 @@ def connectivity_to_sparsetensor(
     Raises:
         ImportError: If ``torch_sparse`` is not installed.
     """
+    if isinstance(edge_index, Tensor) and not edge_index.is_sparse:
+        # Reject dense adjacency matrices (N, N) or (B, N, N).
+        if edge_index.dim() == 3 or (edge_index.dim() == 2 and edge_index.size(0) != 2):
+            raise ValueError(
+                "Dense adjacency matrices are not supported by connectivity_to_sparsetensor(). "
+                "Expected edge_index with shape [2, E], a torch COO sparse tensor, "
+                "or a torch_sparse.SparseTensor."
+            )
+        if edge_index.dim() != 2:
+            raise ValueError(
+                "connectivity_to_sparsetensor() expected edge_index with shape [2, E] "
+                f"when given a dense Tensor, got a Tensor with {edge_index.dim()} dimensions."
+            )
+        if edge_index.dtype not in (torch.int64, torch.long):
+            raise ValueError(
+                "connectivity_to_sparsetensor() expected edge_index indices to be an integer tensor "
+                f"(dtype torch.long), got dtype={edge_index.dtype}."
+            )
     if not HAS_TORCH_SPARSE:
         raise ImportError(
             "Cannot convert connectivity to sparse tensor: torch_sparse is not installed."
