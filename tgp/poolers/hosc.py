@@ -3,7 +3,6 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
-from torch_geometric.utils import to_dense_adj, to_dense_batch
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
@@ -14,6 +13,7 @@ from tgp.utils.losses import (
     hosc_orthogonality_loss,
     mincut_loss,
     orthogonality_loss,
+    sparse_ho_mincut_loss,
     sparse_mincut_loss,
     unbatched_hosc_orthogonality_loss,
     unbatched_orthogonality_loss,
@@ -353,16 +353,12 @@ class HOSCPooling(DenseSRCPooling):
             cut_loss = cut_loss / self.k
 
         if self.alpha > 0:
-            adj_dense = to_dense_adj(
-                edge_index_conv, edge_attr=edge_weight_conv, batch=batch
-            )
-            S_dense, _ = to_dense_batch(S, batch)
-            motif_adj = torch.matmul(torch.matmul(adj_dense, adj_dense), adj_dense)
-            motif_adj_pool = torch.matmul(
-                torch.matmul(S_dense.transpose(1, 2), motif_adj), S_dense
-            )
-            ho_cut_loss = mincut_loss(
-                motif_adj, S_dense, motif_adj_pool, batch_reduction="mean"
+            ho_cut_loss = sparse_ho_mincut_loss(
+                edge_index_conv,
+                S,
+                edge_weight_conv,
+                batch,
+                batch_reduction="mean",
             )
             ho_cut_loss = ho_cut_loss / self.k
 

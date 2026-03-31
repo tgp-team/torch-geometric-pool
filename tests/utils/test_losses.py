@@ -1510,10 +1510,9 @@ class TestLossesBranchCoverage:
         with pytest.raises(ValueError, match="Batch reduction .* not allowed"):
             losses._batch_reduce_loss(torch.tensor([1.0]), "invalid")  # type: ignore[arg-type]
 
-    def test_sparse_mincut_loss_handles_filtered_none_edge_weight(self, monkeypatch):
+    def test_sparse_mincut_loss_accepts_column_edge_weight(self):
         import tgp.utils.losses as losses
 
-        monkeypatch.setattr(losses, "check_and_filter_edge_weights", lambda _: None)
         edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
         edge_weight = torch.ones((2, 1), dtype=torch.float32)
         S = torch.tensor([[0.8, 0.2], [0.3, 0.7]], dtype=torch.float32)
@@ -1524,12 +1523,9 @@ class TestLossesBranchCoverage:
         )
         assert torch.isfinite(loss)
 
-    def test_sparse_link_pred_loss_handles_filtered_none_and_normalization(
-        self, monkeypatch
-    ):
+    def test_sparse_link_pred_loss_accepts_column_edge_weight_and_normalizes(self):
         import tgp.utils.losses as losses
 
-        monkeypatch.setattr(losses, "check_and_filter_edge_weights", lambda _: None)
         edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
         edge_weight = torch.ones((2, 1), dtype=torch.float32)
         S = torch.tensor([[0.9, 0.1], [0.2, 0.8]], dtype=torch.float32)
@@ -1544,10 +1540,9 @@ class TestLossesBranchCoverage:
         )
         assert torch.isfinite(loss)
 
-    def test_sparse_totvar_loss_handles_filtered_none_edge_weight(self, monkeypatch):
+    def test_sparse_totvar_loss_accepts_column_edge_weight(self):
         import tgp.utils.losses as losses
 
-        monkeypatch.setattr(losses, "check_and_filter_edge_weights", lambda _: None)
         edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
         edge_weight = torch.ones((2, 1), dtype=torch.float32)
         S = torch.tensor([[0.7, 0.3], [0.4, 0.6]], dtype=torch.float32)
@@ -1558,10 +1553,9 @@ class TestLossesBranchCoverage:
         )
         assert torch.isfinite(loss)
 
-    def test_sparse_spectral_loss_handles_filtered_none_edge_weight(self, monkeypatch):
+    def test_sparse_spectral_loss_accepts_column_edge_weight(self):
         import tgp.utils.losses as losses
 
-        monkeypatch.setattr(losses, "check_and_filter_edge_weights", lambda _: None)
         edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
         edge_weight = torch.ones((2, 1), dtype=torch.float32)
         S = torch.tensor([[0.6, 0.4], [0.1, 0.9]], dtype=torch.float32)
@@ -1571,6 +1565,54 @@ class TestLossesBranchCoverage:
             edge_index, S, edge_weight=edge_weight, batch=batch
         )
         assert torch.isfinite(loss)
+
+    def test_sparse_ho_mincut_loss_sets_batch_when_none(self):
+        import tgp.utils.losses as losses
+
+        # Non-empty edges, batch=None triggers the internal batch fallback.
+        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+        S = torch.tensor([[0.8, 0.2], [0.3, 0.7]], dtype=torch.float32)
+        loss = losses.sparse_ho_mincut_loss(edge_index, S, edge_weight=None, batch=None)
+        assert torch.isfinite(loss)
+
+    def test_sparse_ho_mincut_loss_single_graph_empty_edges_returns_zero_scalar(self):
+        import tgp.utils.losses as losses
+
+        # Single graph fast-path with empty edge_index returns a scalar zero.
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        S = torch.tensor([[0.5, 0.5], [0.4, 0.6]], dtype=torch.float32)
+        out = losses.sparse_ho_mincut_loss(edge_index, S, edge_weight=None, batch=None)
+        assert out.shape == torch.Size([])
+        assert out.item() == 0.0
+
+    def test_sparse_ho_mincut_loss_multi_graph_no_edges_returns_zero_after_reduction(
+        self,
+    ):
+        import tgp.utils.losses as losses
+
+        # Multi-graph path with E==0 returns zeros reduced across batch.
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+        S = torch.tensor([[0.7, 0.3], [0.2, 0.8], [0.6, 0.4]], dtype=torch.float32)
+        batch = torch.tensor([0, 0, 1], dtype=torch.long)
+        out = losses.sparse_ho_mincut_loss(
+            edge_index, S, edge_weight=None, batch=batch, batch_reduction="mean"
+        )
+        assert out.shape == torch.Size([])
+        assert out.item() == 0.0
+
+    def test_sparse_ho_mincut_loss_multi_graph_handles_graph_with_no_edges(self):
+        import tgp.utils.losses as losses
+
+        # Two graphs: first has edges, second is an isolated node (no edges).
+        edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+        edge_weight = torch.ones((2,), dtype=torch.float32)
+        S = torch.tensor([[0.9, 0.1], [0.2, 0.8], [0.6, 0.4]], dtype=torch.float32)
+        batch = torch.tensor([0, 0, 1], dtype=torch.long)
+        out = losses.sparse_ho_mincut_loss(
+            edge_index, S, edge_weight=edge_weight, batch=batch, batch_reduction="mean"
+        )
+        assert torch.isfinite(out)
+        assert out.item() != 0.0
 
     def test_unbatched_hosc_orthogonality_loss_k_le_one_and_batch_none(self):
         import tgp.utils.losses as losses

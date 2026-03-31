@@ -175,10 +175,7 @@ def sparse_mincut_loss(
         edge_weight = torch.ones(edge_index.size(1), device=device)
     else:
         edge_weight = check_and_filter_edge_weights(edge_weight)
-        if edge_weight is None:
-            edge_weight = torch.ones(edge_index.size(1), device=device)
-        else:
-            edge_weight = edge_weight.view(-1)
+        edge_weight = edge_weight.view(-1)
 
     if batch is None:
         batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
@@ -215,6 +212,107 @@ def sparse_mincut_loss(
     # Compute loss: -num / den
     cut_loss = -(num_per_graph / (den_per_graph + eps))
 
+    return _batch_reduce_loss(cut_loss, batch_reduction)
+
+
+def sparse_ho_mincut_loss(
+    edge_index: Tensor,
+    S: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    batch: Optional[Tensor] = None,
+    batch_reduction: BatchReductionType = "mean",
+) -> Tensor:
+    r"""Sparse higher-order (motif) mincut loss for unbatched graph pooling.
+
+    Computes the same scalar as applying :func:`mincut_loss` to the dense motif
+    adjacency :math:`\mathbf{M} = \mathbf{A}^3`, **without** materializing
+    :math:`\mathbf{M}` or dense :math:`(N, N)` tensors.
+
+    For each graph :math:`g`, it computes:
+
+    .. math::
+        \mathcal{L}_\text{CUT}^{(g)} = -\frac{\mathrm{Tr}(\mathbf{S}_g^\top \mathbf{M}_g \mathbf{S}_g)}
+        {\mathrm{Tr}(\mathbf{S}_g^\top \mathbf{D}_g \mathbf{S}_g)},
+
+    where :math:`\mathbf{M}_g = \mathbf{A}_g^3` and
+    :math:`\mathbf{D}_g = \mathrm{diag}(\mathbf{M}_g \mathbf{1})`.
+
+    Implementation details:
+    - Numerator uses :math:`\mathrm{Tr}(S^\top M S) = \sum_{i,k} S_{ik} (MS)_{ik}`
+      with :math:`MS = A(A(AS))`.
+    - Denominator uses :math:`d = M \mathbf{1} = A(A(A\mathbf{1}))`.
+
+    This keeps memory closer to :math:`O(E + NK)` (plus sparse storage), though
+    runtime can still grow with graph density/3-hop walk proliferation.
+    """
+    num_nodes = S.size(0)
+    device = S.device
+    dtype = S.dtype
+
+    if edge_weight is None:
+        edge_weight = torch.ones(edge_index.size(1), device=device, dtype=dtype)
+    else:
+        edge_weight = check_and_filter_edge_weights(edge_weight)
+        edge_weight = edge_weight.view(-1)
+
+    if batch is None:
+        batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+    batch_size = int(batch.max().item()) + 1
+
+    # Fast path: single graph.
+    if batch_size == 1:
+        if edge_index.numel() == 0:
+            return torch.zeros((), device=device, dtype=dtype)
+
+        A = torch.sparse_coo_tensor(
+            edge_index, edge_weight, size=(num_nodes, num_nodes), device=device
+        ).coalesce()
+
+        # Z = M S = A (A (A S))
+        Z = torch.sparse.mm(A, S)
+        Z = torch.sparse.mm(A, Z)
+        Z = torch.sparse.mm(A, Z)
+        num = (S * Z).sum()
+
+        ones = torch.ones((num_nodes, 1), device=device, dtype=dtype)
+        d = torch.sparse.mm(A, ones)
+        d = torch.sparse.mm(A, d)
+        d = torch.sparse.mm(A, d)
+        d = d.view(-1)
+
+        den = (d * (S * S).sum(dim=-1)).sum()
+        return -(num / (den + eps))
+
+    # Multi-graph path: operate on the full (block-diagonal) sparse adjacency and
+    # reduce per-graph via `batch`.
+    if edge_index.numel() == 0:
+        out = torch.zeros((batch_size,), device=device, dtype=dtype)
+        return _batch_reduce_loss(out, batch_reduction)
+
+    A = torch.sparse_coo_tensor(
+        edge_index, edge_weight.to(dtype), size=(num_nodes, num_nodes), device=device
+    ).coalesce()
+
+    # Z = M S = A (A (A S))
+    Z = torch.sparse.mm(A, S)
+    Z = torch.sparse.mm(A, Z)
+    Z = torch.sparse.mm(A, Z)
+    num_per_node = (S * Z).sum(dim=-1)  # [N]
+    num_per_graph = scatter(
+        num_per_node, batch, dim=0, dim_size=batch_size, reduce="sum"
+    )
+
+    ones = torch.ones((num_nodes, 1), device=device, dtype=dtype)
+    d = torch.sparse.mm(A, ones)
+    d = torch.sparse.mm(A, d)
+    d = torch.sparse.mm(A, d)
+    d = d.view(-1)
+    den_per_node = d * (S * S).sum(dim=-1)
+    den_per_graph = scatter(
+        den_per_node, batch, dim=0, dim_size=batch_size, reduce="sum"
+    )
+
+    cut_loss = -(num_per_graph / (den_per_graph + eps))
     return _batch_reduce_loss(cut_loss, batch_reduction)
 
 
@@ -647,10 +745,7 @@ def sparse_link_pred_loss(
         edge_weight = torch.ones(edge_index.size(1), device=device, dtype=dtype)
     else:
         edge_weight = check_and_filter_edge_weights(edge_weight)
-        if edge_weight is None:
-            edge_weight = torch.ones(edge_index.size(1), device=device, dtype=dtype)
-        else:
-            edge_weight = edge_weight.view(-1).to(dtype)
+        edge_weight = edge_weight.view(-1).to(dtype)
 
     if batch is None:
         batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
@@ -798,10 +893,7 @@ def sparse_totvar_loss(
         edge_weight = torch.ones(edge_index.size(1), device=device)
     else:
         edge_weight = check_and_filter_edge_weights(edge_weight)
-        if edge_weight is None:
-            edge_weight = torch.ones(edge_index.size(1), device=device)
-        else:
-            edge_weight = edge_weight.view(-1)
+        edge_weight = edge_weight.view(-1)
 
     if batch is None:
         batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
@@ -1087,10 +1179,7 @@ def sparse_spectral_loss(
         edge_weight = torch.ones(edge_index.size(1), device=device)
     else:
         edge_weight = check_and_filter_edge_weights(edge_weight)
-        if edge_weight is None:
-            edge_weight = torch.ones(edge_index.size(1), device=device)
-        else:
-            edge_weight = edge_weight.view(-1)
+        edge_weight = edge_weight.view(-1)
 
     if batch is None:
         batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
