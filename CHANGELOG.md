@@ -1,3 +1,15 @@
+## v1.0.1
+
+- **HOSCPooling higher-order cut loss is now sparse**  
+  Replaces the dense motif-adjacency path (`A^3` via `to_dense_adj`) with
+  `sparse_ho_mincut_loss`, avoiding dense \((N, N)\) materialization and adding
+  coverage for empty-edge and mixed-edge batch cases.
+- **Connectivity helpers reject dense adjacencies**  
+  `connectivity_to_edge_index`, `connectivity_to_torch_coo`, and
+  `connectivity_to_sparsetensor` now raise clear `ValueError`s when given dense
+  adjacency matrices \((N, N)\) / \((B, N, N)\), with tests added.
+- **Minor fixes**
+
 ## v1.0
 This release summarizes the recent architectural refactor and behavioral updates.
 It focuses on public‑facing API/behavior, intended usage, and design trade‑offs.
