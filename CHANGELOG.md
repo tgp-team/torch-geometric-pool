@@ -1,3 +1,10 @@
+## v1.0.2
+
+- **HOSCPooling auxiliary loss computed on the postprocessed pooled adjacency**,
+  consistently in batched and unbatched paths; the unbatched path stays sparse.
+- **LaPoolSelect unbatched mode preserves edgeless graphs**, fixing dropped rows
+  in the assignment matrix `S`.
+
 ## v1.0.1
 
 - **HOSCPooling higher-order cut loss is now sparse**  
