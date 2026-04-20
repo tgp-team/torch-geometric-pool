@@ -7,9 +7,9 @@ from torch_geometric.typing import Adj
 from torch_geometric.utils import (
     get_laplacian,
     scatter,
+    subgraph,
     to_scipy_sparse_matrix,
     unbatch,
-    unbatch_edge_index,
 )
 from torch_scatter import scatter_mul
 
@@ -325,14 +325,24 @@ class LaPoolSelect(Select):
             )
             batch_size = int(batch.max().item()) + 1
             unbatched_x = unbatch(x, batch)
-            unbatched_ei = unbatch_edge_index(edge_index, batch)
+
+            # Build per-graph edge views explicitly to preserve graphs that have
+            # nodes but no edges. `unbatch_edge_index` may skip such graphs,
+            # which would silently truncate zip(...) and drop rows in S.
+            unbatched_ei = []
             unbatched_ew = []
             for b in range(batch_size):
-                mask = batch[edge_index[0]] == b
-                ew = edge_weight[mask] if edge_weight is not None else None
-                unbatched_ew.append(
-                    ew.squeeze(-1) if ew is not None and ew.dim() > 1 else ew
+                node_mask = batch == b
+                ei_b, ew_b = subgraph(
+                    subset=node_mask,
+                    edge_index=edge_index,
+                    edge_attr=edge_weight,
+                    relabel_nodes=True,
+                    num_nodes=x.size(0),
                 )
+                unbatched_ei.append(ei_b)
+                unbatched_ew.append(ew_b)
+
             s_list = [
                 self._forward_unbatched(
                     x=x_i,

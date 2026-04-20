@@ -129,6 +129,7 @@ def sparse_mincut_loss(
     edge_weight: Optional[Tensor] = None,
     batch: Optional[Tensor] = None,
     batch_reduction: BatchReductionType = "mean",
+    num_per_graph: Optional[Tensor] = None,
 ) -> Tensor:
     r"""Sparse auxiliary mincut loss for unbatched graph pooling.
 
@@ -164,6 +165,13 @@ def sparse_mincut_loss(
         batch_reduction (str, optional): Reduction method applied to the batch dimension.
             Can be ``'mean'`` or ``'sum'``.
             (default: ``"mean"``)
+        num_per_graph (~torch.Tensor, optional): Pre-computed numerator
+            :math:`\mathrm{Tr}(\mathbf{S}^{\top} \mathbf{A}_{\mathrm{pool}} \mathbf{S})`
+            per graph of shape :math:`(B,)`. If provided, it overrides the
+            edge-wise numerator computation, which lets callers feed a
+            postprocessed pooled adjacency while the denominator is still
+            derived from the raw ``edge_index`` / ``edge_weight``.
+            (default: :obj:`None`)
 
     Returns:
         ~torch.Tensor: The mincut loss.
@@ -196,18 +204,19 @@ def sparse_mincut_loss(
         den_per_node, batch, dim=0, dim_size=batch_size, reduce="sum"
     )
 
-    # Compute S^T A S per graph using sparse operations
-    # For each edge (i, j) with weight w_ij: contribution to S^T A S is w_ij * S_i^T * S_j
-    # Trace(S^T A S) = sum_{(i,j)} w_ij * (S_i . S_j)
-    src, dst = edge_index[0], edge_index[1]
-    S_src = S[src]  # [E, K]
-    S_dst = S[dst]  # [E, K]
-    edge_contribution = edge_weight * (S_src * S_dst).sum(dim=-1)  # [E]
+    if num_per_graph is None:
+        # Compute S^T A S per graph using sparse operations
+        # For each edge (i, j) with weight w_ij: contribution to S^T A S is w_ij * S_i^T * S_j
+        # Trace(S^T A S) = sum_{(i,j)} w_ij * (S_i . S_j)
+        src, dst = edge_index[0], edge_index[1]
+        S_src = S[src]  # [E, K]
+        S_dst = S[dst]  # [E, K]
+        edge_contribution = edge_weight * (S_src * S_dst).sum(dim=-1)  # [E]
 
-    edge_batch = batch[src]  # Batch assignment for each edge
-    num_per_graph = scatter(
-        edge_contribution, edge_batch, dim=0, dim_size=batch_size, reduce="sum"
-    )
+        edge_batch = batch[src]  # Batch assignment for each edge
+        num_per_graph = scatter(
+            edge_contribution, edge_batch, dim=0, dim_size=batch_size, reduce="sum"
+        )
 
     # Compute loss: -num / den
     cut_loss = -(num_per_graph / (den_per_graph + eps))

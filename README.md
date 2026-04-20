@@ -51,7 +51,7 @@ If you prefer a notebook-based introduction, check out the following tutorials:
 
 * [![nbviewer](https://img.shields.io/badge/-Advanced-blue?logo=jupyter&style=flat&labelColor=gray)](https://nbviewer.jupyter.org/github/tgp-team/torch-geometric-pool/blob/main/docs/source/tutorials/advanced.ipynb) Deep dive into the SRC framework, showing how each component interacts and how to use the select, reduce, connect and lift operations to modify the graph topology and the graph features.
 
-In addition, check the [example folder](https://github.com/tgp-team/torch-geometric-pool/tree/main/examples) for a collection of minimalistic python script showcasing the usage of the pooling operators of <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp in all the most common downstream tasks, such as graph classification/regression, node classification/regression, and node clustering.
+In addition, check the [example folder](https://github.com/tgp-team/torch-geometric-pool/tree/main/examples) for a collection of minimalistic python script showcasing the usage of the pooling operators of <img src="https://raw.githubusercontent.com/tgp-team/torch-geometric-pool/refs/heads/main/docs/source/_static/img/tgp-logo.svg" width="20px" align="center" style="display: inline-block; height: 1.0em; width: unset; vertical-align: text-top;"/> tgp in all the most common downstream tasks, such as graph classification, node classification, and node clustering.
 
 ## Installation
 

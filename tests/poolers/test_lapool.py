@@ -350,6 +350,45 @@ def test_lapool_select_unbatched_multi_graph_batch_path():
     assert torch.isfinite(s).all()
 
 
+def test_lapool_select_unbatched_multi_graph_with_edgeless_graph():
+    selector = LaPoolSelect(batched_representation=False)
+    x = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [0.5, 0.5],
+            [0.2, 0.8],
+            [0.8, 0.2],
+        ],
+        dtype=torch.float32,
+    )
+    # Graph 0: nodes 0,1 (has edges)
+    # Graph 1: nodes 2,3 (has edges)
+    # Graph 2: nodes 4,5 (no edges)
+    edge_index = torch.tensor(
+        [
+            [0, 1, 2, 3],
+            [1, 0, 3, 2],
+        ],
+        dtype=torch.long,
+    )
+    edge_weight = torch.ones(edge_index.size(1), dtype=torch.float32)
+    batch = torch.tensor([0, 0, 1, 1, 2, 2], dtype=torch.long)
+
+    s = selector._forward_unbatched(
+        x=x,
+        edge_index=edge_index,
+        edge_weight=edge_weight,
+        batch=batch,
+        num_nodes=x.size(0),
+    )
+    # Regression guard: no graph should be dropped from S rows.
+    assert s.size(0) == x.size(0)
+    assert s.size(1) >= 1
+    assert torch.isfinite(s).all()
+
+
 def test_lapool_select_repr():
     selector = LaPoolSelect(shortest_path_reg=True, s_inv_op="transpose")
     rep = repr(selector)

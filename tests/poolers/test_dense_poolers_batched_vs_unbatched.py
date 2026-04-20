@@ -14,16 +14,20 @@ from tgp.poolers import (
     MinCutPooling,
     get_pooler,
 )
+from tgp.select import SelectOutput
 
 # Dense poolers: those with compute_sparse_loss and batched=True support.
 # JustBalance has compute_sparse_loss(S, batch); others have (edge_index, edge_weight, S, batch).
+# `needs_pool` is True when compute_sparse_loss also needs the postprocessed
+# pooled adjacency (currently only HOSCPooling, since its first-order cut
+# numerator is read from adj_pool to match the batched path).
 DENSE_POOLER_CONFIGS = [
-    ("mincut", MinCutPooling, True),
-    ("acc", AsymCheegerCutPooling, True),
-    ("diff", DiffPool, True),
-    ("dmon", DMoNPooling, True),
-    ("hosc", HOSCPooling, True),
-    ("jb", JustBalancePooling, False),
+    ("mincut", MinCutPooling, True, False),
+    ("acc", AsymCheegerCutPooling, True, False),
+    ("diff", DiffPool, True, False),
+    ("dmon", DMoNPooling, True, False),
+    ("hosc", HOSCPooling, True, True),
+    ("jb", JustBalancePooling, False, False),
 ]
 
 
@@ -34,13 +38,14 @@ POOLING_OUTPUT_POOLER_NAMES = [c[0] for c in DENSE_POOLER_CONFIGS] + ["lap"]
 
 
 @pytest.mark.parametrize(
-    "pooler_name,pooler_cls,uses_adj_in_sparse_loss", DENSE_POOLER_CONFIGS
+    "pooler_name,pooler_cls,uses_adj_in_sparse_loss,needs_pool", DENSE_POOLER_CONFIGS
 )
 def test_dense_pooler_batched_vs_unbatched_loss_equality(
     pooler_test_graph_dense_batch,
     pooler_name,
     pooler_cls,
     uses_adj_in_sparse_loss,
+    needs_pool,
 ):
     """For each dense pooler, batched forward loss dict matches compute_sparse_loss."""
     x, adj = pooler_test_graph_dense_batch
@@ -53,7 +58,24 @@ def test_dense_pooler_batched_vs_unbatched_loss_equality(
     S = out.so.s
     edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(adj, S)
 
-    if uses_adj_in_sparse_loss:
+    if needs_pool:
+        # Build the postprocessed pooled adjacency the unbatched path produces,
+        # so the sparse loss matches the batched one (post-postprocess).
+        adj_pool, edge_weight_pool = pooler.connect(
+            edge_index=edge_index,
+            so=SelectOutput(s=S_flat),
+            edge_weight=edge_weight,
+            batch=batch,
+        )
+        loss_sparse = pooler.compute_sparse_loss(
+            edge_index,
+            edge_weight,
+            S_flat,
+            batch,
+            adj_pool=adj_pool,
+            edge_weight_pool=edge_weight_pool,
+        )
+    elif uses_adj_in_sparse_loss:
         loss_sparse = pooler.compute_sparse_loss(edge_index, edge_weight, S_flat, batch)
     else:
         loss_sparse = pooler.compute_sparse_loss(S_flat, batch)

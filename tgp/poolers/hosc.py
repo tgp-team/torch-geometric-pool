@@ -3,6 +3,7 @@ from typing import List, Optional, Union
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj
+from torch_geometric.utils import scatter
 
 from tgp.connect import DenseConnect
 from tgp.lift import BaseLift
@@ -215,7 +216,6 @@ class HOSCPooling(DenseSRCPooling):
             so = self.select(x=x, mask=mask)
             x_pooled, batch_pooled = self.reduce(x=x, so=so, batch=batch)
             adj_pool = self.connector.dense_connect(adj=adj, s=so.s)
-            loss = self.compute_loss(adj, so.s, adj_pool, mask)
             adj_pool = postprocess_adj_pool_dense(
                 adj_pool,
                 remove_self_loops=self.connector.remove_self_loops,
@@ -223,6 +223,7 @@ class HOSCPooling(DenseSRCPooling):
                 adj_transpose=self.connector.adj_transpose,
                 edge_weight_norm=self.connector.edge_weight_norm,
             )
+            loss = self.compute_loss(adj, so.s, adj_pool, mask)
             if self.sparse_output:
                 x_pooled, edge_index_pooled, edge_weight_pooled, batch_pooled = (
                     self._finalize_sparse_output(
@@ -245,7 +246,6 @@ class HOSCPooling(DenseSRCPooling):
 
         # === Unbatched (sparse-loss) path ===
         so = self.select(x=x, batch=batch)
-        loss = self.compute_sparse_loss(adj, edge_weight, so.s, batch)
         return_batched = not self.sparse_output
         x_pooled, batch_pooled = self.reduce(
             x=x, so=so, batch=batch, return_batched=return_batched
@@ -255,6 +255,15 @@ class HOSCPooling(DenseSRCPooling):
             so=so,
             edge_weight=edge_weight,
             batch=batch,
+            batch_pooled=batch_pooled,
+        )
+        loss = self.compute_sparse_loss(
+            adj,
+            edge_weight,
+            so.s,
+            batch,
+            adj_pool=edge_index_pooled,
+            edge_weight_pool=edge_weight_pooled,
             batch_pooled=batch_pooled,
         )
         return PoolingOutput(
@@ -319,18 +328,31 @@ class HOSCPooling(DenseSRCPooling):
         edge_weight: Optional[Tensor],
         S: Tensor,
         batch: Optional[Tensor],
+        adj_pool: Optional[Adj] = None,
+        edge_weight_pool: Optional[Tensor] = None,
+        batch_pooled: Optional[Tensor] = None,
     ) -> dict:
-        """Computes the auxiliary loss terms for unbatched (sparse) mode.
+        r"""Computes the auxiliary loss terms for unbatched (sparse) mode.
 
         This method is used when ``batched=False`` and operates on sparse
-        adjacency matrices. First-order cut uses sparse ops; higher-order (motif)
-        cut is computed per graph via dense adjacency when ``alpha`` > 0.
+        adjacency matrices.
 
         Args:
             edge_index (~torch_geometric.typing.Adj): Graph connectivity in sparse format.
             edge_weight (~torch.Tensor, optional): Edge weights of shape :math:`(E,)`.
             S (~torch.Tensor): The dense assignment matrix of shape :math:`(N, K)`.
             batch (~torch.Tensor, optional): Batch vector of shape :math:`(N,)`.
+            adj_pool (~torch_geometric.typing.Adj, optional): The postprocessed pooled
+                adjacency. When ``self.sparse_output=True``, an ``edge_index`` of
+                shape :math:`(2, E_\\text{pool})` over the block-diagonal supernode
+                graph. When ``self.sparse_output=False``, a dense tensor of shape
+                :math:`(B, K, K)`. Required when ``alpha < 1``.
+            edge_weight_pool (~torch.Tensor, optional): Edge weights of the
+                postprocessed pooled adjacency, of shape :math:`(E_\\text{pool},)`.
+                Required when ``self.sparse_output=True`` and ``alpha < 1``.
+            batch_pooled (~torch.Tensor, optional): Batch vector for the pooled
+                supernodes. Required when ``self.sparse_output=True``,
+                ``alpha < 1`` and the input contains multiple graphs.
 
         Returns:
             dict: A dictionary with ``'hosc_loss'`` and ``'ortho_loss'``.
@@ -342,13 +364,40 @@ class HOSCPooling(DenseSRCPooling):
         device = S.device
         if batch is None:
             batch = torch.zeros(num_nodes, dtype=torch.long, device=device)
+        batch_size = int(batch.max().item()) + 1
 
         cut_loss = torch.tensor(0.0, device=device, dtype=S.dtype)
         ho_cut_loss = torch.tensor(0.0, device=device, dtype=S.dtype)
 
         if self.alpha < 1:
+            if self.sparse_output:
+                # Sparse block-diagonal pooled adj: Tr per graph =
+                # sum of self-loop weights, scattered over `batch_pooled`.
+                src, dst = adj_pool[0], adj_pool[1]
+                loop_mask = src == dst
+                contrib = edge_weight_pool.view(-1) * loop_mask.to(
+                    edge_weight_pool.dtype
+                )
+                if batch_pooled is None:
+                    edge_batch = torch.zeros(
+                        src.numel(), dtype=torch.long, device=device
+                    )
+                else:
+                    edge_batch = batch_pooled[src]
+                num_per_graph = scatter(
+                    contrib, edge_batch, dim=0, dim_size=batch_size, reduce="sum"
+                )
+            else:
+                # Dense [B, K, K] pooled adj: Tr per graph = sum of diagonals.
+                num_per_graph = torch.diagonal(adj_pool, dim1=-2, dim2=-1).sum(dim=-1)
+
             cut_loss = sparse_mincut_loss(
-                edge_index_conv, S, edge_weight_conv, batch, batch_reduction="mean"
+                edge_index_conv,
+                S,
+                edge_weight_conv,
+                batch,
+                batch_reduction="mean",
+                num_per_graph=num_per_graph,
             )
             cut_loss = cut_loss / self.k
 

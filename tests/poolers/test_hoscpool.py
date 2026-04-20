@@ -159,6 +159,32 @@ def test_hosc_unbatched_sparse_output():
     )
 
 
+def test_hosc_unbatched_sparse_output_single_graph_no_batch():
+    """Covers the ``batch_pooled is None`` branch in ``compute_sparse_loss``
+    for the unbatched sparse-output path on a single graph (``batch=None``).
+    """
+    torch.manual_seed(0)
+    n_features = 8
+    k = 3
+
+    x = torch.randn(10, n_features)
+    edge_index = torch.randint(0, 10, (2, 20))
+
+    pooler = HOSCPooling(
+        in_channels=n_features,
+        k=k,
+        batched=False,
+        sparse_output=True,
+        alpha=0.5,
+    )
+    out = pooler(x=x, adj=edge_index, batch=None)
+
+    assert out.batch is None
+    assert out.edge_index.dim() == 2 and out.edge_index.shape[0] == 2
+    assert torch.isfinite(out.loss["hosc_loss"])
+    assert torch.isfinite(out.loss["ortho_loss"])
+
+
 @pytest.mark.parametrize("train_mode", [True, False])
 def test_hosc_training_mode(pooler_test_graph_dense_batch, train_mode):
     """Test HOSCPooling gradient computation."""
@@ -235,6 +261,7 @@ def test_hosc_compute_sparse_loss_alpha_extremes_and_ortho_branches():
     edge_index, edge_weight, s = _toy_sparse_hosc_inputs()
 
     # alpha=1 -> skip sparse first-order cut, use higher-order path; mu=0 -> zero ortho.
+    # adj_pool is unused because the cut path is gated out.
     pooler_alpha1_mu0 = HOSCPooling(
         in_channels=s.size(-1), k=s.size(-1), alpha=1.0, mu=0.0, hosc_ortho=False
     )
@@ -251,11 +278,26 @@ def test_hosc_compute_sparse_loss_alpha_extremes_and_ortho_branches():
     pooler_alpha0_hosc_ortho = HOSCPooling(
         in_channels=s.size(-1), k=s.size(-1), alpha=0.0, mu=0.4, hosc_ortho=True
     )
+    # Build a postprocessed dense [B=1, K, K] adj_pool consistent with the
+    # unbatched connect path (adj_transpose=False).
+    adj_dense = torch.zeros(s.size(0), s.size(0), dtype=s.dtype)
+    adj_dense[edge_index[0], edge_index[1]] = edge_weight
+    raw_adj_pool = (s.t() @ adj_dense @ s).unsqueeze(0)
+    from tgp.utils.ops import postprocess_adj_pool_dense
+
+    adj_pool = postprocess_adj_pool_dense(
+        raw_adj_pool,
+        remove_self_loops=pooler_alpha0_hosc_ortho.connector.remove_self_loops,
+        degree_norm=pooler_alpha0_hosc_ortho.connector.degree_norm,
+        adj_transpose=False,
+        edge_weight_norm=pooler_alpha0_hosc_ortho.connector.edge_weight_norm,
+    )
     loss_alpha0_hosc_ortho = pooler_alpha0_hosc_ortho.compute_sparse_loss(
         edge_index=edge_index,
         edge_weight=edge_weight,
         S=s,
         batch=None,
+        adj_pool=adj_pool,
     )
     assert set(loss_alpha0_hosc_ortho.keys()) == {"hosc_loss", "ortho_loss"}
     assert torch.isfinite(loss_alpha0_hosc_ortho["hosc_loss"])
@@ -265,6 +307,7 @@ def test_hosc_compute_sparse_loss_alpha_extremes_and_ortho_branches():
 def test_hosc_batched_vs_unbatched_loss_equality(pooler_test_graph_dense_batch):
     """Batched forward loss dict matches compute_sparse_loss on same data."""
     from tests.test_utils import _dense_batched_to_sparse_unbatched
+    from tgp.select import SelectOutput
 
     x, adj = pooler_test_graph_dense_batch
     n_features = x.shape[-1]
@@ -273,7 +316,23 @@ def test_hosc_batched_vs_unbatched_loss_equality(pooler_test_graph_dense_batch):
     out = pooler(x=x, adj=adj)
     S = out.so.s
     edge_index, edge_weight, S_flat, batch = _dense_batched_to_sparse_unbatched(adj, S)
-    loss_sparse = pooler.compute_sparse_loss(edge_index, edge_weight, S_flat, batch)
+    # Run the unbatched connect to produce the postprocessed pooled adjacency
+    # the unbatched compute_sparse_loss expects.
+    so_flat = SelectOutput(s=S_flat)
+    adj_pool, edge_weight_pool = pooler.connect(
+        edge_index=edge_index,
+        so=so_flat,
+        edge_weight=edge_weight,
+        batch=batch,
+    )
+    loss_sparse = pooler.compute_sparse_loss(
+        edge_index,
+        edge_weight,
+        S_flat,
+        batch,
+        adj_pool=adj_pool,
+        edge_weight_pool=edge_weight_pool,
+    )
     for key in out.loss:
         assert key in loss_sparse
         assert torch.allclose(out.loss[key], loss_sparse[key], rtol=1e-5, atol=1e-5)

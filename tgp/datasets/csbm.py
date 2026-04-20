@@ -225,7 +225,7 @@ def _build_data_object(
 
 
 class CSBMDataset(InMemoryDataset):
-    """Community SBM dataset for graph classification tasks in PyG format.
+    """Contextual SBM dataset for graph classification tasks in PyG format.
 
     Args:
         root (str): Root directory for the dataset.
