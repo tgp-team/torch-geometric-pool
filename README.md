@@ -116,10 +116,10 @@ Thanks to all contributors 🤝
 If you use Torch Geometric Pool for your research, please consider citing the paper:
 
 ```bibtex
-@misc{bianchi2025torchgeometricpoolpytorch,
-      title={Torch Geometric Pool: the Pytorch library for pooling in Graph Neural Networks}, 
-      author={Filippo Maria Bianchi and Carlo Abate and Ivan Marisca},
-      year={2025},
+@misc{abate2026torchgeometricpoolpytorch,
+      title={Torch Geometric Pool: the PyTorch library for pooling in Graph Neural Networks}, 
+      author={Carlo Abate and Ivan Marisca and Filippo Maria Bianchi},
+      year={2026},
       eprint={2512.12642},
       archivePrefix={arXiv},
       primaryClass={cs.LG},
