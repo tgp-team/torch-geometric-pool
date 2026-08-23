@@ -421,7 +421,6 @@ class SelectOutput:
             AssertionError: If ``max_iter <= 0`` for ``"closest_node"`` strategy.
             ValueError: If :obj:`weight` size doesn't match the number of nodes.
             ValueError: If ``adj`` has an invalid type.
-            ValueError: If ``strategy`` is not recognized.
 
         Example:
             >>> # Convert sparse top-k selection to full assignment
