@@ -53,11 +53,9 @@ class IdentitySelect(Select):
         device = device if device is not None else get_device(edge_index=edge_index)
 
         # Create identity matrix: each node maps to itself
-        node_index = torch.arange(num_nodes, device=device)
         cluster_index = torch.arange(num_nodes, device=device)
 
         return SelectOutput(
-            node_index=node_index,
             num_nodes=num_nodes,
             cluster_index=cluster_index,
             num_supernodes=num_nodes,

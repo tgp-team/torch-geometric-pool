@@ -23,6 +23,132 @@ def test_cluster_to_s_as_edge_index():
     assert torch.equal(ret_weight, weight)
 
 
+@pytest.mark.parametrize("missing", ["node_index", "cluster_index"])
+def test_selectoutput_default_indices_preserve_assignments(missing):
+    if missing == "cluster_index":
+        node_index = torch.tensor([3, 4, 1])
+        cluster_index = torch.arange(3)
+    else:
+        node_index = torch.arange(3)
+        cluster_index = torch.tensor([2, 0, 2])
+    weight = torch.tensor([0.8, 0.5, 0.2])
+    kwargs = dict(
+        node_index=node_index,
+        cluster_index=cluster_index,
+        num_nodes=6,
+        num_supernodes=4,
+        weight=weight,
+    )
+    explicit = SelectOutput(**kwargs)
+    del kwargs[missing]
+    implicit = SelectOutput(**kwargs)
+
+    expected = torch.zeros(6, 4)
+    expected[node_index, cluster_index] = weight
+    for out in [explicit, implicit]:
+        torch.testing.assert_close(out.s.to_dense(), expected)
+        torch.testing.assert_close(out.s_inv.to_dense(), expected.t())
+    assert torch.equal(implicit.node_index, explicit.node_index)
+    assert torch.equal(implicit.cluster_index, explicit.cluster_index)
+    assert torch.equal(implicit.weight, explicit.weight)
+
+
+@pytest.mark.parametrize(
+    "nodes,clusters,shape",
+    [
+        ([4, 1], None, (5, 2)),
+        (None, [2, 0, 2], (3, 3)),
+        ([4, 1], [3, 1], (5, 4)),
+        ([], None, (0, 0)),
+        (None, [], (0, 0)),
+        ([], [], (0, 0)),
+    ],
+)
+def test_selectoutput_infers_dimensions_from_indices(nodes, clusters, shape):
+    out = SelectOutput(
+        node_index=None if nodes is None else torch.tensor(nodes, dtype=torch.long),
+        cluster_index=(
+            None if clusters is None else torch.tensor(clusters, dtype=torch.long)
+        ),
+    )
+    assert out.s.shape == shape
+    assert out.s_inv.shape == shape[::-1]
+    assert torch.equal(out.weight, torch.ones(out.weight.numel()))
+
+
+@pytest.mark.parametrize("index_name", ["node_index", "cluster_index"])
+def test_selectoutput_empty_indices_preserve_explicit_dimensions(index_name):
+    out = SelectOutput(
+        **{index_name: torch.empty(0, dtype=torch.long)},
+        num_nodes=5,
+        num_supernodes=3,
+    )
+    assert out.s.shape == (5, 3)
+    assert out.s_inv.shape == (3, 5)
+    assert out.node_index.numel() == out.cluster_index.numel() == 0
+    torch.testing.assert_close(out.s.to_dense(), torch.zeros(5, 3))
+
+
+@pytest.mark.parametrize("index_name", ["node_index", "cluster_index"])
+def test_cluster_to_s_edge_index_defaults_preserve_input_order(index_name):
+    supplied = torch.tensor([3, 4, 1])
+    weight = torch.tensor([0.8, 0.5, 0.2])
+    indices, values = cluster_to_s(
+        **{index_name: supplied}, weight=weight, as_edge_index=True
+    )
+    supplied_row = 0 if index_name == "node_index" else 1
+    assert torch.equal(indices[supplied_row], supplied)
+    assert torch.equal(indices[1 - supplied_row], torch.arange(3))
+    assert torch.equal(values, weight)
+
+
+@pytest.mark.parametrize("constructor", [SelectOutput, cluster_to_s])
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({}, "At least one"),
+        (
+            {"node_index": torch.tensor([0, 1]), "cluster_index": torch.tensor([0])},
+            "same length",
+        ),
+        ({"node_index": torch.tensor([[0, 1]])}, "one-dimensional"),
+        ({"cluster_index": torch.tensor([[0, 1]])}, "one-dimensional"),
+        (
+            {"node_index": torch.tensor([0, 1]), "weight": torch.ones(1)},
+            "weight must have the same length",
+        ),
+    ],
+)
+def test_sparse_assignment_rejects_invalid_vectors(constructor, kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        constructor(**kwargs)
+
+
+def test_selectoutput_defaults_survive_batching_and_separation():
+    selections = [
+        SelectOutput(
+            node_index=torch.tensor([3, 1]),
+            weight=torch.tensor([0.8, 0.2]),
+            num_nodes=5,
+        ),
+        SelectOutput(
+            cluster_index=torch.tensor([1, 0, 1]),
+            weight=torch.tensor([0.4, 0.5, 0.6]),
+        ),
+    ]
+    batch = PooledBatch.from_data_list(
+        [Data(so=so, num_nodes=so.num_nodes) for so in selections]
+    )
+    expected = torch.block_diag(*(so.s.to_dense() for so in selections))
+    torch.testing.assert_close(batch.so.s.to_dense(), expected)
+    torch.testing.assert_close(batch.so.s_inv.to_dense(), expected.t())
+    for i, so in enumerate(selections):
+        restored = batch.get_example(i).so
+        assert torch.equal(restored.node_index, so.node_index)
+        assert torch.equal(restored.cluster_index, so.cluster_index)
+        torch.testing.assert_close(restored.weight, so.weight)
+
+
 def test_selectoutput_from_cluster_index_and_default_s_inv():
     num_nodes = 3
     num_supernodes = 2

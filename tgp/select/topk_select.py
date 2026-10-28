@@ -196,7 +196,6 @@ class TopkSelect(Select):
         return SelectOutput(
             node_index=node_index,
             num_nodes=x.size(0),
-            cluster_index=torch.arange(node_index.size(0), device=x.device),
             num_supernodes=node_index.size(0),
             weight=score[node_index],
             s_inv_op=self.s_inv_op,

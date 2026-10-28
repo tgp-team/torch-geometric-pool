@@ -9,6 +9,7 @@ from torch_geometric.typing import Adj
 
 from tgp.imports import is_sparsetensor
 from tgp.utils.ops import (
+    _prepare_assignment_indices,
     connectivity_to_edge_index,
     get_assignments,
     get_mask_from_dense_s,
@@ -17,20 +18,26 @@ from tgp.utils.ops import (
 
 
 def cluster_to_s(
-    cluster_index: Tensor,
+    cluster_index: Optional[Tensor] = None,
     node_index: Optional[Tensor] = None,
     weight: Optional[Tensor] = None,
     as_edge_index: bool = False,
     num_nodes: Optional[int] = None,
     num_supernodes: Optional[int] = None,
 ):
-    r"""Converts a cluster assignment vector to a sparse assignment matrix.
+    r"""Converts paired node and cluster indices to a sparse assignment matrix.
+
+    Each pair maps ``node_index[i]`` to ``cluster_index[i]``. If either vector
+    is omitted, consecutive indices are generated in the supplied vector's
+    order, before sorting the sparse assignment entries.
 
     Args:
-        cluster_index (~torch.Tensor):
-            The cluster indices.
+        cluster_index (~torch.Tensor, optional):
+            The pooled node indices. Defaults to consecutive indices in
+            ``node_index`` order. At least one index vector must be provided.
         node_index (~torch.Tensor, optional):
-            The node indices. (default: :obj:`None`)
+            The original node indices. Defaults to consecutive indices in
+            ``cluster_index`` order.
         weight (~torch.Tensor, optional):
             A weight vector, denoting the membership of a node to
             each cluster. (default: :obj:`None`)
@@ -38,23 +45,28 @@ def cluster_to_s(
             If set to :obj:`True`, will return the edge indices of the assignment matrix.
             (default: :obj:`False`)
         num_nodes (int, optional):
-            The number of nodes. (default: :obj:`None`)
+            The number of original nodes. Inferred as the largest node index
+            plus one, or zero for an empty selection. Provide this explicitly
+            to retain trailing unselected or isolated nodes.
         num_supernodes (int, optional):
-            The number of clusters. (default: :obj:`None`)
+            The number of pooled nodes. Inferred as the largest cluster index
+            plus one, or zero for an empty selection.
+
+    Raises:
+        ValueError: If both index vectors are missing, they are not vectors,
+            or the numbers of indices and assignment weights do not match.
     """
+    node_index, cluster_index, num_supernodes = _prepare_assignment_indices(
+        node_index, cluster_index, num_supernodes
+    )
+    if weight is not None and weight.size(0) != node_index.numel():
+        raise ValueError("weight must have the same length as the index vectors.")
     if num_nodes is None:
-        num_nodes = cluster_index.size(0)
-    if num_supernodes is None:
-        num_supernodes = int(cluster_index.max().item()) + 1
-    if node_index is None:
-        node_index = torch.arange(
-            num_nodes, dtype=torch.long, device=cluster_index.device
-        )
+        num_nodes = int(node_index.max()) + 1 if node_index.numel() else 0
     if as_edge_index:
         return torch.stack([node_index, cluster_index], dim=0), weight
     else:
-        # Sort indices for compatibility with subgraph operation in sparse_connect
-        # which requires sorted node indices for proper edge relabeling
+        # Sort sparse rows while preserving pooled node IDs and their weights.
         node_index, perm = torch.sort(node_index)
         cluster_index = cluster_index[perm]
         indices = torch.stack([node_index, cluster_index], dim=0)
@@ -78,14 +90,22 @@ class SelectOutput:
     from selected nodes to their respective cluster(s).
 
     Args:
-        node_index (~torch.Tensor):
-            The indices of the selected nodes.
-        num_nodes (int):
-            The number of nodes.
-        cluster_index (~torch.Tensor):
-            The indices of the clusters each node in :obj:`node_index` is assigned to.
-        num_supernodes (int):
-            The number of clusters.
+        node_index (~torch.Tensor, optional):
+            The indices of the selected original nodes. If omitted when building
+            a sparse assignment, defaults to consecutive indices in
+            ``cluster_index`` order.
+        num_nodes (int, optional):
+            The number of original nodes. For index-based construction, inferred
+            from the largest node index plus one (zero for empty indices).
+            Provide explicitly to retain trailing unselected or isolated nodes.
+        cluster_index (~torch.Tensor, optional):
+            The pooled node ID corresponding to each entry in ``node_index``.
+            If omitted, defaults to consecutive IDs in the supplied
+            ``node_index`` order, before sorting. Without ``s``, at least one
+            index vector must be provided.
+        num_supernodes (int, optional):
+            The number of pooled nodes. For index-based construction, inferred
+            from the largest cluster index plus one (zero for empty indices).
         weight (~torch.Tensor, optional):
             A weight vector, denoting the membership of a node to
             each cluster. (default: :obj:`None`)
@@ -154,10 +174,6 @@ class SelectOutput:
                 )
                 assert weight is None, "'weight' cannot be set if 's' is a dense Tensor"
         elif s is None:  # Make sparse assignment from other data
-            assert cluster_index is not None, (
-                "'cluster_index' cannot be None if 's' is None"
-            )
-
             s = cluster_to_s(
                 cluster_index,
                 node_index=node_index,
@@ -168,8 +184,8 @@ class SelectOutput:
         else:
             raise ValueError(
                 "Either a sparse or dense assignment matrix is provided "
-                "through 's' or a cluster assignment vector must be "
-                "provided thorough 'cluster_index'."
+                "through 's' or node/cluster indices must be "
+                "provided through 'node_index' or 'cluster_index'."
             )
 
         self.s = s

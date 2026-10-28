@@ -229,7 +229,6 @@ class EdgeContractionSelect(Select):
         new_edge_score[cluster[edge_index[0, match]]] = e[match]
 
         so = SelectOutput(
-            node_index=torch.arange(x.size(0), device=x.device),
             num_nodes=x.size(0),
             cluster_index=cluster,
             num_supernodes=c,

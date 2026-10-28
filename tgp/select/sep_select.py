@@ -334,7 +334,6 @@ def _make_select_output(
         num_supernodes += int(missing.numel())
 
     return SelectOutput(
-        node_index=torch.arange(assignment.numel(), device=assignment.device),
         num_nodes=int(assignment.numel()),
         cluster_index=assignment,
         num_supernodes=int(num_supernodes),
@@ -346,7 +345,6 @@ def _empty_select_output(device: torch.device, s_inv_op: SinvType) -> SelectOutp
     """Build an empty :class:`SelectOutput`."""
     empty = torch.empty(0, dtype=torch.long, device=device)
     return SelectOutput(
-        node_index=empty,
         num_nodes=0,
         cluster_index=empty,
         num_supernodes=0,
