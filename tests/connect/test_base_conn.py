@@ -42,6 +42,35 @@ def _dense_connectivity(adj, weight, num_nodes):
     ).to_dense()
 
 
+@pytest.mark.parametrize(
+    "nodes,clusters",
+    [
+        ([3, 4, 1], None),
+        (None, [0, 1, 0, 2, 1]),
+        ([4, 1, 3], [1, 2, 0]),
+    ],
+    ids=["node_only", "cluster_only", "paired"],
+)
+def test_sparse_connect_direct_matches_select_output(nodes, clusters):
+    edge_index = torch.tensor([[4, 1, 4, 0, 3, 3], [1, 4, 1, 4, 3, 1]])
+    edge_weight = torch.tensor([2.0, 3.0, 5.0, 11.0, 7.0, 13.0])
+    kwargs = dict(
+        node_index=None if nodes is None else torch.tensor(nodes),
+        cluster_index=None if clusters is None else torch.tensor(clusters),
+        num_nodes=5,
+    )
+
+    direct_edges, direct_weights = sparse_connect(edge_index, edge_weight, **kwargs)
+    so = SelectOutput(**kwargs)
+    wrapped_edges, wrapped_weights = SparseConnect()(
+        edge_index, so, edge_weight=edge_weight
+    )
+
+    # SelectOutput sorts sparse rows; that must not change pooled node IDs or edges.
+    assert torch.equal(direct_edges, wrapped_edges)
+    torch.testing.assert_close(direct_weights, wrapped_weights)
+
+
 @pytest.mark.parametrize("fmt", CONNECTIVITY_FORMATS)
 @pytest.mark.parametrize("remove_self_loops", [False, True])
 @pytest.mark.parametrize(

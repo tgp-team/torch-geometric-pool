@@ -82,6 +82,38 @@ def dense_to_block_diag(adj_pool: Tensor) -> Tuple[Tensor, Tensor]:
     return edge_index, edge_weight
 
 
+def _prepare_assignment_indices(
+    node_index: Optional[Tensor],
+    cluster_index: Optional[Tensor],
+    num_supernodes: Optional[int] = None,
+) -> Tuple[Tensor, Tensor, int]:
+    """Fill missing assignment indices and validate their shared shape contract.
+
+    Supplied vectors keep their order and are returned without copying. A
+    missing vector becomes consecutive indices on the supplied vector's device.
+    The pooled-node count is inferred only when it is not provided.
+    """
+    if node_index is None and cluster_index is None:
+        raise ValueError(
+            "At least one of node_index and cluster_index must be provided."
+        )
+    if node_index is None:
+        node_index = torch.arange(
+            cluster_index.numel(), dtype=torch.long, device=cluster_index.device
+        )
+    if cluster_index is None:
+        cluster_index = torch.arange(
+            node_index.numel(), dtype=torch.long, device=node_index.device
+        )
+    if node_index.dim() != 1 or cluster_index.dim() != 1:
+        raise ValueError("node_index and cluster_index must be one-dimensional.")
+    if node_index.numel() != cluster_index.numel():
+        raise ValueError("node_index and cluster_index must have the same length.")
+    if num_supernodes is None:
+        num_supernodes = int(cluster_index.max()) + 1 if cluster_index.numel() else 0
+    return node_index, cluster_index, num_supernodes
+
+
 def get_mask_from_dense_s(
     s: Tensor,
     batch: Optional[Tensor] = None,

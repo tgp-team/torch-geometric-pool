@@ -9,6 +9,7 @@ from torch_geometric.typing import Adj
 
 from tgp.imports import is_sparsetensor
 from tgp.utils.ops import (
+    _prepare_assignment_indices,
     connectivity_to_edge_index,
     get_assignments,
     get_mask_from_dense_s,
@@ -55,28 +56,13 @@ def cluster_to_s(
         ValueError: If both index vectors are missing, they are not vectors,
             or the numbers of indices and assignment weights do not match.
     """
-    if node_index is None and cluster_index is None:
-        raise ValueError(
-            "At least one of node_index and cluster_index must be provided."
-        )
-    if node_index is None:
-        node_index = torch.arange(
-            cluster_index.numel(), dtype=torch.long, device=cluster_index.device
-        )
-    if cluster_index is None:
-        cluster_index = torch.arange(
-            node_index.numel(), dtype=torch.long, device=node_index.device
-        )
-    if node_index.dim() != 1 or cluster_index.dim() != 1:
-        raise ValueError("node_index and cluster_index must be one-dimensional.")
-    if node_index.numel() != cluster_index.numel():
-        raise ValueError("node_index and cluster_index must have the same length.")
+    node_index, cluster_index, num_supernodes = _prepare_assignment_indices(
+        node_index, cluster_index, num_supernodes
+    )
     if weight is not None and weight.size(0) != node_index.numel():
         raise ValueError("weight must have the same length as the index vectors.")
     if num_nodes is None:
         num_nodes = int(node_index.max()) + 1 if node_index.numel() else 0
-    if num_supernodes is None:
-        num_supernodes = int(cluster_index.max()) + 1 if cluster_index.numel() else 0
     if as_edge_index:
         return torch.stack([node_index, cluster_index], dim=0), weight
     else:

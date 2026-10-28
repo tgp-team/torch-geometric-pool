@@ -14,6 +14,7 @@ from tgp.utils import (
     connectivity_to_torch_coo,
     postprocess_adj_pool_sparse,
 )
+from tgp.utils.ops import _prepare_assignment_indices
 from tgp.utils.typing import ConnectionType
 
 
@@ -107,22 +108,15 @@ def sparse_connect(
         raise RuntimeError(
             "At least one of node_index and cluster_index must be provided."
         )
-    if node_index is None:
-        if cluster_index.numel() != num_nodes:
-            raise ValueError(
-                "cluster_index must contain num_nodes entries when node_index is omitted."
-            )
-        node_index = torch.arange(num_nodes, device=cluster_index.device)
-    if cluster_index is None:
-        cluster_index = torch.arange(node_index.numel(), device=node_index.device)
-    if node_index.dim() != 1 or cluster_index.dim() != 1:
-        raise ValueError("node_index and cluster_index must be one-dimensional.")
-    if node_index.numel() != cluster_index.numel():
-        raise ValueError("node_index and cluster_index must have the same length.")
+    if node_index is None and cluster_index.numel() != num_nodes:
+        raise ValueError(
+            "cluster_index must contain num_nodes entries when node_index is omitted."
+        )
+    node_index, cluster_index, num_supernodes = _prepare_assignment_indices(
+        node_index, cluster_index, num_supernodes
+    )
     if node_index.numel() > num_nodes:
         raise ValueError("node_index cannot contain more than num_nodes entries.")
-    if num_supernodes is None:
-        num_supernodes = int(cluster_index.max()) + 1 if cluster_index.numel() else 0
 
     node_to_cluster = edge_index.new_full((num_nodes,), -1)
     node_to_cluster[node_index] = cluster_index
