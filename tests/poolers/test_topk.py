@@ -8,6 +8,90 @@ from tgp.select.topk_select import TopkSelect
 from tgp.src import PoolingOutput
 
 
+def test_topk_edges_follow_pooled_feature_order():
+    x = torch.tensor([[0.0], [8.0], [0.0], [10.0], [9.0]])
+    edge_index = torch.tensor([[1, 4], [4, 1]])
+    pooler = TopkPooling(in_channels=1, ratio=0.6, nonlinearity="linear")
+
+    out = pooler(x=x, adj=edge_index)
+
+    assert torch.equal(out.so.node_index, torch.tensor([1, 3, 4]))
+    assert torch.equal(out.so.cluster_index, torch.tensor([2, 0, 1]))
+    torch.testing.assert_close(out.x, torch.tensor([[100.0], [81.0], [64.0]]))
+    assert torch.equal(out.edge_index, torch.tensor([[2, 1], [1, 2]]))
+    assert out.edge_weight is None
+
+
+@pytest.mark.parametrize("ratio", [0.6, 5])
+def test_topk_batched_edges_and_features_match_selected_nodes(ratio):
+    scores = torch.tensor([0.1, 0.8, 0.2, 1.0, 0.9, 0.7, 0.1, 0.9, 0.2, 0.8])
+    x = torch.arange(20.0).view(10, 2)
+    batch = torch.arange(10) // 5
+    edges = torch.tensor([[1, 4, 3, 4, 5, 7, 7, 9], [4, 1, 4, 3, 7, 5, 9, 7]])
+    weights = torch.arange(2.0, 10.0)
+    pooler = TopkPooling(in_channels=1, ratio=ratio, nonlinearity="linear")
+
+    out = pooler(x=x, adj=edges, edge_weight=weights, batch=batch, attn=scores)
+
+    selected = (
+        torch.tensor([3, 4, 1, 7, 9, 5])
+        if ratio == 0.6
+        else torch.tensor([3, 4, 1, 2, 0, 7, 9, 5, 8, 6])
+    )
+    torch.testing.assert_close(out.x, x[selected] * scores[selected, None])
+    assert torch.equal(out.batch, batch[selected])
+    adjacency = torch.sparse_coo_tensor(edges, weights, (10, 10)).to_dense()
+    actual = torch.sparse_coo_tensor(
+        out.edge_index, out.edge_weight, (selected.numel(), selected.numel())
+    ).to_dense()
+    torch.testing.assert_close(actual, adjacency[selected][:, selected])
+    assert torch.equal(out.batch[out.edge_index[0]], out.batch[out.edge_index[1]])
+
+
+def test_topk_preserves_parallel_edges_gradients_and_lifting():
+    x = torch.arange(10.0, dtype=torch.double).view(5, 2).requires_grad_()
+    scores = torch.tensor(
+        [0.1, 0.8, 0.2, 1.0, 0.9], dtype=torch.double, requires_grad=True
+    )
+    weights = torch.tensor(
+        [2.0, 3.0, 5.0, 7.0, 11.0], dtype=torch.double, requires_grad=True
+    )
+    edges = torch.tensor([[1, 4, 3, 0, 4], [4, 1, 4, 1, 1]])
+    pooler = TopkPooling(
+        in_channels=1, ratio=0.6, nonlinearity="linear", multiplier=1.7
+    )
+
+    out = pooler(x=x, adj=edges, edge_weight=weights, attn=scores)
+    selected = torch.tensor([3, 4, 1])
+    expected_x = 1.7 * x[selected] * scores[selected, None]
+    expected_edges = torch.tensor([[2, 1, 0, 1], [1, 2, 1, 2]])
+    expected_weights = weights[torch.tensor([0, 1, 2, 4])]
+    assert torch.equal(out.edge_index, expected_edges)
+    torch.testing.assert_close(out.x, expected_x)
+    torch.testing.assert_close(out.edge_weight, expected_weights)
+
+    loss = (
+        out.x.square().sum()
+        + (out.x[out.edge_index[0]] * out.edge_weight[:, None]).square().sum()
+    )
+    reference_loss = (
+        expected_x.square().sum()
+        + (expected_x[expected_edges[0]] * expected_weights[:, None]).square().sum()
+    )
+    actual_grad = torch.autograd.grad(loss, (x, scores, weights), retain_graph=True)
+    expected_grad = torch.autograd.grad(reference_loss, (x, scores, weights))
+    for actual, expected in zip(actual_grad, expected_grad):
+        torch.testing.assert_close(actual, expected)
+    assert (
+        actual_grad[2][3] == 0
+    )  # The edge touching a dropped node contributes nothing.
+
+    lifted = pooler(x=out.x, so=out.so, lifting=True)
+    expected_lifted = torch.zeros_like(x)
+    expected_lifted[selected] = expected_x * scores[selected, None]
+    torch.testing.assert_close(lifted, expected_lifted)
+
+
 @pytest.mark.parametrize(
     "ratio,min_score",
     [

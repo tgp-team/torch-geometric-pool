@@ -8,6 +8,254 @@ import torch
 
 from tgp.connect import Connect, SparseConnect, sparse_connect
 from tgp.select import SelectOutput
+from tgp.utils import connectivity_to_edge_index
+
+CONNECTIVITY_FORMATS = [
+    "edge_index",
+    "torch_coo",
+    pytest.param("torch_sparse", marks=pytest.mark.torch_sparse),
+]
+
+
+def _as_connectivity(edge_index, edge_weight, num_nodes, fmt):
+    if fmt == "edge_index":
+        return edge_index, edge_weight
+    if fmt == "torch_coo":
+        values = (
+            edge_weight if edge_weight is not None else torch.ones(edge_index.size(1))
+        )
+        return torch.sparse_coo_tensor(
+            edge_index, values, (num_nodes, num_nodes)
+        ).coalesce(), None
+    sparse = pytest.importorskip("torch_sparse")
+    return sparse.SparseTensor.from_edge_index(
+        edge_index, edge_weight, sparse_sizes=(num_nodes, num_nodes)
+    ), None
+
+
+def _dense_connectivity(adj, weight, num_nodes):
+    edge_index, weight = connectivity_to_edge_index(adj, weight)
+    if weight is None:
+        weight = torch.ones(edge_index.size(1))
+    return torch.sparse_coo_tensor(
+        edge_index, weight, (num_nodes, num_nodes)
+    ).to_dense()
+
+
+@pytest.mark.parametrize("fmt", CONNECTIVITY_FORMATS)
+@pytest.mark.parametrize("remove_self_loops", [False, True])
+@pytest.mark.parametrize(
+    "nodes,clusters,num_supernodes",
+    [
+        ([3, 4, 1], None, 3),
+        ([1, 3, 4], [2, 0, 1], 3),
+        ([4, 2, 0, 3, 1], None, 5),
+        (None, [1, 0, 1, 2, 0], 3),
+        ([4, 1, 3], [0, 0, 1], 2),
+        ([3], None, 1),
+        ([], None, 0),
+    ],
+)
+def test_sparse_connect_matches_assignment_matrix(
+    fmt, remove_self_loops, nodes, clusters, num_supernodes
+):
+    adjacency = torch.tensor(
+        [
+            [2.0, 3.0, 0.0, 0.0, 5.0],
+            [3.0, 0.0, 7.0, 0.0, 11.0],
+            [0.0, 7.0, 0.0, 13.0, 0.0],
+            [0.0, 0.0, 13.0, 17.0, 19.0],
+            [5.0, 11.0, 0.0, 19.0, 0.0],
+        ]
+    )
+    edge_index = adjacency.nonzero().t()
+    edge_weight = adjacency[edge_index[0], edge_index[1]]
+    adj, weight = _as_connectivity(edge_index, edge_weight, 5, fmt)
+    node_index = None if nodes is None else torch.tensor(nodes, dtype=torch.long)
+    cluster_index = (
+        None if clusters is None else torch.tensor(clusters, dtype=torch.long)
+    )
+
+    pooled_adj, pooled_weight = sparse_connect(
+        adj,
+        weight,
+        node_index=node_index,
+        cluster_index=cluster_index,
+        num_nodes=5,
+        num_supernodes=num_supernodes,
+        remove_self_loops=remove_self_loops,
+    )
+
+    assignment = torch.zeros(5, num_supernodes)
+    original_ids = list(range(5)) if nodes is None else nodes
+    pooled_ids = list(range(len(original_ids))) if clusters is None else clusters
+    assignment[original_ids, pooled_ids] = 1
+    expected = assignment.t() @ adjacency @ assignment
+    if remove_self_loops:
+        expected.fill_diagonal_(0)
+    actual = _dense_connectivity(pooled_adj, pooled_weight, num_supernodes)
+    torch.testing.assert_close(actual, expected)
+    if fmt == "edge_index":
+        assert not pooled_adj.is_sparse
+    else:
+        assert pooled_weight is None
+        if fmt == "torch_coo":
+            assert pooled_adj.is_sparse
+            assert pooled_adj.shape == (num_supernodes, num_supernodes)
+        else:
+            assert pooled_adj.sparse_sizes() == (num_supernodes, num_supernodes)
+
+
+@pytest.mark.parametrize("reduce_op", ["sum", "mean", "max"])
+@pytest.mark.parametrize("weighted", [False, True])
+@pytest.mark.parametrize("full_assignment", [False, True])
+def test_sparse_connect_preserves_duplicate_edge_policy(
+    reduce_op, weighted, full_assignment
+):
+    edge_index = torch.tensor([[4, 1, 4, 0, 3, 3], [1, 4, 1, 4, 3, 1]])
+    edge_weight = torch.tensor([2.0, 3.0, 5.0, 11.0, 7.0, 13.0]) if weighted else None
+    nodes = [4, 1, 3, 0, 2] if full_assignment else [4, 1, 3]
+
+    actual_edges, actual_weights = sparse_connect(
+        edge_index,
+        edge_weight,
+        node_index=torch.tensor(nodes),
+        num_nodes=5,
+        reduce_op=reduce_op,
+    )
+
+    if full_assignment:
+        expected_edges = torch.tensor([[0, 1, 2, 3], [1, 0, 1, 0]])
+        merged_weight = {"sum": 7.0, "mean": 3.5, "max": 5.0}[reduce_op]
+        expected_weights = torch.tensor([merged_weight, 3.0, 13.0, 11.0])
+    else:
+        expected_edges = torch.tensor([[0, 1, 0, 2], [1, 0, 1, 1]])
+        expected_weights = torch.tensor([2.0, 3.0, 5.0, 13.0])
+    assert torch.equal(actual_edges, expected_edges)
+    if weighted:
+        torch.testing.assert_close(actual_weights, expected_weights)
+    else:
+        assert actual_weights is None
+
+
+@pytest.mark.parametrize(
+    "reduce_op,expected", [("sum", 10.0), ("mean", 5.0), ("max", 8.0)]
+)
+def test_sparse_connect_aggregates_edges_after_merging_nodes(reduce_op, expected):
+    edges, weights = sparse_connect(
+        torch.tensor([[0, 1, 0], [2, 2, 1]]),
+        torch.tensor([2.0, 8.0, 13.0]),
+        cluster_index=torch.tensor([0, 0, 1]),
+        num_nodes=3,
+        reduce_op=reduce_op,
+    )
+    assert torch.equal(edges, torch.tensor([[0], [1]]))
+    torch.testing.assert_close(weights, torch.tensor([expected]))
+
+
+@pytest.mark.parametrize("fmt", CONNECTIVITY_FORMATS)
+@pytest.mark.parametrize("num_nodes", [0, 5])
+def test_sparse_connect_empty_edges_and_isolated_nodes(fmt, num_nodes):
+    adj, weight = _as_connectivity(
+        torch.empty((2, 0), dtype=torch.long), None, num_nodes, fmt
+    )
+    nodes = (
+        torch.tensor([4, 1], dtype=torch.long)
+        if num_nodes
+        else torch.empty(0, dtype=torch.long)
+    )
+    pooled_adj, pooled_weight = sparse_connect(
+        adj,
+        weight,
+        node_index=nodes,
+        # Sparse inputs carry their dimensions even when no edges exist.
+        num_nodes=num_nodes if fmt == "edge_index" else None,
+    )
+    expected_size = nodes.numel()
+    torch.testing.assert_close(
+        _dense_connectivity(pooled_adj, pooled_weight, expected_size),
+        torch.zeros(expected_size, expected_size),
+    )
+    if fmt == "torch_coo":
+        assert pooled_adj.shape == (expected_size, expected_size)
+    elif fmt == "torch_sparse":
+        assert pooled_adj.sparse_sizes() == (expected_size, expected_size)
+
+
+def test_sparse_connect_removes_all_incident_edges():
+    edges, weights = sparse_connect(
+        torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        torch.tensor([2.0, 3.0, 4.0]),
+        node_index=torch.tensor([3, 4]),
+        num_nodes=5,
+    )
+    assert edges.shape == (2, 0)
+    assert weights.shape == (0,)
+
+
+@pytest.mark.parametrize("fmt", CONNECTIVITY_FORMATS)
+@pytest.mark.parametrize(
+    "degree_norm,edge_weight_norm",
+    [(False, False), (True, False), (False, True), (True, True)],
+)
+@pytest.mark.parametrize("remove_self_loops", [False, True])
+def test_sparse_connect_batched_normalization_matches_dense_reference(
+    fmt, degree_norm, edge_weight_norm, remove_self_loops
+):
+    block = torch.tensor(
+        [
+            [5.0, 2.0, 0.0, 4.0],
+            [2.0, 6.0, 3.0, 0.0],
+            [0.0, 3.0, 7.0, 8.0],
+            [4.0, 0.0, 8.0, 9.0],
+        ]
+    )
+    adjacency = torch.block_diag(block, 2 * block)
+    edge_index = adjacency.nonzero().t()
+    adj, weight = _as_connectivity(
+        edge_index, adjacency[edge_index[0], edge_index[1]], 8, fmt
+    )
+    selected = torch.tensor([3, 1, 0, 6, 4, 7])
+    so = SelectOutput(node_index=selected, num_nodes=8)
+    pooled_batch = torch.tensor([0, 0, 0, 1, 1, 1])
+    connector = SparseConnect(
+        degree_norm=degree_norm,
+        edge_weight_norm=edge_weight_norm,
+        remove_self_loops=remove_self_loops,
+    )
+    result = connector(adj, so, edge_weight=weight, batch_pooled=pooled_batch)
+
+    expected = adjacency[selected][:, selected]
+    if remove_self_loops:
+        expected.fill_diagonal_(0)
+    if degree_norm:
+        inv_degree = expected.sum(dim=1).rsqrt()
+        expected = inv_degree[:, None] * expected * inv_degree[None, :]
+    if edge_weight_norm:
+        for start in [0, 3]:
+            graph = expected[start : start + 3, start : start + 3]
+            graph /= graph.abs().max()
+    torch.testing.assert_close(_dense_connectivity(*result, 6), expected)
+    pooled_edges, _ = connectivity_to_edge_index(*result)
+    assert torch.equal(pooled_batch[pooled_edges[0]], pooled_batch[pooled_edges[1]])
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({"cluster_index": torch.tensor([0, 1])}, "num_nodes entries"),
+        (
+            {"node_index": torch.tensor([0, 1]), "cluster_index": torch.tensor([0])},
+            "same length",
+        ),
+        ({"node_index": torch.tensor([[0, 1]])}, "one-dimensional"),
+        ({"cluster_index": torch.tensor([[0, 1, 2]])}, "one-dimensional"),
+        ({"node_index": torch.tensor([0, 1, 2, 0])}, "more than num_nodes"),
+    ],
+)
+def test_sparse_connect_rejects_invalid_index_lengths(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        sparse_connect(torch.tensor([[0, 1], [1, 0]]), num_nodes=3, **kwargs)
 
 
 class TestConnect:

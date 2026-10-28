@@ -71,7 +71,6 @@ class GraclusSelect(Select):
         num_supernodes = ids.size(0)
 
         so = SelectOutput(
-            node_index=torch.arange(num_nodes, device=assignment.device),
             num_nodes=num_nodes,
             cluster_index=assignment,
             num_supernodes=num_supernodes,

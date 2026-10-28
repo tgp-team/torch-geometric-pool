@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 from torch_geometric.typing import Adj, OptTensor
-from torch_geometric.utils import coalesce, subgraph
+from torch_geometric.utils import coalesce
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
 from tgp.imports import is_sparsetensor
@@ -57,7 +57,7 @@ class Connect(torch.nn.Module):
 def sparse_connect(
     edge_index: Adj,
     edge_weight: OptTensor = None,
-    node_index: Tensor = None,
+    node_index: Optional[Tensor] = None,
     cluster_index: Optional[Tensor] = None,
     num_nodes: int = None,
     num_supernodes: int = None,
@@ -67,28 +67,76 @@ def sparse_connect(
     batch_pooled: Optional[Tensor] = None,
     degree_norm: bool = False,
 ) -> Tuple[Adj, OptTensor]:
-    r"""Connects the nodes in the coarsened graph."""
+    r"""Connects original edges using explicit original-node-to-pooled-node pairs.
+
+    ``node_index[i]`` maps to ``cluster_index[i]``; their order need not match
+    original node order. Original nodes absent from ``node_index`` are dropped,
+    together with their incident edges. Each original node may occur at most
+    once in ``node_index``.
+
+    If ``cluster_index`` is omitted, consecutive pooled IDs are assigned in
+    ``node_index`` order. If ``node_index`` is omitted, ``cluster_index`` must
+    contain one assignment for every original node, in original node order.
+
+    Selecting a proper subset preserves surviving edge order and parallel
+    edges. Assigning every original node coalesces parallel edges with
+    ``reduce_op``, including when all nodes are retained by TopK. The existing
+    self-loop and normalization options are applied after this step. Output
+    connectivity has the same format as the input; sparse formats embed the
+    weights and may coalesce parallel entries during conversion.
+
+    Provide ``num_nodes`` explicitly when an edge list does not include every
+    original node. ``num_supernodes`` defaults to the largest assigned pooled
+    ID plus one, or zero for an empty assignment.
+
+    Raises:
+        RuntimeError: If neither index vector is supplied.
+        ValueError: If the index vectors are not one-dimensional or their
+            lengths do not describe a valid sparse assignment.
+    """
     to_sparsetensor = False
     to_torch_coo = False
     if is_sparsetensor(edge_index):
         to_sparsetensor = True
     elif isinstance(edge_index, Tensor) and edge_index.is_sparse:
         to_torch_coo = True
-    edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
     num_nodes = maybe_num_nodes(edge_index, num_nodes)
-    if node_index is not None and len(node_index) < num_nodes:  # e.g. topkpooling
-        edge_index, edge_weight = subgraph(
-            node_index, edge_index, edge_weight, relabel_nodes=True, num_nodes=num_nodes
+    edge_index, edge_weight = connectivity_to_edge_index(edge_index, edge_weight)
+
+    if node_index is None and cluster_index is None:
+        raise RuntimeError(
+            "At least one of node_index and cluster_index must be provided."
         )
-    elif (
-        cluster_index is not None and len(cluster_index) == num_nodes
-    ):  # e.g. maxcutpool (assign all nodes) - kmis
-        edge_index = cluster_index[edge_index]
+    if node_index is None:
+        if cluster_index.numel() != num_nodes:
+            raise ValueError(
+                "cluster_index must contain num_nodes entries when node_index is omitted."
+            )
+        node_index = torch.arange(num_nodes, device=cluster_index.device)
+    if cluster_index is None:
+        cluster_index = torch.arange(node_index.numel(), device=node_index.device)
+    if node_index.dim() != 1 or cluster_index.dim() != 1:
+        raise ValueError("node_index and cluster_index must be one-dimensional.")
+    if node_index.numel() != cluster_index.numel():
+        raise ValueError("node_index and cluster_index must have the same length.")
+    if node_index.numel() > num_nodes:
+        raise ValueError("node_index cannot contain more than num_nodes entries.")
+    if num_supernodes is None:
+        num_supernodes = int(cluster_index.max()) + 1 if cluster_index.numel() else 0
+
+    node_to_cluster = edge_index.new_full((num_nodes,), -1)
+    node_to_cluster[node_index] = cluster_index
+    pooled_edges = node_to_cluster[edge_index]
+    edge_mask = (pooled_edges >= 0).all(dim=0)
+    edge_index = pooled_edges[:, edge_mask]
+    if edge_weight is not None:
+        edge_weight = edge_weight[edge_mask]
+
+    # Preserve the historical aggregation policy independently of node ordering.
+    if node_index.numel() == num_nodes:
         edge_index, edge_weight = coalesce(
             edge_index, edge_weight, num_nodes=num_supernodes, reduce=reduce_op
         )
-    else:
-        raise RuntimeError
 
     edge_index, edge_weight = postprocess_adj_pool_sparse(
         edge_index,
@@ -127,9 +175,14 @@ class SparseConnect(Connect):
 
     where :math:`\mathbf{i}` denotes the set of supernodes.
 
+    The pairing of ``so.node_index`` and ``so.cluster_index`` determines pooled
+    node IDs, independently of storage order. Proper subsets preserve parallel
+    edges in edge-list output; full assignments coalesce them with ``reduce_op``.
+
     Args:
         reduce_op (~tgp.utils.typing.ConnectionType, optional):
-            The aggregation function to be applied to nodes in the same cluster. Can be
+            The aggregation function for edges sharing pooled endpoints when
+            every original node is assigned. Can be
             any string admitted by :obj:`~torch_geometric.utils.scatter` (e.g., ``'sum'``, ``'mean'``,
             ``'max'``) or any :class:`~tgp.utils.typing.ConnectionType`.
             (default: :obj:`sum`)
