@@ -356,11 +356,15 @@ assignments, mapping, mask = propagate_assignments_sparse(
 **`cluster_to_s()` function:**
 ```python
 # Old
-return SparseTensor(row=node_index, col=cluster_index, value=weight, sparse_sizes=(N, K))
+return SparseTensor(
+    row=node_index, col=cluster_index, value=weight, sparse_sizes=(N, K)
+)
 
 # New
 indices = torch.stack([node_index, cluster_index], dim=0)
-return torch.sparse_coo_tensor(indices=indices, values=values, size=(N, K), is_coalesced=True)
+return torch.sparse_coo_tensor(
+    indices=indices, values=values, size=(N, K), is_coalesced=True
+)
 ```
 
 #### `tgp/utils/ops.py`
@@ -385,13 +389,17 @@ adj_inv = adj_inv.to_sparse_coo()
 ```python
 # Old - using torch_sparse utilities
 eye_index, eye_weight = torch_sparse_eye(num_nodes, device=device, dtype=dtype)
-propagation_matrix = SparseTensor(row=..., col=..., value=..., sparse_sizes=...).coalesce("sum")
+propagation_matrix = SparseTensor(
+    row=..., col=..., value=..., sparse_sizes=...
+).coalesce("sum")
 
 # New - using native PyTorch
 diag_indices = torch.arange(num_nodes, device=device)
 eye_index = torch.stack([diag_indices, diag_indices], dim=0)
 eye_weight = torch.ones(num_nodes, device=device, dtype=dtype)
-propagation_matrix = torch.sparse_coo_tensor(combined_indices, combined_values, size=...).coalesce()
+propagation_matrix = torch.sparse_coo_tensor(
+    combined_indices, combined_values, size=...
+).coalesce()
 ```
 
 **Updated `get_assignments()`:**
@@ -430,7 +438,9 @@ if so.s.is_sparse:
     values = so.s.values()
     if values is not None and self.operation != "any":
         src = src * values.view(-1, 1)
-    x_pool = scatter(src, so.cluster_index, dim=0, dim_size=so.num_supernodes, reduce=reduce)
+    x_pool = scatter(
+        src, so.cluster_index, dim=0, dim_size=so.num_supernodes, reduce=reduce
+    )
 ```
 
 **Updated `Reduce.reduce_batch()`:**
@@ -539,11 +549,13 @@ is_sparse = so.s.is_sparse
 ```python
 # Old code
 from torch_sparse import SparseTensor
+
 if isinstance(tensor, SparseTensor):
     ...
 
 # New code
 from tgp.imports import is_sparsetensor
+
 if is_sparsetensor(tensor):
     # It's a torch_sparse.SparseTensor
     ...
