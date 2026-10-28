@@ -80,6 +80,8 @@ def sparse_connect(
         edge_index, edge_weight = subgraph(
             node_index, edge_index, edge_weight, relabel_nodes=True, num_nodes=num_nodes
         )
+        if cluster_index is not None:
+            edge_index = cluster_index[edge_index]
     elif (
         cluster_index is not None and len(cluster_index) == num_nodes
     ):  # e.g. maxcutpool (assign all nodes) - kmis
