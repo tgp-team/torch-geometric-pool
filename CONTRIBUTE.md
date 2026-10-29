@@ -50,5 +50,5 @@ pytest --cov=tgp --cov-report=term-missing --cov-report=html
 
 ## 5. Pull request
 
-- Create a PR on Github.
+- Create a PR on Github targeting the `dev` branch.
 - Describe your changes in detail.
