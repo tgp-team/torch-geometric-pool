@@ -83,8 +83,7 @@ from torch_geometric.nn import GCNConv
 from tgp.poolers import get_pooler
 
 # Create a simple graph (5 nodes, 5 edges)
-edge_index = torch.tensor([[0, 1, 2, 3, 4, 0],
-                           [1, 0, 3, 2, 0, 4]], dtype=torch.long)
+edge_index = torch.tensor([[0, 1, 2, 3, 4, 0], [1, 0, 3, 2, 0, 4]], dtype=torch.long)
 x = torch.randn((5, 16))  # node features
 
 data = Data(x=x, edge_index=edge_index)
@@ -94,7 +93,9 @@ pool = get_pooler("topk", in_channels=32, ratio=0.5)
 
 # Forward pass with pooling
 out = GCNConv(in_channels=16, out_channels=32)(data.x, data.edge_index)
-out = pool(out, data.edge_index, batch=None)  # PoolingOutput(so=[5, 3], x=[3, 32], edge_index=[2, 2])
+out = pool(
+    out, data.edge_index, batch=None
+)  # PoolingOutput(so=[5, 3], x=[3, 32], edge_index=[2, 2])
 out = GCNConv(in_channels=32, out_channels=32)(out.x, out.edge_index)
 ```
 

@@ -85,7 +85,7 @@ doc = [
 ]
 dev = [
     "pre-commit",
-    "ruff>=0.10",
+    "ruff==0.17.3",
     "torch_geometric_pool[notebook,test,doc]",
 ]
 
