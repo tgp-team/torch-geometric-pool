@@ -118,7 +118,7 @@ class PoolingOutput:
 
 class SRCPooling(torch.nn.Module):
     r"""A base class for pooling layers based on the paper
-    `"Understanding Pooling in Graph Neural Networks" <https://arxiv.org/abs/1905.05178>`_
+    `"Understanding Pooling in Graph Neural Networks" <https://arxiv.org/abs/2110.05292>`_
     (Grattarola et al., TNNLS 2022). Each pooler should inherit from this class.
 
     :class:`~tgp.src.SRCPooling` decomposes a pooling layer into three components:
